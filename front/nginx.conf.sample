@@ -1,0 +1,19 @@
+server {
+    listen 80;
+    server_name manage.spectralatam.com;
+    
+    # Ruta a donde subiste los archivos de la carpeta 'dist'
+    root /var/www/html/manage.spectralatam.com; 
+    index index.html;
+
+    # Esta es la parte clave para que React funcione en Nginx
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Opcional: Configuración para archivos estáticos (cache)
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+        expires 30d;
+        add_header Cache-Control "public, no-transform";
+    }
+}
