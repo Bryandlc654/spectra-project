@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Database;
+use App\Support\Cache;
 use App\Support\Response;
 use PDO;
 use Throwable;
@@ -44,10 +45,29 @@ final class TimezoneController
         $where = [];
         $params = [];
 
-        if ($q !== '') {
-            $where[] = '(t.name LIKE :q OR CAST(t.id AS CHAR) LIKE :q)';
-            $params[':q'] = '%' . $q . '%';
+        if ($q === '') {
+            $records = Cache::remember('ref:timezones', 3600, function (): array {
+                $stmt = $this->pdo->query("SELECT id, name, created_at, updated_at FROM timezones ORDER BY name ASC");
+                return $stmt->fetchAll() ?: [];
+            });
+
+            $total = count($records);
+            $offset = ($page - 1) * $perPage;
+            $items = array_values(array_slice($records, $offset, $perPage));
+
+            Response::json([
+                'data' => $items,
+                'meta' => [
+                    'page' => $page,
+                    'per_page' => $perPage,
+                    'total' => $total,
+                    'total_pages' => max(1, (int)ceil($total / max(1, $perPage))),
+                ],
+            ]);
+            return;
         }
+
+        $where[] = '(t.name LIKE :q OR CAST(t.id AS CHAR) LIKE :q)';
 
         $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
 
@@ -114,6 +134,8 @@ final class TimezoneController
         $stmt->execute([':name' => $name]);
 
         $id = (int)$this->pdo->lastInsertId();
+
+        Cache::delete('ref:timezones');
 
         Response::json([
             'message' => 'Timezone creada',
@@ -183,6 +205,8 @@ final class TimezoneController
         $stmt = $this->pdo->prepare("UPDATE timezones SET name = :name, updated_at = NOW() WHERE id = :id");
         $stmt->execute([':name' => $name, ':id' => $idInt]);
 
+        Cache::delete('ref:timezones');
+
         Response::json(['message' => 'Timezone actualizada']);
     }
 
@@ -212,6 +236,8 @@ final class TimezoneController
             Response::error('Timezone no encontrada', 404);
             return;
         }
+
+        Cache::delete('ref:timezones');
 
         Response::json(['message' => 'Timezone eliminada']);
     }

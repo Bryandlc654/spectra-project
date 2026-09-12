@@ -20,7 +20,7 @@ class AuthController
         $this->pdo = $database->pdo();
         $this->jwt = $jwtConfig;
         $this->audit = new AuditLogger();
-        $this->ensureTables();
+        if (\App\Support\Schema::needsMigration($this->pdo)) { $this->ensureTables(); }
     }
 
     private function ensureTables(): void
@@ -33,6 +33,7 @@ class AuthController
                 password_hash VARCHAR(255),
                 status VARCHAR(50) DEFAULT 'active',
                 platform_role VARCHAR(50) DEFAULT 'user',
+                deleted_at DATETIME NULL,
                 last_login_at DATETIME,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -40,6 +41,7 @@ class AuthController
                 INDEX (platform_role)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
         ");
+        try { $this->pdo->exec("ALTER TABLE users ADD COLUMN deleted_at DATETIME NULL AFTER platform_role"); } catch (\Throwable $e) {}
 
         $this->pdo->exec("
             CREATE TABLE IF NOT EXISTS system_settings (
@@ -394,7 +396,7 @@ class AuthController
                 ':email' => $email,
                 ':password_hash' => $passwordHash,
                 ':status' => 'active',
-                ':platform_role' => 'super_admin',
+                ':platform_role' => 'user',
             ]);
 
             if ($stmt->rowCount() !== 1) {
@@ -627,6 +629,76 @@ class AuthController
         return 'http://localhost:5173';
     }
 
+    private function allowedFrontendOrigins(): array
+    {
+        $origins = [];
+
+        $fromEnv = trim((string)(getenv('FRONTEND_URLS') ?: ''));
+        if ($fromEnv !== '') {
+            foreach (explode(',', $fromEnv) as $origin) {
+                $origin = trim($origin);
+                if ($origin !== '') $origins[$origin] = true;
+            }
+        }
+
+        $configured = $this->getFrontendUrl();
+        if ($configured) $origins[$configured] = true;
+
+        // Dev y defaults de producción conocidos
+        foreach ([
+            'http://localhost:5173',
+            'http://localhost:3000',
+            'https://app.spectralatam.com',
+            'https://manage.spectralatam.com',
+        ] as $origin) {
+            $origins[$origin] = true;
+        }
+
+        return array_keys($origins);
+    }
+
+    private function sanitizeRedirectUrl(string $redirectUrl): string
+    {
+        $parsed = parse_url($redirectUrl);
+        if (!$parsed || !isset($parsed['scheme'], $parsed['host'])) {
+            return $this->getFrontendUrl();
+        }
+
+        $scheme = strtolower($parsed['scheme']);
+        if (!in_array($scheme, ['http', 'https'], true)) {
+            return $this->getFrontendUrl();
+        }
+
+        $port = isset($parsed['port']) ? ':' . $parsed['port'] : '';
+        $origin = $scheme . '://' . $parsed['host'] . $port;
+
+        $allowedHosts = array_map(function ($origin) {
+            return parse_url($origin, PHP_URL_HOST);
+        }, $this->allowedFrontendOrigins());
+
+        // Validar el origen completo (host + puerto)
+        foreach ($this->allowedFrontendOrigins() as $allowed) {
+            if (strcasecmp(rtrim($allowed, '/'), $origin) === 0) {
+                return $redirectUrl;
+            }
+        }
+
+        // Fallback: si el host coincide pero el puerto es el estándar, permitir igual
+        if (in_array($parsed['host'], $allowedHosts, true) && $port === '') {
+            $defaultPort = $scheme === 'https' ? ':443' : ':80';
+            foreach ($this->allowedFrontendOrigins() as $allowed) {
+                $allowedUrl = rtrim($allowed, '/');
+                $allowedHost = parse_url($allowedUrl, PHP_URL_HOST);
+                $allowedPort = parse_url($allowedUrl, PHP_URL_PORT);
+                if ($allowedHost === $parsed['host'] && (($allowedPort === null && $defaultPort === ($scheme === 'https' ? ':443' : ':80')) || ':' . $allowedPort === $defaultPort)) {
+                    return $redirectUrl;
+                }
+            }
+        }
+
+        return $this->getFrontendUrl();
+    }
+
     private function getBaseApiUrl(): string
     {
         // Try to get from system settings first
@@ -654,7 +726,7 @@ class AuthController
             return;
         }
         
-        $frontendUrl = $_GET['redirect_to'] ?? 'http://localhost:5173'; // Default fallback
+        $frontendUrl = $this->sanitizeRedirectUrl($_GET['redirect_to'] ?? 'http://localhost:5173'); // Default fallback
         $callbackUrl = $this->getBaseApiUrl() . '/api/auth/google/callback';
         
         $state = base64_encode(json_encode(['redirect_to' => $frontendUrl]));
@@ -763,7 +835,7 @@ class AuthController
             return;
         }
         
-        $frontendUrl = $_GET['redirect_to'] ?? 'http://localhost:5173';
+        $frontendUrl = $this->sanitizeRedirectUrl($_GET['redirect_to'] ?? 'http://localhost:5173');
         $callbackUrl = $this->getBaseApiUrl() . '/api/auth/microsoft/callback';
         $state = base64_encode(json_encode(['redirect_to' => $frontendUrl]));
 
@@ -967,7 +1039,7 @@ class AuthController
     private function redirectFrontend(string $state, array $params): void
     {
         $stateDecoded = json_decode(base64_decode($state), true);
-        $redirectUrl = $stateDecoded['redirect_to'] ?? 'http://localhost:5173';
+        $redirectUrl = $this->sanitizeRedirectUrl($stateDecoded['redirect_to'] ?? 'http://localhost:5173');
         
         $query = http_build_query($params);
         $sep = (strpos($redirectUrl, '?') === false) ? '?' : '&';

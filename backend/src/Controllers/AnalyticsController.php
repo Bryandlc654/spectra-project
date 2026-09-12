@@ -14,7 +14,7 @@ class AnalyticsController
     public function __construct(Database $database)
     {
         $this->pdo = $database->pdo();
-        $this->ensureTables();
+        if (\App\Support\Schema::needsMigration($this->pdo)) { $this->ensureTables(); }
     }
 
     private function ensureTables(): void
@@ -37,6 +37,12 @@ class AnalyticsController
 
     public function handle(array $segments, string $method): void
     {
+        $user = Auth::user();
+        if (!in_array(($user['platform_role'] ?? ''), ['super_admin', 'admin'], true)) {
+            Response::error('Acceso denegado: se requieren privilegios de administrador', 403);
+            return;
+        }
+
         $resource = $segments[2] ?? null;
         
         if ($resource === 'global-costs') {
@@ -235,11 +241,11 @@ class AnalyticsController
         // Average rating of closed contracts? Or milestones completed on time?
         // Let's use milestone completion status
         $stmt = $this->pdo->prepare("
-            SELECT status, COUNT(*) as count
+            SELECT pm.status, COUNT(*) as count
             FROM project_milestones pm
             JOIN projects p ON pm.project_id = p.id
             WHERE p.company_id = :cid
-            GROUP BY status
+            GROUP BY pm.status
         ");
         $stmt->execute([':cid' => $companyId]);
         Response::json(['data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
@@ -250,15 +256,23 @@ class AnalyticsController
         $companyId = $_GET['company_id'] ?? null;
         if (!$companyId) { Response::error('company_id required', 400); return; }
 
-        // Sum of paid invoices linked to contracts of a project
+        // Costos totales pagados por compañía (contracts↔invoices no tiene project_id en esquema actual;
+        // se expone el total global por empresa; futura FK contracts.project_id para atribución por proyecto).
         $stmt = $this->pdo->prepare("
-            SELECT p.id, p.name,
-                   COALESCE(SUM(i.total_amount), 0) as total_cost,
-                   MAX(c_curr.code) as currency_code
+            SELECT 
+                p.id, p.name,
+                COALESCE(pc.company_total_cost, 0) as total_cost,
+                MAX(pc.currency_code) as currency_code
             FROM projects p
-            LEFT JOIN contracts c ON c.project_id = p.id
-            LEFT JOIN invoices i ON i.contract_id = c.id AND i.status = 'paid'
-            LEFT JOIN currencies c_curr ON i.currency_id = c_curr.id
+            LEFT JOIN (
+                SELECT c.company_id,
+                       SUM(i.total_amount) as company_total_cost,
+                       MAX(c_curr.code) as currency_code
+                FROM contracts c
+                JOIN invoices i ON i.contract_id = c.id AND i.status = 'paid'
+                LEFT JOIN currencies c_curr ON i.currency_id = c_curr.id
+                GROUP BY c.company_id
+            ) pc ON pc.company_id = p.company_id
             WHERE p.company_id = :cid
             GROUP BY p.id, p.name
             ORDER BY total_cost DESC
@@ -277,8 +291,8 @@ class AnalyticsController
         // We join contracts -> freelancers (users)
         $stmt = $this->pdo->prepare("
             SELECT 
-                SUM(CASE WHEN u.tax_id IS NOT NULL AND u.tax_id != '' THEN 1 ELSE 0 END) as compliant,
-                SUM(CASE WHEN u.tax_id IS NULL OR u.tax_id = '' THEN 1 ELSE 0 END) as non_compliant,
+                SUM(CASE WHEN u.national_id IS NOT NULL AND u.national_id != '' THEN 1 ELSE 0 END) as compliant,
+                SUM(CASE WHEN u.national_id IS NULL OR u.national_id = '' THEN 1 ELSE 0 END) as non_compliant,
                 COUNT(*) as total
             FROM contracts c
             JOIN users u ON c.freelancer_id = u.id
@@ -395,11 +409,11 @@ class AnalyticsController
         
         $stmt = $this->pdo->prepare("
             SELECT 
-                SUM(CASE WHEN type = 'earning' THEN amount ELSE 0 END) as earnings,
-                SUM(CASE WHEN type = 'tax' THEN amount ELSE 0 END) as taxes
+                SUM(CASE WHEN pi.type = 'earning' THEN pi.amount ELSE 0 END) as earnings,
+                SUM(CASE WHEN pi.type = 'tax' THEN pi.amount ELSE 0 END) as taxes
             FROM payroll_items pi
-            JOIN users u ON pi.user_id = u.id
-            WHERE u.company_id LIKE :cid
+            JOIN company_users cu ON cu.user_id = pi.user_id
+            WHERE cu.company_id LIKE :cid
             AND pi.created_at >= :start_date AND pi.created_at <= :end_date
         ");
         
@@ -418,9 +432,9 @@ class AnalyticsController
             INSERT INTO monthly_costs_snapshots (id, company_id, month, total_payroll, total_fees, total_taxes)
             VALUES (UUID(), :cid, :month, :payroll, :fees, :taxes)
             ON DUPLICATE KEY UPDATE 
-                total_payroll = :payroll,
-                total_fees = :fees,
-                total_taxes = :taxes,
+                total_payroll = VALUES(total_payroll),
+                total_fees = VALUES(total_fees),
+                total_taxes = VALUES(total_taxes),
                 updated_at = NOW()
         ");
 

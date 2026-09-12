@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useToast } from '../../components/ToastProvider';
 
 export default function OnboardingPage({ apiUrl, token }) {
-    const { toast } = useToast();
+    const toast = useToast();
     const [tasks, setTasks] = useState([]);
     const [loading, setLoading] = useState(true);
 

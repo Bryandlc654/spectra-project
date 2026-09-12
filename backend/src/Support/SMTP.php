@@ -33,7 +33,7 @@ class SMTP
         if (empty($config)) {
             // Fallback to defaults if no config found anywhere
             $config = [
-                'smtp_host' => trim($_ENV['SMTP_HOST'] ?? 'mail.spectralatam.com'),
+                'smtp_host' => trim($_ENV['SMTP_HOST'] ?? ''),
                 'smtp_port' => trim($_ENV['SMTP_PORT'] ?? '465'),
                 'smtp_user' => trim($_ENV['SMTP_USER'] ?? ''),
                 'smtp_pass' => trim($_ENV['SMTP_PASS'] ?? ''),

@@ -4,6 +4,7 @@ namespace App\Controllers;
 
 use App\Database;
 use App\Support\Auth;
+use App\Support\Cache;
 use App\Support\Response;
 use App\Support\SMTP;
 use App\Support\TaxEngine;
@@ -24,10 +25,112 @@ final class TenantController
     {
         $this->database = $database;
         $this->pdo = $database->pdo();
+        if (\App\Support\Schema::needsMigration($this->pdo)) { $this->ensureTables(); }
+    }
+
+    private function ensureTables(): void
+    {
+        $this->pdo->exec("
+            CREATE TABLE IF NOT EXISTS companies (
+                id VARCHAR(36) PRIMARY KEY,
+                legal_name VARCHAR(255) NOT NULL,
+                trade_name VARCHAR(255) NULL,
+                country_id INT NULL,
+                default_currency_id INT NULL,
+                timezone_id INT NULL,
+                status VARCHAR(50) DEFAULT 'active',
+                logo_url VARCHAR(255) NULL,
+                read_only_mode BOOLEAN DEFAULT FALSE,
+                deleted_at DATETIME NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX (status),
+                INDEX (deleted_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ");
+
+        $this->pdo->exec("
+            CREATE TABLE IF NOT EXISTS currencies (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                code VARCHAR(10) NOT NULL UNIQUE,
+                name VARCHAR(100) NOT NULL,
+                symbol VARCHAR(10) NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ");
+
+        $this->pdo->exec("
+            CREATE TABLE IF NOT EXISTS timezones (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(100) NOT NULL UNIQUE,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ");
+
+        $this->pdo->exec("
+            CREATE TABLE IF NOT EXISTS wallets (
+                id CHAR(36) PRIMARY KEY,
+                company_id CHAR(36) NOT NULL UNIQUE,
+                currency_id INT NOT NULL,
+                balance DECIMAL(15,2) DEFAULT 0.00,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ");
+
+        $this->pdo->exec("
+            CREATE TABLE IF NOT EXISTS company_settings (
+                company_id CHAR(36) PRIMARY KEY,
+                default_language VARCHAR(10) DEFAULT 'es',
+                tax_id VARCHAR(50) NULL,
+                read_only_mode BOOLEAN DEFAULT FALSE,
+                unpaid_leave_days_allowed INT DEFAULT 0,
+                invoice_series VARCHAR(20) NULL,
+                invoice_number_next INT DEFAULT 1,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ");
+
+        try { $this->pdo->exec("ALTER TABLE company_settings ADD COLUMN read_only_mode BOOLEAN DEFAULT FALSE AFTER tax_id"); } catch (\Throwable $e) {}
+
+        $this->pdo->exec("
+            CREATE TABLE IF NOT EXISTS company_users (
+                id CHAR(36) PRIMARY KEY,
+                company_id CHAR(36) NOT NULL,
+                user_id VARCHAR(36) NOT NULL,
+                status VARCHAR(50) DEFAULT 'active',
+                job_title VARCHAR(255) NULL,
+                department VARCHAR(100) NULL,
+                active_company BOOLEAN DEFAULT FALSE,
+                deleted_at DATETIME NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX (company_id),
+                INDEX (user_id),
+                FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ");
+        try { $this->pdo->exec("ALTER TABLE company_users ADD COLUMN active_company BOOLEAN DEFAULT FALSE AFTER department"); } catch (\Throwable $e) {}
+
+        $this->ensureCompanySubscriptionsTable();
+        $this->ensureCompanyFeeRulesTable();
+        $this->ensurePayrollsTable();
+        $this->ensureWalletTransactionsTable();
+        $this->ensureAmendmentsTable();
+        $this->ensureContractsTable();
+        $this->ensureContractLegalObservationsTable();
+        $this->ensureProjectsTable();
+        $this->ensureContractTemplatesTable();
+        $this->ensureInvoicesTable();
     }
 
     /**
-     * Rutas soportadas (base: /api/tenants):
      * GET    /api/tenants
      * POST   /api/tenants
      * GET    /api/tenants/{id}
@@ -62,10 +165,22 @@ final class TenantController
             $subId = $segments[4] ?? null;
 
             $user = Auth::user();
-            if (($user['platform_role'] ?? '') === 'support' && $tenantId !== 'support-view') {
-                Response::error('Acceso denegado', 403);
+            $role = $user['platform_role'] ?? '';
+            $isAdmin = in_array($role, ['super_admin', 'admin'], true);
+            $isSupportView = ($role === 'support' && $tenantId === 'support-view');
+            if (!$isAdmin && !$isSupportView) {
+                Response::error('Acceso denegado: se requieren privilegios de administrador', 403);
                 return;
             }
+
+            // Normalización retroactiva de status fuera de whitelist (legacy)
+            try {
+                $stmtSt = $this->pdo->prepare("SELECT COUNT(*) FROM companies WHERE status NOT IN ('active','suspended') AND deleted_at IS NULL");
+                $stmtSt->execute();
+                if ((int)$stmtSt->fetchColumn() > 0) {
+                    $this->pdo->exec("UPDATE companies SET status = 'active' WHERE status NOT IN ('active','suspended') AND deleted_at IS NULL");
+                }
+            } catch (\Throwable $e) {}
 
             if ($tenantId === 'wizard') {
                 if ($method === 'POST') { $this->wizard(); return; }
@@ -750,6 +865,14 @@ final class TenantController
         }
         if (!in_array($status, ['active', 'suspended'], true)) $status = 'active';
 
+        // Prevención duplicados nombre
+        $stmt = $this->pdo->prepare("SELECT 1 FROM companies WHERE legal_name = :legal AND deleted_at IS NULL LIMIT 1");
+        $stmt->execute([':legal' => $legal]);
+        if ($stmt->fetch()) {
+            Response::error("La Razón Social '$legal' ya existe", 409);
+            return;
+        }
+
         // Validación FK
         if (!$this->existsById('countries', $countryId)) { Response::error('country_id inválido', 422); return; }
         if (!$this->existsById('currencies', $currencyId)) { Response::error('default_currency_id inválido', 422); return; }
@@ -780,23 +903,32 @@ final class TenantController
 
         $id = $this->uuid();
 
-        $stmt = $this->pdo->prepare("
-            INSERT INTO companies (id, legal_name, trade_name, country_id, default_currency_id, timezone_id, status, logo_url, created_at)
-            VALUES (:id, :legal, :trade, :country, :currency, :tzid, :status, :logo, NOW())
-        ");
-        $stmt->execute([
-            ':id' => $id,
-            ':legal' => $legal,
-            ':trade' => ($trade !== '' ? $trade : null),
-            ':country' => $countryId,
-            ':currency' => $currencyId,
-            ':tzid' => $timezoneId,
-            ':status' => $status,
-            ':logo' => $logoUrl,
-        ]);
+        try {
+            $this->pdo->beginTransaction();
 
-        $this->ensureCompanySettings($id, $lang);
-        $this->ensureWallet($id, $currencyId);
+            $stmt = $this->pdo->prepare("
+                INSERT INTO companies (id, legal_name, trade_name, country_id, default_currency_id, timezone_id, status, logo_url, created_at)
+                VALUES (:id, :legal, :trade, :country, :currency, :tzid, :status, :logo, NOW())
+            ");
+            $stmt->execute([
+                ':id' => $id,
+                ':legal' => $legal,
+                ':trade' => ($trade !== '' ? $trade : null),
+                ':country' => $countryId,
+                ':currency' => $currencyId,
+                ':tzid' => $timezoneId,
+                ':status' => $status,
+                ':logo' => $logoUrl,
+            ]);
+
+            $this->ensureCompanySettings($id, $lang);
+            $this->ensureWallet($id, $currencyId);
+
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) $this->pdo->rollBack();
+            throw $e;
+        }
 
         $this->audit('tenant.created', 'company', $id, [
             'legal_name' => $legal,
@@ -844,6 +976,20 @@ final class TenantController
 
         if ($legal === '' || $countryId <= 0 || $currencyId <= 0 || $timezoneId <= 0) {
             Response::error('Faltan datos básicos obligatorios', 422);
+            return;
+        }
+
+        // Whitelist de status (coerción a active si no es válido)
+        if (!in_array($status, ['active', 'suspended'], true)) $status = 'active';
+
+        // Validación FK
+        if (!$this->existsById('countries', $countryId)) { Response::error('country_id inválido', 422); return; }
+        if (!$this->existsById('currencies', $currencyId)) { Response::error('default_currency_id inválido', 422); return; }
+
+        // Whitelist de billing_cycle
+        $billingCycle = isset($payload['billing_cycle']) ? (string)$payload['billing_cycle'] : 'monthly';
+        if (!in_array($billingCycle, ['monthly', 'yearly'], true)) {
+            Response::error('billing_cycle inválido (monthly|yearly)', 422);
             return;
         }
         
@@ -938,7 +1084,6 @@ final class TenantController
 
             // 3b. Create Subscription & Fee Rules (New Requirement)
             $planPrice = isset($payload['plan_price']) ? (float)$payload['plan_price'] : 99.00;
-            $billingCycle = isset($payload['billing_cycle']) ? $payload['billing_cycle'] : 'monthly';
             $platformFee = isset($payload['platform_fee']) ? (float)$payload['platform_fee'] : 29.00;
 
             $this->createDefaultSubscription($companyId, $currencyId, $planPrice, $billingCycle);
@@ -964,6 +1109,7 @@ final class TenantController
 
             // 5. Owner / User
             $userId = null;
+            $generatedPassword = null;
             $stmt = $this->pdo->prepare("SELECT id FROM users WHERE email = :email");
             $stmt->execute([':email' => $ownerEmail]);
             $existingUser = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -972,14 +1118,23 @@ final class TenantController
                 $userId = $existingUser['id'];
             } else {
                 $userId = $this->uuid();
+                $pwdRaw = (string)($payload['owner_password'] ?? '');
+                $pwdHash = null;
+                if ($pwdRaw !== '') {
+                    $pwdHash = password_hash($pwdRaw, PASSWORD_BCRYPT);
+                } else {
+                    $generatedPassword = bin2hex(random_bytes(8));
+                    $pwdHash = password_hash($generatedPassword, PASSWORD_BCRYPT);
+                }
                 $stmt = $this->pdo->prepare("
-                    INSERT INTO users (id, full_name, email, status, platform_role, created_at)
-                    VALUES (:id, :name, :email, 'active', 'user', NOW())
+                    INSERT INTO users (id, full_name, email, password_hash, status, platform_role, created_at)
+                    VALUES (:id, :name, :email, :pwd, 'active', 'user', NOW())
                 ");
                 $stmt->execute([
                     ':id' => $userId,
                     ':name' => ($ownerName !== '' ? $ownerName : 'Usuario'),
-                    ':email' => $ownerEmail
+                    ':email' => $ownerEmail,
+                    ':pwd' => $pwdHash
                 ]);
             }
 
@@ -1064,9 +1219,14 @@ final class TenantController
 
             $this->pdo->commit();
 
+            $respData = ['id' => $companyId];
+            if ($generatedPassword !== null) {
+                $respData['owner_password'] = $generatedPassword;
+            }
+
             Response::json([
                 'message' => 'Empresa creada y configurada exitosamente',
-                'data' => ['id' => $companyId]
+                'data' => $respData
             ], 201);
 
         } catch (Throwable $e) {
@@ -1445,6 +1605,7 @@ final class TenantController
 
         foreach ($payload as $k => $v) {
             if ($k === 'company_id') continue;
+            if ($k === 'read_only_mode') continue; // se sincroniza aparte (con cast a int) para companies
             if (!isset($allowed[$k])) continue;
 
             $sets[] = "`{$k}` = :{$k}";
@@ -1500,6 +1661,10 @@ final class TenantController
             $companySets[] = "read_only_mode = :read_only_mode";
             $companyParams[':read_only_mode'] = $val;
             $this->audit($val ? 'tenant.readonly.enabled' : 'tenant.readonly.disabled', 'company', $companyId, []);
+
+            // Sincroniza company_settings.read_only_mode (lo usan Auth y getSettings)
+            $this->pdo->prepare("UPDATE company_settings SET read_only_mode = :val WHERE company_id LIKE :cid")
+                ->execute([':val' => $val, ':cid' => $companyId]);
         }
 
         // Logo Upload
@@ -2770,6 +2935,7 @@ final class TenantController
                 INDEX idx_status (status)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
         ");
+        try { $this->pdo->exec("ALTER TABLE company_subscriptions ADD COLUMN payment_method_json TEXT NULL AFTER next_billing_date"); } catch (\Throwable $e) {}
     }
 
     private function ensureCompanyFeeRulesTable(): void
@@ -4205,11 +4371,11 @@ final class TenantController
         }
 
         // 1. Ensure Enterprise Plan Exists (Update price if exists to match requested config)
-        $stmt = $this->pdo->prepare("SELECT id FROM subscription_plans WHERE code = 'enterprise' LIMIT 1");
+        $stmt = $this->pdo->prepare("SELECT id, name, code FROM subscription_plans WHERE code = 'enterprise' LIMIT 1");
         $stmt->execute();
-        $planId = $stmt->fetchColumn();
+        $existingPlan = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        if (!$planId) {
+        if (!$existingPlan) {
             $planId = $this->uuid();
             $stmtIns = $this->pdo->prepare("
                 INSERT INTO subscription_plans (id, name, code, price, billing_interval, currency_id, created_at)
@@ -4222,17 +4388,41 @@ final class TenantController
                 ':cur' => $currencyId
             ]);
         } else {
-            // Update existing plan defaults
-            $stmtUpd = $this->pdo->prepare("
-                UPDATE subscription_plans 
-                SET price = :price, billing_interval = :interval, updated_at = NOW()
-                WHERE id = :id
-            ");
-            $stmtUpd->execute([
-                ':price' => $price,
-                ':interval' => $interval,
-                ':id' => $planId
-            ]);
+            $planId = $existingPlan['id'];
+
+            // ¿El plan ya está asignado a otros tenants? Si es así, clonarlo para no
+            // mutar los defaults compartidos por el resto de empresas.
+            $stmtCount = $this->pdo->prepare("SELECT COUNT(*) FROM company_subscriptions WHERE plan_id = :pid");
+            $stmtCount->execute([':pid' => $planId]);
+            $count = (int)$stmtCount->fetchColumn();
+
+            if ($count > 0) {
+                $planId = $this->uuid();
+                $stmtIns = $this->pdo->prepare("
+                    INSERT INTO subscription_plans (id, name, code, price, billing_interval, currency_id, created_at)
+                    VALUES (:id, :name, :code, :price, :interval, :cur, NOW())
+                ");
+                $stmtIns->execute([
+                    ':id' => $planId,
+                    ':name' => $existingPlan['name'] . ' (Custom)',
+                    ':code' => $existingPlan['code'] . '_' . str_replace('.', '', uniqid('', true)),
+                    ':price' => $price,
+                    ':interval' => $interval,
+                    ':cur' => $currencyId
+                ]);
+            } else {
+                // Plan sin uso previo: actualizar defaults directamente
+                $stmtUpd = $this->pdo->prepare("
+                    UPDATE subscription_plans 
+                    SET price = :price, billing_interval = :interval, updated_at = NOW()
+                    WHERE id = :id
+                ");
+                $stmtUpd->execute([
+                    ':price' => $price,
+                    ':interval' => $interval,
+                    ':id' => $planId
+                ]);
+            }
         }
 
         // 2. Assign Subscription
@@ -4340,7 +4530,7 @@ final class TenantController
         return $r;
     }
 
-    private function existsById(string $table, int $id): bool
+    private function existsById(string $table, int|string $id): bool
     {
         if (!$this->tableExists($table)) return false;
         if (!preg_match('/^[a-zA-Z0-9_]+$/', $table)) return false;
@@ -4499,6 +4689,9 @@ final class TenantController
     {
         if (!preg_match('/^[a-zA-Z0-9_]+$/', $table)) return false;
 
+        $cacheKey = 'tenant:tbl:' . $table;
+        if (Cache::get($cacheKey, false) === true) return true;
+
         $stmt = $this->pdo->prepare("
             SELECT 1
             FROM information_schema.tables
@@ -4507,7 +4700,13 @@ final class TenantController
             LIMIT 1
         ");
         $stmt->execute([':t' => $table]);
-        return (bool)$stmt->fetchColumn();
+        $exists = (bool)$stmt->fetchColumn();
+
+        if ($exists) {
+            Cache::set($cacheKey, true, 3600);
+        }
+
+        return $exists;
     }
 
     private function updateSubscription(string $companyId): void
@@ -4521,33 +4720,63 @@ final class TenantController
         $this->ensureCompanyFeeRulesTable();
 
         $data = $this->readPayload();
-        
-        // 1. Update Platform Fee
-        if (isset($data['platform_fee'])) {
-            $fee = (float)$data['platform_fee'];
-            // Check if rule exists
-            $stmt = $this->pdo->prepare("SELECT id FROM company_fee_rules WHERE company_id = :cid AND type = 'platform_fee'");
-            $stmt->execute([':cid' => $companyId]);
-            $ruleId = $stmt->fetchColumn();
 
-            if ($ruleId) {
-                $stmtUpd = $this->pdo->prepare("UPDATE company_fee_rules SET value = :val, active = 1, updated_at = NOW() WHERE id = :id");
-                $stmtUpd->execute([':val' => $fee, ':id' => $ruleId]);
-            } else {
-                $newRuleId = $this->uuid();
-                $stmtIns = $this->pdo->prepare("INSERT INTO company_fee_rules (id, company_id, type, value, currency_id, active, created_at) VALUES (:id, :cid, 'platform_fee', :val, 1, 1, NOW())");
-                $stmtIns->execute([':id' => $newRuleId, ':cid' => $companyId, ':val' => $fee]);
-            }
+        $feeGiven = isset($data['platform_fee']);
+        $planPriceGiven = isset($data['plan_price']);
+        $billingGiven = isset($data['billing_cycle']);
+
+        // Whitelist de billing_cycle
+        if ($billingGiven && !in_array((string)$data['billing_cycle'], ['monthly', 'yearly'], true)) {
+            Response::error('billing_cycle inválido (monthly|yearly)', 422);
+            return;
         }
 
-        // 2. Update Plan (Price/Interval)
-        if (isset($data['plan_price']) || isset($data['billing_cycle'])) {
-            // Fetch current subscription
-            $stmtSub = $this->pdo->prepare("SELECT plan_id FROM company_subscriptions WHERE company_id = :cid AND status = 'active'");
-            $stmtSub->execute([':cid' => $companyId]);
-            $currentPlanId = $stmtSub->fetchColumn();
+        // platform_fee y plan_price deben ser numéricos >= 0
+        if ($feeGiven && (!is_numeric($data['platform_fee']) || (float)$data['platform_fee'] < 0)) {
+            Response::error('platform_fee inválido (número >= 0)', 422);
+            return;
+        }
+        if ($planPriceGiven && (!is_numeric($data['plan_price']) || (float)$data['plan_price'] < 0)) {
+            Response::error('plan_price inválido (número >= 0)', 422);
+            return;
+        }
 
-            if ($currentPlanId) {
+        try {
+            $this->pdo->beginTransaction();
+
+            // 1. Update Platform Fee
+            if ($feeGiven) {
+                $fee = (float)$data['platform_fee'];
+                // Check if rule exists
+                $stmt = $this->pdo->prepare("SELECT id FROM company_fee_rules WHERE company_id = :cid AND type = 'platform_fee'");
+                $stmt->execute([':cid' => $companyId]);
+                $ruleId = $stmt->fetchColumn();
+
+                if ($ruleId) {
+                    $stmtUpd = $this->pdo->prepare("UPDATE company_fee_rules SET value = :val, active = 1, updated_at = NOW() WHERE id = :id");
+                    $stmtUpd->execute([':val' => $fee, ':id' => $ruleId]);
+                } else {
+                    $stmtCurr = $this->pdo->prepare("SELECT default_currency_id FROM companies WHERE id = :cid");
+                    $stmtCurr->execute([':cid' => $companyId]);
+                    $companyCurrencyId = (int)$stmtCurr->fetchColumn();
+                    if ($companyCurrencyId <= 0) $companyCurrencyId = 1;
+                    $newRuleId = $this->uuid();
+                    $stmtIns = $this->pdo->prepare("INSERT INTO company_fee_rules (id, company_id, type, value, currency_id, active, created_at) VALUES (:id, :cid, 'platform_fee', :val, :cur, 1, NOW())");
+                    $stmtIns->execute([':id' => $newRuleId, ':cid' => $companyId, ':val' => $fee, ':cur' => $companyCurrencyId]);
+                }
+            }
+
+            // 2. Update Plan (Price/Interval)
+            if ($planPriceGiven || $billingGiven) {
+                // Fetch current subscription
+                $stmtSub = $this->pdo->prepare("SELECT plan_id FROM company_subscriptions WHERE company_id = :cid AND status = 'active'");
+                $stmtSub->execute([':cid' => $companyId]);
+                $currentPlanId = $stmtSub->fetchColumn();
+
+                if (!$currentPlanId) {
+                    throw new \RuntimeException('No existe una suscripción activa para este tenant');
+                }
+
                 // Check if plan is shared
                 $stmtCount = $this->pdo->prepare("SELECT COUNT(*) FROM company_subscriptions WHERE plan_id = :pid");
                 $stmtCount->execute([':pid' => $currentPlanId]);
@@ -4557,14 +4786,14 @@ final class TenantController
                 $stmtPlan->execute([':pid' => $currentPlanId]);
                 $plan = $stmtPlan->fetch(PDO::FETCH_ASSOC);
 
-                $newPrice = isset($data['plan_price']) ? (float)$data['plan_price'] : $plan['price'];
-                $newInterval = isset($data['billing_cycle']) ? $data['billing_cycle'] : $plan['billing_interval'];
+                $newPrice = $planPriceGiven ? (float)$data['plan_price'] : $plan['price'];
+                $newInterval = $billingGiven ? (string)$data['billing_cycle'] : $plan['billing_interval'];
 
                 if ($count > 1) {
                     // Shared plan: Create new custom plan for this company
                     $newPlanId = $this->uuid();
                     $newCode = $plan['code'] . '_' . time(); // unique code
-                    
+
                     $stmtInsPlan = $this->pdo->prepare("
                         INSERT INTO subscription_plans (id, name, code, price, billing_interval, currency_id, created_at)
                         VALUES (:id, :name, :code, :price, :interval, :cur, NOW())
@@ -4592,8 +4821,17 @@ final class TenantController
                     ]);
                 }
             }
+
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) $this->pdo->rollBack();
+            if ($e instanceof \RuntimeException && str_starts_with($e->getMessage(), 'No existe una suscripción')) {
+                Response::error($e->getMessage(), 422);
+                return;
+            }
+            throw $e;
         }
-        
+
         $this->audit('tenant.subscription.updated', 'company_subscription', $companyId, ['payload' => $data]);
         Response::json(['message' => 'Suscripción actualizada correctamente']);
     }
@@ -4632,86 +4870,45 @@ final class TenantController
             $val = $stmtFee->fetchColumn();
             if ($val !== false) {
                 $platformFee = (float)$val;
+            } else {
+                // Backfill: tenant legacy sin regla de fee → crear con defaults (29.00)
+                try {
+                    $stmtCur = $this->pdo->prepare("SELECT default_currency_id FROM companies WHERE id = :cid");
+                    $stmtCur->execute([':cid' => $id]);
+                    $backfillCurrency = (int)$stmtCur->fetchColumn();
+                    if ($backfillCurrency <= 0) $backfillCurrency = 1;
+                    $backfillId = $this->uuid();
+                    $this->pdo->prepare("INSERT INTO company_fee_rules (id, company_id, type, value, currency_id, active, created_at) VALUES (:id,:cid,'platform_fee',29.00,:cur,1,NOW())")
+                        ->execute([':id' => $backfillId, ':cid' => $id, ':cur' => $backfillCurrency]);
+                    $platformFee = 29.00;
+                } catch (\Throwable $e) {}
             }
         }
 
-        // If no subscription, create a default one (Enterprise) for continuity
-        if (!$sub && $this->tableExists('company_subscriptions') && $this->tableExists('subscription_plans')) {
-            // Find enterprise plan
-            $stmtP = $this->pdo->prepare("SELECT id, name, price, billing_interval FROM subscription_plans WHERE code LIKE 'enterprise' LIMIT 1");
-            $stmtP->execute();
-            $plan = $stmtP->fetch(PDO::FETCH_ASSOC);
-            
-            if ($plan) {
-                $subId = $this->uuid();
-                $now = date('Y-m-d');
-                $next = date('Y-m-d', strtotime('+1 month'));
-                
-                $stmtIns = $this->pdo->prepare("
-                    INSERT INTO company_subscriptions (id, company_id, plan_id, status, start_date, next_billing_date, created_at)
-                    VALUES (:id, :cid, :pid, 'active', :start, :next, NOW())
-                ");
-                $stmtIns->execute([
-                    ':id' => $subId,
-                    ':cid' => $id,
-                    ':pid' => $plan['id'],
-                    ':start' => $now,
-                    ':next' => $next
-                ]);
-                
-                $sub = [
-                    'id' => $subId,
-                    'status' => 'active',
-                    'plan_name' => $plan['name'],
-                    'plan_price' => $plan['price'],
-                    'billing_interval' => $plan['billing_interval'],
-                    'next_billing_date' => $next,
-                    'payment_method_json' => null
-                ];
-            }
-        }
-
-        // Fallback mock if DB fails or tables missing
-        if (!$sub) {
-             $sub = [
-                'plan_name' => 'Enterprise (Legacy)',
-                'plan_price' => 299.00,
-                'billing_interval' => 'monthly',
-                'next_billing_date' => date('Y-m-d', strtotime('+1 month')),
-                'payment_method_json' => null
-             ];
-        }
-
-        // Parse payment method
-        $pm = json_decode($sub['payment_method_json'] ?? '{}', true);
-        if (empty($pm)) {
-            $pm = [
-                'brand' => 'Visa',
-                'last4' => '4242', // Default mock
-                'exp_month' => 12,
-                'exp_year' => 2025
+        // Sin suscripción real: se devuelve plan null (sin fabricar datos)
+        $planData = null;
+        if ($sub) {
+            $pm = json_decode($sub['payment_method_json'] ?? '{}', true);
+            $planData = [
+                'name' => $sub['plan_name'],
+                'price' => (float)$sub['plan_price'],
+                'platform_fee' => $platformFee,
+                'currency' => ($sub['currency_code'] ?? '') ?: 'USD',
+                'interval' => $sub['billing_interval'],
+                'next_billing' => $sub['next_billing_date'],
+                'payment_method' => $pm ?: null,
             ];
         }
-
-        $planData = [
-            'name' => $sub['plan_name'],
-            'price' => (float)$sub['plan_price'],
-            'platform_fee' => isset($platformFee) ? $platformFee : 0.00,
-            'currency' => 'USD', // Todo: fetch from currency_id
-            'interval' => $sub['billing_interval'],
-            'next_billing' => $sub['next_billing_date'],
-            'payment_method' => $pm
-        ];
 
         // Fetch Invoices
         $invoices = [];
         if ($this->tableExists('invoices')) {
              try {
                 $stmt = $this->pdo->prepare("
-                    SELECT id, invoice_number, issued_at as date, total as amount, status 
+                    SELECT id, invoice_number, issue_date as date, total_amount as amount, status 
                     FROM invoices 
                     WHERE company_id LIKE :id 
-                    ORDER BY issued_at DESC 
+                    ORDER BY issue_date DESC 
                     LIMIT 5
                 ");
                 $stmt->execute([':id' => $id]);
@@ -4742,11 +4939,11 @@ final class TenantController
                 'invoices' => $invoices,
                 'usage' => [
                     'users_count' => $usersCount,
-                    'users_limit' => 20, // Mock limit
+                    'users_limit' => 0,
                     'projects_count' => $projectsCount,
-                    'projects_limit' => -1, // Unlimited
-                    'storage_used_gb' => 45, // Mock
-                    'storage_limit_gb' => 100 // Mock
+                    'projects_limit' => -1,
+                    'storage_used_gb' => 0,
+                    'storage_limit_gb' => 0
                 ]
             ]
         ]);
@@ -4760,23 +4957,26 @@ final class TenantController
             return $this->columnsCache[$table] = [];
         }
 
-        try {
-            $stmt = $this->pdo->prepare("
-                SELECT column_name
-                FROM information_schema.columns
-                WHERE table_schema = DATABASE()
-                  AND table_name LIKE :t
-                ORDER BY ordinal_position
-            ");
-            $stmt->execute([':t' => $table]);
+        $cacheKey = 'tenant:cols:' . $table;
+        $cols = Cache::remember($cacheKey, 3600, function () use ($table): array {
+            try {
+                $stmt = $this->pdo->prepare("
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = DATABASE()
+                      AND table_name LIKE :t
+                    ORDER BY ordinal_position
+                ");
+                $stmt->execute([':t' => $table]);
 
-            $cols = $stmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
-            $cols = array_map('strval', $cols);
+                $rows = $stmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
+                return array_map('strval', $rows);
+            } catch (Throwable $e) {
+                return [];
+            }
+        });
 
-            return $this->columnsCache[$table] = $cols;
-        } catch (Throwable $e) {
-            return $this->columnsCache[$table] = [];
-        }
+        return $this->columnsCache[$table] = $cols;
     }
 
     private function subscriptionsIndex(): void
@@ -4790,8 +4990,9 @@ final class TenantController
         $params = [];
 
         if ($q !== '') {
-            $where[] = '(c.legal_name LIKE :q OR c.trade_name LIKE :q)';
-            $params[':q'] = '%' . $q . '%';
+            $where[] = '(c.legal_name LIKE :q1 OR c.trade_name LIKE :q2)';
+            $params[':q1'] = '%' . $q . '%';
+            $params[':q2'] = '%' . $q . '%';
         }
         
         $whereSql = implode(' AND ', $where);

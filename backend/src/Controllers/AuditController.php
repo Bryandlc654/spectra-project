@@ -23,13 +23,13 @@ class AuditController
         $user = \App\Support\Auth::user();
         $role = $user['platform_role'] ?? 'user';
 
-        // Allow super_admin, support, and company_admin roles
-        if (!in_array($role, ['super_admin', 'support', 'company_admin'])) {
+        // Allow super_admin, admin, security, legal, support, and company_admin roles
+        if (!in_array($role, ['super_admin', 'admin', 'security', 'legal', 'support', 'company_admin'])) {
             Response::error('Unauthorized access to audit logs', 403);
             return;
         }
 
-        if ($method === 'GET' && isset($segments[0]) && $segments[0] === 'export') {
+        if ($method === 'GET' && (($segments[2] ?? '') === 'export' || ($segments[0] ?? '') === 'export')) {
             $this->export($user);
             return;
         }
@@ -44,7 +44,7 @@ class AuditController
     private function index(array $user)
     {
         $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
-        $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 50;
+        $limit = (int)($_GET['limit'] ?? $_GET['per_page'] ?? 50);
         $limit = max(1, min(100, $limit));
         $offset = ($page - 1) * $limit;
 
@@ -82,7 +82,8 @@ class AuditController
                 'page' => $page,
                 'per_page' => $limit,
                 'total' => $result['total'],
-                'last_page' => ceil($result['total'] / $limit)
+                'last_page' => (int)ceil($result['total'] / max(1, $limit)),
+                'total_pages' => (int)ceil($result['total'] / max(1, $limit))
             ]
         ]);
     }

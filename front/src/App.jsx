@@ -11,6 +11,7 @@ import PageLoading from './components/PageLoading';
 // Lazy load pages & layouts
 const AuthPage = lazy(() => import('./AuthPage'));
 const SigningCompletePage = lazy(() => import('./pages/SigningCompletePage'));
+const SignContractPage = lazy(() => import('./pages/SignContractPage'));
 const DashboardLayout = lazy(() => import('./layouts/DashboardLayout'));
 const DashboardHome = lazy(() => import('./pages/DashboardHome'));
 const CompanyDashboard = lazy(() => import('./pages/CompanyDashboard'));
@@ -153,6 +154,21 @@ function AppRoutes() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!session?.token) {
+      setDynamicPermissions(null);
+      return;
+    }
+    fetch(`${apiUrl}/api/roles/system/permissions`, {
+      headers: { Authorization: `Bearer ${session.token}` }
+    })
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (data) setDynamicPermissions(data);
+      })
+      .catch(() => {});
+  }, [session?.token, apiUrl]);
+
   const handleSessionExpiredConfirm = () => {
     setIsSessionExpired(false);
     
@@ -204,6 +220,12 @@ function AppRoutes() {
           />
           
           <Route path="/signing-complete" element={<SigningCompletePage />} />
+
+          {/* Portal público de firma (Spectra Sign): sin autenticación, acceso por token */}
+          <Route
+            path="/sign/:token"
+            element={<SignContractPage apiUrl={apiUrl} />}
+          />
 
           <Route
             path="/dashboard"

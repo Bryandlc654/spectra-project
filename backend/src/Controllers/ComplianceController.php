@@ -14,7 +14,7 @@ class ComplianceController
     public function __construct(Database $database)
     {
         $this->pdo = $database->pdo();
-        $this->ensureTables();
+        if (\App\Support\Schema::needsMigration($this->pdo)) { $this->ensureTables(); }
     }
 
     private function ensureTables(): void
@@ -31,7 +31,7 @@ class ComplianceController
         $this->pdo->exec("
             CREATE TABLE IF NOT EXISTS compliance_requirements (
                 id CHAR(36) PRIMARY KEY,
-                country_id INT UNSIGNED NOT NULL,
+                country_id INT NOT NULL,
                 document_type VARCHAR(100) NOT NULL, -- e.g., 'passport', 'tax_residency_cert'
                 is_mandatory BOOLEAN DEFAULT TRUE,
                 description TEXT NULL,
@@ -188,9 +188,15 @@ class ComplianceController
             ];
         }
 
-        $insert = $this->pdo->prepare("INSERT INTO compliance_requirements (id, country_id, document_type, is_mandatory, description) VALUES (UUID(), ?, ?, ?, ?)");
+        $insert = $this->pdo->prepare("INSERT INTO compliance_requirements (id, country_id, document_type, is_mandatory, description) VALUES (:id, :cid, :doc, :mand, :desc)");
         foreach ($defaults as $req) {
-            $insert->execute([$countryId, $req[0], $req[1], $req[2]]);
+            $insert->execute([
+                ':id' => \App\Support\Str::uuid(),
+                ':cid' => $countryId,
+                ':doc' => $req[0],
+                ':mand' => $req[1],
+                ':desc' => $req[2],
+            ]);
         }
     }
 
@@ -219,10 +225,11 @@ class ComplianceController
 
         $stmt = $this->pdo->prepare("
             INSERT INTO compliance_requirements (id, country_id, document_type, is_mandatory, description)
-            VALUES (UUID(), :country_id, :document_type, :is_mandatory, :description)
+            VALUES (:id, :country_id, :document_type, :is_mandatory, :description)
         ");
         
         $stmt->execute([
+            ':id' => \App\Support\Str::uuid(),
             ':country_id' => $input['country_id'],
             ':document_type' => $input['document_type'],
             ':is_mandatory' => $input['is_mandatory'] ?? 1,
@@ -382,7 +389,7 @@ class ComplianceController
         $requirementId = $_POST['requirement_id'];
         
         // Upload logic (simplified)
-        $uploadDir = __DIR__ . '/../../uploads/compliance/';
+        $uploadDir = __DIR__ . '/../../public/uploads/compliance/';
         if (!is_dir($uploadDir)) mkdir($uploadDir, 0777, true);
         
         $fileName = uniqid() . '_' . basename($_FILES['file']['name']);
@@ -406,9 +413,10 @@ class ComplianceController
             } else {
                 $insertStmt = $this->pdo->prepare("
                     INSERT INTO user_compliance_documents (id, user_id, requirement_id, file_path, status)
-                    VALUES (UUID(), :uid, :rid, :path, 'pending')
+                    VALUES (:id, :uid, :rid, :path, 'pending')
                 ");
                 $insertStmt->execute([
+                    ':id' => \App\Support\Str::uuid(),
                     ':uid' => $user['id'],
                     ':rid' => $requirementId,
                     ':path' => $webPath

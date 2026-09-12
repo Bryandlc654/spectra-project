@@ -18,8 +18,8 @@ try {
 }
 
 // Get credentials from ENV
-$host = trim($_ENV['SMTP_HOST'] ?? 'mail.spectralatam.com');
-$user = trim($_ENV['SMTP_USER'] ?? 'info@spectralatam.com');
+$host = trim($_ENV['SMTP_HOST'] ?? '');
+$user = trim($_ENV['SMTP_USER'] ?? '');
 $pass = trim($_ENV['SMTP_PASS'] ?? '');
 $port = trim($_ENV['SMTP_PORT'] ?? '465');
 $enc = trim($_ENV['SMTP_ENCRYPTION'] ?? 'ssl');

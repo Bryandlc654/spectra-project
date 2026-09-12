@@ -106,7 +106,7 @@ export default function ContractsListPage({ apiUrl, token }) {
         return (
             <div className={`mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${color}`}>
                 <i className={`bi ${icon}`} />
-                <span>DocuSign: {st}</span>
+                <span>Firma: {st}</span>
             </div>
         );
     };
@@ -123,7 +123,7 @@ export default function ContractsListPage({ apiUrl, token }) {
                 <div className="flex flex-wrap gap-2">
                     <select
                         value={statusFilter}
-                        onChange={e => setStatusFilter(e.target.value)}
+                        onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
                         className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700"
                     >
                         <option value="">Todos</option>
@@ -135,7 +135,7 @@ export default function ContractsListPage({ apiUrl, token }) {
                     <input
                         type="search"
                         value={search}
-                        onChange={e => setSearch(e.target.value)}
+                        onChange={e => { setSearch(e.target.value); setPage(1); }}
                         placeholder="Buscar..."
                         className="w-40 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700"
                     />
@@ -143,6 +143,12 @@ export default function ContractsListPage({ apiUrl, token }) {
             </div>
 
             {err && <div className="text-red-600 bg-red-50 p-3 rounded">{err}</div>}
+
+            {loading && !contracts.length && (
+                <div className="p-8 text-center text-slate-500 bg-slate-50 rounded-2xl">
+                    Cargando...
+                </div>
+            )}
 
             {!loading && !contracts.length && !err && (
                 <div className="p-8 text-center text-slate-500 bg-slate-50 rounded-2xl">
@@ -186,6 +192,25 @@ export default function ContractsListPage({ apiUrl, token }) {
                             ))}
                         </tbody>
                     </table>
+                    {totalPages > 1 && (
+                        <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+                            <button
+                                disabled={page <= 1}
+                                onClick={() => setPage(p => Math.max(1, p - 1))}
+                                className="disabled:opacity-50"
+                            >
+                                Anterior
+                            </button>
+                            <span>Página {page} de {totalPages}</span>
+                            <button
+                                disabled={page >= totalPages}
+                                onClick={() => setPage(p => p + 1)}
+                                className="disabled:opacity-50"
+                            >
+                                Siguiente
+                            </button>
+                        </div>
+                    )}
                 </div>
             )}
         </div>

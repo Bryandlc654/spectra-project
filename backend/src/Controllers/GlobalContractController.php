@@ -105,8 +105,12 @@ class GlobalContractController
             $where = [];
             $params = [];
 
+            if ($this->tableHasColumn('contracts', 'deleted_at')) {
+                $where[] = 'c.deleted_at IS NULL';
+            }
+
             if (!empty($_GET['status'])) {
-                $where[] = 'c.status LIKE :status';
+                $where[] = 'c.status = :status';
                 $params[':status'] = $_GET['status'];
             }
 
@@ -141,7 +145,12 @@ class GlobalContractController
                        env.status as envelope_status, env.provider as envelope_provider
                 FROM contracts c 
                 LEFT JOIN companies comp ON c.company_id = comp.id
-                LEFT JOIN docusign_envelopes env ON c.id = env.contract_id
+                LEFT JOIN docusign_envelopes env ON env.id = (
+                    SELECT e.id FROM docusign_envelopes e
+                    WHERE e.contract_id = c.id
+                    ORDER BY e.created_at DESC, e.id DESC
+                    LIMIT 1
+                )
                 $whereSql
                 ORDER BY c.created_at DESC 
                 LIMIT :limit OFFSET :offset
@@ -166,6 +175,17 @@ class GlobalContractController
             ]);
         } catch (\Throwable $e) {
             Response::error('Error fetching global contracts: ' . $e->getMessage(), 500);
+        }
+    }
+
+    private function tableHasColumn(string $table, string $column): bool
+    {
+        try {
+            $stmt = $this->pdo->prepare("SHOW COLUMNS FROM `$table` LIKE '$column'");
+            $stmt->execute();
+            return $stmt->fetchColumn() !== false;
+        } catch (\Throwable $e) {
+            return false;
         }
     }
 

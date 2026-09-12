@@ -13,7 +13,10 @@ class SystemSettingsController
     public function __construct(Database $database)
     {
         $this->pdo = $database->pdo();
-        $this->ensureTable();
+        if (\App\Support\Cache::get('system_settings_schema_v1') === null) {
+            $this->ensureTable();
+            \App\Support\Cache::set('system_settings_schema_v1', time(), 86400 * 365);
+        }
     }
 
     private function ensureTable(): void
@@ -22,6 +25,7 @@ class SystemSettingsController
             CREATE TABLE IF NOT EXISTS system_settings (
                 setting_key VARCHAR(100) PRIMARY KEY,
                 setting_value TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
         ");
@@ -124,11 +128,8 @@ class SystemSettingsController
             'system_api_url'
         ];
 
-        $stmt = $this->pdo->prepare("
-            INSERT INTO system_settings (setting_key, setting_value) 
-            VALUES (:key, :val) 
-            ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
-        ");
+        $upd = $this->pdo->prepare("UPDATE system_settings SET setting_value = :val, updated_at = NOW() WHERE setting_key = :key");
+        $ins = $this->pdo->prepare("INSERT INTO system_settings (setting_key, setting_value, created_at, updated_at) VALUES (:key, :val, NOW(), NOW())");
 
         foreach ($payload as $key => $val) {
             if (!in_array($key, $allowedKeys)) continue;
@@ -136,7 +137,15 @@ class SystemSettingsController
             // If value is masked, skip update
             if ($val === '********') continue;
 
-            $stmt->execute([':key' => $key, ':val' => $val]);
+            $upd->execute([':val' => $val, ':key' => $key]);
+            if ($upd->rowCount() === 0) {
+                try {
+                    $ins->execute([':key' => $key, ':val' => $val]);
+                } catch (\Throwable $e) {
+                    // Carrera con otra escritura: reintentar update
+                    $upd->execute([':val' => $val, ':key' => $key]);
+                }
+            }
         }
 
         Response::json(['message' => 'Settings updated']);

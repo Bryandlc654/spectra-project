@@ -14,7 +14,7 @@ class TaxFormController
     public function __construct(Database $database)
     {
         $this->pdo = $database->pdo();
-        $this->ensureTables();
+        if (\App\Support\Schema::needsMigration($this->pdo)) { $this->ensureTables(); }
     }
 
     private function ensureTables(): void
@@ -176,13 +176,31 @@ class TaxFormController
     public function downloadPdf(string $id): void
     {
         // Simple HTML view for PDF printing
-        $stmt = $this->pdo->prepare("SELECT * FROM tax_forms WHERE id LIKE ? LIMIT 1");
-        $stmt->execute([$id]);
+        // Solo el dueño del formulario o roles con acceso amplio pueden descargar
+        $userId = Auth::userId();
+        if (!$userId) {
+            http_response_code(401);
+            echo "No autenticado";
+            exit;
+        }
+
+        $user = Auth::user();
+        $role = strtolower((string)($user['platform_role'] ?? ''));
+
+        $wideAccess = in_array($role, ['super_admin', 'admin', 'finance', 'legal'], true);
+        $stmt = $this->pdo->prepare("SELECT * FROM tax_forms WHERE id = :id LIMIT 1");
+        $stmt->execute([':id' => $id]);
         $form = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$form) {
             http_response_code(404);
             echo "Formulario no encontrado";
+            exit;
+        }
+
+        if (!$wideAccess && (string)($form['user_id'] ?? '') !== (string)$userId) {
+            http_response_code(403);
+            echo "No tienes permiso para ver este formulario";
             exit;
         }
 

@@ -1,11 +1,16 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useToast } from '../../components/ToastProvider';
 
+const PER_PAGE = 20;
+
 export default function AdminOnboardingPage({ apiUrl, token }) {
-    const { toast } = useToast();
+    const toast = useToast();
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedUser, setSelectedUser] = useState(null); // For details modal
+    const [page, setPage] = useState(1);
+    const [total, setTotal] = useState(0);
+    const [totalPages, setTotalPages] = useState(1);
 
     const api = useMemo(() => {
         const headers = {
@@ -22,14 +27,24 @@ export default function AdminOnboardingPage({ apiUrl, token }) {
     }, [apiUrl, token]);
 
     useEffect(() => {
-        loadData();
-    }, []);
+        loadData(page);
+        // eslint-disable-next-line
+    }, [page]);
 
-    const loadData = async () => {
+    const loadData = async (nextPage) => {
         setLoading(true);
         try {
-            const data = await api.get('/api/onboarding/users-progress');
-            setUsers(data);
+            const data = await api.get(`/api/onboarding/users-progress?page=${nextPage}&limit=${PER_PAGE}`);
+            if (Array.isArray(data)) {
+                setUsers(data);
+                setTotal(data.length);
+                setTotalPages(1);
+            } else {
+                setUsers(data.data || []);
+                const pag = data.pagination || {};
+                setTotal(pag.total || 0);
+                setTotalPages(pag.total_pages || 1);
+            }
         } catch (e) {
             toast.error('Error al cargar progreso de onboarding');
         } finally {
@@ -52,57 +67,88 @@ export default function AdminOnboardingPage({ apiUrl, token }) {
                 <div className="text-center py-8 text-slate-500">Cargando...</div>
             ) : (
                 <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                    <table className="w-full text-sm text-left">
-                        <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase">
-                            <tr>
-                                <th className="px-6 py-4">Empleado</th>
-                                <th className="px-6 py-4">Rol</th>
-                                <th className="px-6 py-4">Progreso</th>
-                                <th className="px-6 py-4 text-right">Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {users.map(u => (
-                                <tr key={u.id} className="hover:bg-slate-50">
-                                    <td className="px-6 py-4">
-                                        <div>
-                                            <div className="font-semibold text-slate-900">{u.full_name}</div>
-                                            <div className="text-xs text-slate-500">{u.email}</div>
-                                        </div>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-800">
-                                            {u.platform_role}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <div className="w-full max-w-xs">
-                                            <div className="flex justify-between text-xs mb-1">
-                                                <span className="font-medium">{u.progress}%</span>
-                                                <span className="text-slate-500">{u.tasks_completed}/{u.tasks_total} tareas</span>
-                                            </div>
-                                            <div className="w-full bg-slate-100 rounded-full h-2">
-                                                <div 
-                                                    className={`h-2 rounded-full transition-all ${
-                                                        u.progress === 100 ? 'bg-emerald-500' : 'bg-blue-500'
-                                                    }`}
-                                                    style={{ width: `${u.progress}%` }}
-                                                ></div>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td className="px-6 py-4 text-right">
-                                        <button 
-                                            onClick={() => setSelectedUser(u)}
-                                            className="text-blue-600 hover:text-blue-800 font-medium text-xs"
-                                        >
-                                            Ver Detalles
-                                        </button>
-                                    </td>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm text-left">
+                            <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase">
+                                <tr>
+                                    <th className="px-6 py-4">Empleado</th>
+                                    <th className="px-6 py-4">Rol</th>
+                                    <th className="px-6 py-4">Progreso</th>
+                                    <th className="px-6 py-4 text-right">Acciones</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {users.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={4} className="px-6 py-8 text-center text-slate-500">
+                                            Sin empleados para mostrar
+                                        </td>
+                                    </tr>
+                                ) : users.map(u => (
+                                    <tr key={u.id} className="hover:bg-slate-50">
+                                        <td className="px-6 py-4">
+                                            <div>
+                                                <div className="font-semibold text-slate-900">{u.full_name}</div>
+                                                <div className="text-xs text-slate-500">{u.email}</div>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-800">
+                                                {u.platform_role}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <div className="w-full max-w-xs">
+                                                <div className="flex justify-between text-xs mb-1">
+                                                    <span className="font-medium">{u.progress}%</span>
+                                                    <span className="text-slate-500">{u.tasks_completed}/{u.tasks_total} tareas</span>
+                                                </div>
+                                                <div className="w-full bg-slate-100 rounded-full h-2">
+                                                    <div 
+                                                        className={`h-2 rounded-full transition-all ${
+                                                            u.progress === 100 ? 'bg-emerald-500' : 'bg-blue-500'
+                                                        }`}
+                                                        style={{ width: `${u.progress}%` }}
+                                                    ></div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 text-right">
+                                            <button 
+                                                onClick={() => setSelectedUser(u)}
+                                                className="text-blue-600 hover:text-blue-800 font-medium text-xs"
+                                            >
+                                                Ver Detalles
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {/* Pagination */}
+                    <div className="px-6 py-4 border-t border-slate-200 flex items-center justify-between bg-slate-50/50">
+                        <span className="text-sm text-slate-500">
+                            Mostrando {(page - 1) * PER_PAGE + 1} a {Math.min(page * PER_PAGE, total)} de {total} empleados
+                        </span>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => setPage(p => Math.max(1, p - 1))}
+                                disabled={page === 1}
+                                className="px-3 py-1 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50 disabled:opacity-50 transition-colors shadow-sm"
+                            >
+                                Anterior
+                            </button>
+                            <button
+                                onClick={() => setPage(p => Math.min(totalPages || 1, p + 1))}
+                                disabled={page >= (totalPages || 1)}
+                                className="px-3 py-1 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50 disabled:opacity-50 transition-colors shadow-sm"
+                            >
+                                Siguiente
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
 

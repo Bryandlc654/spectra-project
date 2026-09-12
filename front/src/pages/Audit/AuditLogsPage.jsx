@@ -150,8 +150,13 @@ export default function AuditLogsPage({ apiUrl, token }) {
                             {log.action}
                         </span>
                     </td>
-                    <td className="py-3 text-slate-500 max-w-md truncate" title={JSON.stringify(log.details)}>
-                        {log.details ? JSON.stringify(log.details).slice(0, 60) + (JSON.stringify(log.details).length > 60 ? '...' : '') : '—'}
+                    <td className="py-3 text-slate-500 max-w-md truncate" title={JSON.stringify(log.metadata ?? log.details ?? {})}>
+                        {(() => {
+                            const d = log.metadata ?? log.details;
+                            if (!d || (typeof d === 'object' && Object.keys(d).length === 0)) return '—';
+                            const s = JSON.stringify(d);
+                            return s.length > 60 ? s.slice(0, 60) + '…' : s;
+                        })()}
                     </td>
                   </tr>
                 ))}

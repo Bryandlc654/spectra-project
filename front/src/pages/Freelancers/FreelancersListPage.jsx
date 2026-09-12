@@ -19,9 +19,15 @@ export default function FreelancersListPage({ apiUrl, token }) {
   const [err, setErr] = useState('');
 
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [status, setStatus] = useState('');
   const [country, setCountry] = useState('');
   const [area, setArea] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 500);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   // Action state
   const [openCreate, setOpenCreate] = useState(false);
@@ -71,7 +77,7 @@ export default function FreelancersListPage({ apiUrl, token }) {
       params.set('page', String(nextPage));
       params.set('per_page', String(perPage));
 
-      if (search.trim()) params.set('q', search.trim());
+      if (debouncedSearch.trim()) params.set('q', debouncedSearch.trim());
       if (status) params.set('status', status);
       if (country.trim()) params.set('country', country.trim());
       if (area.trim()) params.set('area', area.trim());
@@ -94,7 +100,7 @@ export default function FreelancersListPage({ apiUrl, token }) {
   useEffect(() => {
     load(page);
     // eslint-disable-next-line
-  }, [page, status, country, area]);
+  }, [page, debouncedSearch, status, country, area]);
 
   async function handleBlock() {
     if (!confirmAction?.user) return;
@@ -259,7 +265,7 @@ export default function FreelancersListPage({ apiUrl, token }) {
     const formData = new FormData();
     formData.append('file', file);
 
-    const toastId = toast.loading('Importando freelancers...');
+    toast.info('Importando freelancers...');
     try {
       const response = await fetch(`${apiUrl}/api/freelancers/import`, {
         method: 'POST',
@@ -276,11 +282,9 @@ export default function FreelancersListPage({ apiUrl, token }) {
         throw new Error(data.error || 'Error al importar');
       }
       
-      toast.dismiss(toastId);
       toast.success(data.message || 'Importación completada');
       load(1);
     } catch (e) {
-      toast.dismiss(toastId);
       toast.error(e.message || 'Error al importar');
     } finally {
       e.target.value = '';
@@ -558,8 +562,8 @@ export default function FreelancersListPage({ apiUrl, token }) {
                 Anterior
               </button>
               <button
-                onClick={() => setPage(p => Math.min(meta.lastPage || 1, p + 1))}
-                disabled={page >= (meta.lastPage || 1) || loading}
+                onClick={() => setPage(p => Math.min(meta.totalPages || 1, p + 1))}
+                disabled={page >= (meta.totalPages || 1) || loading}
                 className="px-3 py-1 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50 disabled:opacity-50 transition-colors shadow-sm"
               >
                 Siguiente
@@ -656,11 +660,11 @@ export default function FreelancersListPage({ apiUrl, token }) {
               <i className="bi bi-chevron-left"></i>
             </button>
             <span className="text-sm font-medium text-slate-600">
-              {page} / {meta.lastPage || 1}
+              {page} / {meta.totalPages || 1}
             </span>
             <button
-              onClick={() => setPage(p => Math.min(meta.lastPage || 1, p + 1))}
-              disabled={page >= (meta.lastPage || 1) || loading}
+              onClick={() => setPage(p => Math.min(meta.totalPages || 1, p + 1))}
+              disabled={page >= (meta.totalPages || 1) || loading}
               className="w-10 h-10 flex items-center justify-center bg-white border border-slate-300 rounded-full shadow-sm disabled:opacity-50 active:bg-slate-100"
             >
               <i className="bi bi-chevron-right"></i>
@@ -844,6 +848,7 @@ export default function FreelancersListPage({ apiUrl, token }) {
             : handleBlock
         }
         loading={actionLoading}
+        danger={confirmAction?.type !== 'unblock' && confirmAction?.type !== 'reset_password'}
         confirmText={
           confirmAction?.type === 'block'
             ? 'Bloquear'
@@ -852,13 +857,6 @@ export default function FreelancersListPage({ apiUrl, token }) {
             : confirmAction?.type === 'delete'
             ? 'Eliminar'
             : 'Enviar correo'
-        }
-        type={
-          confirmAction?.type === 'block' || confirmAction?.type === 'delete'
-            ? 'danger'
-            : confirmAction?.type === 'reset_password'
-            ? 'warning'
-            : 'success'
         }
       />
     </div>

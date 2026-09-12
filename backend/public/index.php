@@ -1,15 +1,32 @@
 <?php
 
 // =====================================================
-// CORS SIEMPRE PRIMERO
+// CORS SIEMPRE PRIMERO (allowlist de orígenes)
 // =====================================================
-$origin = $_SERVER['HTTP_ORIGIN'] ?? '*';
-header('Access-Control-Allow-Origin: ' . $origin);
-header('Access-Control-Allow-Credentials: true');
+$allowedOrigins = array_filter(array_map('trim', explode(',', (string)getenv('CORS_ALLOWED_ORIGINS'))));
+if (empty($allowedOrigins)) {
+    $allowedOrigins = [
+        'http://localhost:5173',
+        'http://localhost:3000',
+        'https://app.spectralatam.com',
+        'https://manage.spectralatam.com',
+    ];
+}
+
+$requestOrigin = $_SERVER['HTTP_ORIGIN'] ?? '';
+$isAllowedOrigin = $requestOrigin !== '' && in_array(rtrim($requestOrigin, '/'), $allowedOrigins, true);
+
+if ($isAllowedOrigin) {
+    header('Access-Control-Allow-Origin: ' . $requestOrigin);
+    header('Access-Control-Allow-Credentials: true');
+    header('Vary: Origin');
+} else {
+    // No origin (mismo-origen) o origin no permitido: sin ACAO
+    header('Vary: Origin');
+}
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, Accept, Origin');
 header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
 header('Access-Control-Max-Age: 86400');
-header('Vary: Origin');
 header('Content-Type: application/json; charset=utf-8');
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
@@ -17,23 +34,42 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
     exit;
 }
 
+// Compresión gzip cuando el cliente la soporte (ob_gzhandler se auto-desactiva si no aplica)
+ob_start('ob_gzhandler');
+
 // =====================================================
 // Errores a JSON
 // =====================================================
-ini_set('display_errors', '1');
-ini_set('display_startup_errors', '1');
+$appDebug = filter_var(getenv('APP_DEBUG') ?: getenv('APP_ENV') === 'development', FILTER_VALIDATE_BOOLEAN);
+
+if ($appDebug) {
+    ini_set('display_errors', '1');
+    ini_set('display_startup_errors', '1');
+} else {
+    ini_set('display_errors', '0');
+    ini_set('display_startup_errors', '0');
+    error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE & ~E_WARNING);
+}
+
 error_reporting(E_ALL);
 
-set_exception_handler(function ($e) {
-    http_response_code(500);
-    echo json_encode([
-        'error' => 'Internal Server Error',
-        'details' => [
+set_exception_handler(function ($e) use ($appDebug) {
+    $msg = $appDebug ? $e->getMessage() : 'Internal Server Error';
+    $details = [];
+    if ($appDebug) {
+        $details = [
             'message' => $e->getMessage(),
             'file' => $e->getFile(),
             'line' => $e->getLine(),
-        ],
-    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        ];
+    } else {
+        error_log('[Spectra] ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+    }
+
+    http_response_code(500);
+    $body = ['error' => $msg];
+    if (!empty($details)) $body['details'] = $details;
+    echo json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 });
 
@@ -55,7 +91,12 @@ debug_log("Request started: " . ($_SERVER['REQUEST_URI'] ?? 'unknown'));
 require_once __DIR__ . '/../vendor/autoload.php';
 
 $dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/../');
-$dotenv->safeLoad();
+try {
+    $dotenv->safeLoad();
+} catch (Throwable $e) {
+    // Un .env malformado/presente con valores sin comillas no debe tumbar la API:
+    // config.php cae al valor por getenv() (variables de entorno del proceso).
+}
 
 require_once __DIR__ . '/../src/Support/Response.php';
 require_once __DIR__ . '/../src/Support/Auth.php';
@@ -74,8 +115,6 @@ $database = new App\Database($config['db']);
 // $database->pdo();
 debug_log("DB configured (lazy connection)");
 
-
-require_once __DIR__ . '/../src/Services/DocuSignService.php';
 
 require_once __DIR__ . '/../src/Controllers/GenericController.php';
 require_once __DIR__ . '/../src/Controllers/AuthController.php';
@@ -96,6 +135,7 @@ require_once __DIR__ . '/../src/Controllers/KnowledgeBaseController.php';
 require_once __DIR__ . '/../src/Controllers/GlobalContractTemplateController.php';
 require_once __DIR__ . '/../src/Controllers/GlobalContractController.php';
 require_once __DIR__ . '/../src/Controllers/EnvelopeController.php';
+require_once __DIR__ . '/../src/Controllers/SignatureController.php';
 require_once __DIR__ . '/../src/Controllers/FinanceController.php';
 require_once __DIR__ . '/../src/Controllers/ProjectController.php';
 require_once __DIR__ . '/../src/Controllers/PayrollSettingsController.php';
@@ -149,6 +189,7 @@ use App\Controllers\KnowledgeBaseController;
 use App\Controllers\GlobalContractTemplateController;
 use App\Controllers\GlobalContractController;
 use App\Controllers\EnvelopeController;
+use App\Controllers\SignatureController;
 use App\Controllers\FinanceController;
 use App\Controllers\BankAccountController;
 use App\Controllers\ComplianceController;
@@ -173,6 +214,7 @@ $tenantController = new TenantController($database);
 $globalContractTemplateController = new GlobalContractTemplateController($database);
 $globalContractController = new GlobalContractController($database);
 $envelopeController = new EnvelopeController($database);
+$signatureController = new SignatureController($database);
 $financeController = new FinanceController($database);
 $bankAccountController = new BankAccountController($database);
 $timeOffController = new \App\Controllers\TimeOffController($database);
@@ -272,12 +314,18 @@ if (!$table) {
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 // =====================================================
-// Debug endpoints SIN Auth (solo diagnóstico)
+// Debug endpoints (solo diagnóstico, desactivados en producción)
+// Activar únicamente con APP_DEBUG=true en .env
 // /public/api/_debug/db
 // /public/api/_debug/users
 // =====================================================
 if ($table === '_debug') {
     $action = $segments[2] ?? '';
+
+    if (!$appDebug) {
+        Response::error('Not Found', 404);
+        exit;
+    }
 
     if ($action === 'db') {
         $pdo = $database->pdo();
@@ -291,12 +339,6 @@ if ($table === '_debug') {
 
         Response::json([
             'db_connection' => $info,
-            'config_db' => $config['db'],
-            'env' => [
-                'DB_HOST' => getenv('DB_HOST'),
-                'DB_DATABASE' => getenv('DB_DATABASE'),
-                'DB_USERNAME' => getenv('DB_USERNAME'),
-            ],
         ], 200);
         exit;
     }
@@ -559,6 +601,12 @@ if ($table === 'global-contracts') {
 if ($table === 'envelopes') {
     Auth::require($database->pdo(), $config['jwt']);
     $envelopeController->handle($_SERVER['REQUEST_METHOD'], $id);
+    exit;
+}
+
+// Portal público de firma (Spectra Sign): rutas /api/sign/{token} y /api/sign/{token}/pdf
+if ($table === 'sign') {
+    $signatureController->handle($segments, $_SERVER['REQUEST_METHOD'] ?? 'GET');
     exit;
 }
 
@@ -856,6 +904,10 @@ if ($table === 'tax-forms') {
     }
     if ($method === 'POST' && !$sub) {
         $taxFormController->submit();
+        exit;
+    }
+    if ($method === 'GET' && !$sub) {
+        $taxFormController->index();
         exit;
     }
     if ($method === 'GET' && isset($segments[2]) && ($segments[3] ?? '') === 'download') {

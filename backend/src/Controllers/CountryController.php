@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Database;
+use App\Support\Cache;
 use App\Support\Response;
 use PDO;
 use Throwable;
@@ -14,7 +15,7 @@ final class CountryController
     public function __construct(Database $database)
     {
         $this->pdo = $database->pdo();
-        $this->ensureTables();
+        if (\App\Support\Schema::needsMigration($this->pdo)) { $this->ensureTables(); }
     }
 
     private function ensureTables(): void
@@ -99,10 +100,30 @@ final class CountryController
         $where = [];
         $params = [];
 
-        if ($q !== '') {
-            $where[] = '(name LIKE :q OR iso2 LIKE :q)';
-            $params[':q'] = '%' . $q . '%';
+        if ($q === '') {
+            $records = Cache::remember('ref:countries', 3600, function (): array {
+                $stmt = $this->pdo->query("SELECT id, iso2, name FROM countries ORDER BY name ASC");
+                return $stmt->fetchAll() ?: [];
+            });
+
+            $total = count($records);
+            $offset = ($page - 1) * $perPage;
+            $items = array_values(array_slice($records, $offset, $perPage));
+
+            Response::json([
+                'data' => $items,
+                'meta' => [
+                    'page' => $page,
+                    'per_page' => $perPage,
+                    'total' => $total,
+                    'total_pages' => max(1, (int)ceil($total / max(1, $perPage))),
+                ],
+            ]);
+            return;
         }
+
+        $where[] = '(name LIKE :q OR iso2 LIKE :q)';
+        $params[':q'] = "%$q%";
 
         $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
 
@@ -167,6 +188,8 @@ final class CountryController
         $stmt = $this->pdo->prepare("INSERT INTO countries (iso2, name) VALUES (:iso2, :name)");
         $stmt->execute([':iso2' => $iso2, ':name' => $name]);
 
+        Cache::delete('ref:countries');
+
         Response::json(['message' => 'País creado', 'data' => ['id' => (int)$this->pdo->lastInsertId()]], 201);
     }
 
@@ -217,13 +240,41 @@ final class CountryController
         $stmt = $this->pdo->prepare("UPDATE countries SET " . implode(', ', $sets) . " WHERE id = :id");
         $stmt->execute($params);
 
+        Cache::delete('ref:countries');
+
         Response::json(['message' => 'País actualizado']);
     }
 
     private function destroy(int $id): void
     {
-        $stmt = $this->pdo->prepare("DELETE FROM countries WHERE id = :id");
-        $stmt->execute([':id' => $id]);
+        $exists = $this->pdo->prepare("SELECT id FROM countries WHERE id = :id LIMIT 1");
+        $exists->execute([':id' => $id]);
+        if (!$exists->fetchColumn()) {
+            Response::error('País no encontrado', 404);
+            return;
+        }
+
+        // Evitar eliminar países en uso por empresas
+        try {
+            $ref = $this->pdo->prepare("SELECT COUNT(*) FROM companies WHERE country_id = :id");
+            $ref->execute([':id' => $id]);
+            if ((int)$ref->fetchColumn() > 0) {
+                Response::error('No se puede eliminar el país: está en uso por empresas', 409);
+                return;
+            }
+        } catch (Throwable $e) {
+            // La tabla companies podría no tener country_id; continuar
+        }
+
+        try {
+            $stmt = $this->pdo->prepare("DELETE FROM countries WHERE id = :id");
+            $stmt->execute([':id' => $id]);
+        } catch (Throwable $e) {
+            Response::error('No se puede eliminar el país: está en uso', 409);
+            return;
+        }
+        Cache::delete('ref:countries');
+
         Response::json(['message' => 'País eliminado']);
     }
 

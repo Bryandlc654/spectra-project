@@ -15,6 +15,7 @@ class RequisitionController
     public function __construct(Database $database)
     {
         $this->pdo = $database->pdo();
+        if (\App\Support\Schema::needsMigration($this->pdo)) { $this->ensureTables(); }
     }
 
     private function getCompanyId(): ?string
@@ -32,7 +33,6 @@ class RequisitionController
 
     public function handle(array $segments, string $method): void
     {
-        $this->ensureTables();
         $id = $segments[2] ?? null;
         $action = $segments[3] ?? null;
 
@@ -42,14 +42,14 @@ class RequisitionController
             return;
         }
 
-        if ($id && $action === 'create-po') {
-            if ($method === 'POST') $this->createPO($id);
+        if ($id && ($action === 'create-po' || $action === 'emit-po')) {
+            if ($method === 'POST') $this->emitPO($id);
             else Response::error('Method not allowed', 405);
             return;
         }
 
-        if ($id && $action === 'confirm-grn') {
-            if ($method === 'POST') $this->confirmGRN($id);
+        if ($id && ($action === 'confirm-grn' || $action === 'confirm-receipt')) {
+            if ($method === 'POST') $this->confirmReceipt($id);
             else Response::error('Method not allowed', 405);
             return;
         }
@@ -67,31 +67,21 @@ class RequisitionController
         else Response::error('Method not allowed', 405);
     }
 
-    private function createPO(string $id): void
+    /**
+     * Asegura columnas de progreso (PO/GRN) y el enum 'received'.
+     * El DDL canónico no las incluye; se agregan de forma perezosa y cacheada.
+     */
+    private function ensureRequisitionProgressColumns(): void
     {
-        $stmt = $this->pdo->prepare("UPDATE requisitions SET status = 'ordered', updated_at = NOW() WHERE id = :id AND status = 'approved'");
-        $stmt->execute([':id' => $id]);
-        if ($stmt->rowCount() === 0) {
-            Response::error('Requisition not found or not in approved status', 400);
+        if (\App\Support\Cache::get('requisition_progress_cols_v1') !== null) {
             return;
         }
-        Response::json(['message' => 'PO Created successfully', 'status' => 'ordered']);
-    }
-
-    private function confirmGRN(string $id): void
-    {
-        try {
-            // Lazy schema update to support 'received'
-            $this->pdo->exec("ALTER TABLE requisitions MODIFY COLUMN status ENUM('pending', 'approved', 'rejected', 'ordered', 'received') DEFAULT 'pending'");
-        } catch (\Exception $e) {}
-
-        $stmt = $this->pdo->prepare("UPDATE requisitions SET status = 'received', updated_at = NOW() WHERE id = :id AND status = 'ordered'");
-        $stmt->execute([':id' => $id]);
-        if ($stmt->rowCount() === 0) {
-            Response::error('Requisition not found or not in ordered status', 400);
-            return;
-        }
-        Response::json(['message' => 'GRN Confirmed (Goods Received)', 'status' => 'received']);
+        try { $this->pdo->exec("ALTER TABLE requisitions MODIFY COLUMN status ENUM('pending', 'approved', 'rejected', 'ordered', 'received') DEFAULT 'pending'"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("ALTER TABLE requisitions ADD COLUMN po_number VARCHAR(50) NULL"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("ALTER TABLE requisitions ADD COLUMN ordered_at DATETIME NULL"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("ALTER TABLE requisitions ADD COLUMN received_at DATETIME NULL"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("ALTER TABLE requisitions ADD COLUMN received_by CHAR(36) NULL"); } catch (\Throwable $e) {}
+        \App\Support\Cache::set('requisition_progress_cols_v1', time(), 86400 * 365);
     }
 
     private function ensureTables(): void
@@ -107,7 +97,11 @@ class RequisitionController
                 description TEXT,
                 amount DECIMAL(15, 2) NOT NULL,
                 currency_id INT NOT NULL,
-                status ENUM('pending', 'approved', 'rejected', 'ordered') DEFAULT 'pending',
+                status ENUM('pending', 'approved', 'rejected', 'ordered', 'received') DEFAULT 'pending',
+                po_number VARCHAR(50) NULL,
+                ordered_at DATETIME NULL,
+                received_at DATETIME NULL,
+                received_by CHAR(36) NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 INDEX idx_company (company_id),
@@ -141,15 +135,20 @@ class RequisitionController
     private function index(): void
     {
         $companyId = $this->getCompanyId();
-        if (!$companyId) { Response::error('company_id required', 400); return; }
+        $role = Auth::user()['platform_role'] ?? '';
+        $isPlatform = in_array($role, ['super_admin', 'admin', 'finance', 'legal'], true);
+        if (!$companyId && !$isPlatform) { Response::error('company_id required', 400); return; }
 
         $page = max(1, (int)($_GET['page'] ?? 1));
         $limit = max(1, min(100, (int)($_GET['limit'] ?? 20)));
         $offset = ($page - 1) * $limit;
 
+        $whereCount = $companyId ? 'WHERE company_id LIKE :cid' : '';
+        $whereReq = $companyId ? 'WHERE r.company_id LIKE :cid' : '';
+
         // Count total
-        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM requisitions WHERE company_id LIKE :cid");
-        $countStmt->execute([':cid' => $companyId]);
+        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM requisitions $whereCount");
+        $countStmt->execute($companyId ? [':cid' => $companyId] : []);
         $total = (int)$countStmt->fetchColumn();
         
         // Fetch requisitions with requester info
@@ -162,13 +161,13 @@ class RequisitionController
                    (SELECT role_required FROM requisition_approvals ra WHERE ra.requisition_id = r.id AND ra.status = 'pending' ORDER BY ra.step_number ASC LIMIT 1) as current_required_role
             FROM requisitions r
             LEFT JOIN users u ON r.requester_id = u.id
-            WHERE r.company_id LIKE :cid 
+            $whereReq 
             ORDER BY r.created_at DESC
             LIMIT :limit OFFSET :offset
         ";
         
         $stmt = $this->pdo->prepare($sql);
-        $stmt->bindValue(':cid', $companyId);
+        if ($companyId) $stmt->bindValue(':cid', $companyId);
         $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
         $stmt->execute();
@@ -176,17 +175,19 @@ class RequisitionController
 
         // Enhance with current user approval ability
         $userId = Auth::userId();
-        // Get user roles for this company
-        $rolesStmt = $this->pdo->prepare("
-            SELECT r.name 
-            FROM roles r
-            JOIN user_roles ur ON ur.role_id = r.id
-            JOIN company_users cu ON cu.id = ur.company_user_id
-            WHERE cu.user_id LIKE :uid AND cu.company_id LIKE :cid
-        ");
-        $rolesStmt->execute([':uid' => $userId, ':cid' => $companyId]);
-        $userRoles = $rolesStmt->fetchAll(PDO::FETCH_COLUMN);
-        $userRoles = array_map('strtolower', $userRoles);
+        $userRoles = [];
+        if ($companyId) {
+            // Get user roles for this company
+            $rolesStmt = $this->pdo->prepare("
+                SELECT r.name 
+                FROM roles r
+                JOIN user_roles ur ON ur.role_id = r.id
+                JOIN company_users cu ON cu.id = ur.company_user_id
+                WHERE cu.user_id LIKE :uid AND cu.company_id LIKE :cid
+            ");
+            $rolesStmt->execute([':uid' => $userId, ':cid' => $companyId]);
+            $userRoles = array_map('strtolower', $rolesStmt->fetchAll(PDO::FETCH_COLUMN));
+        }
         
         // Also check if user is platform super admin or similar if needed, but let's stick to company roles
         // Map simplified roles if necessary. Assuming roles stored are 'admin', 'finance', 'user', 'company_admin'
@@ -296,8 +297,17 @@ class RequisitionController
         
         if (!$companyId || !$requesterId) { Response::error('company_id and requester_id required', 400); return; }
 
+        if (empty($data['title']) || !isset($data['amount']) || empty($data['currency_id'])) {
+            Response::error('title, amount y currency_id son requeridos', 422);
+            return;
+        }
+        if ((float)$data['amount'] <= 0) {
+            Response::error('amount debe ser mayor a 0', 422);
+            return;
+        }
+
         $id = $this->uuid();
-        $amount = (float)$data['amount'];
+        $amount = (float)($data['amount'] ?? 0);
         
         $this->pdo->beginTransaction();
         try {
@@ -366,6 +376,12 @@ class RequisitionController
         $req = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$req) { Response::error('Requisition not found', 404); return; }
 
+        $companyId = $this->getCompanyId();
+        if ($companyId && ($req['company_id'] ?? null) !== $companyId) {
+            Response::error('Requisition not found', 404);
+            return;
+        }
+
         // Fetch approvals
         $stmtApp = $this->pdo->prepare("
             SELECT ra.*, 
@@ -426,11 +442,12 @@ class RequisitionController
         $userRoles = $rolesStmt->fetchAll(PDO::FETCH_COLUMN);
         $userRoles = array_map('strtolower', $userRoles);
 
-        // Logic: User must have the required role OR be company_admin (override)
+        // Logic: User must have the required role OR be admin/company_admin (override)
         // But if required role IS company_admin, then they must be company_admin.
         $required = strtolower($step['role_required']);
-        
-        if (!in_array($required, $userRoles) && !in_array('admin', $userRoles) && !in_array('company admin', $userRoles)) {
+        $isOverride = in_array('admin', $userRoles) || in_array('company_admin', $userRoles) || in_array('company admin', $userRoles);
+
+        if (!in_array($required, $userRoles) && !$isOverride) {
             Response::error('You do not have the required role (' . $step['role_required'] . ') to approve this step', 403);
             return;
         }
@@ -481,6 +498,7 @@ class RequisitionController
     private function emitPO(string $id): void
     {
         $this->checkPermission('company_admin'); // Only admins/procurement managers can emit PO
+        $this->ensureRequisitionProgressColumns();
 
         $stmt = $this->pdo->prepare("SELECT * FROM requisitions WHERE id = :id");
         $stmt->execute([':id' => $id]);
@@ -503,6 +521,7 @@ class RequisitionController
 
     private function confirmReceipt(string $id): void
     {
+        $this->ensureRequisitionProgressColumns();
         // Any employee can confirm receipt? Or just requester/admin?
         // Let's allow requester and admin.
         $userId = Auth::userId();

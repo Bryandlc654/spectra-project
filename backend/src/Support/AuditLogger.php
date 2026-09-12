@@ -49,51 +49,32 @@ class AuditLogger
     {
         $files = glob($this->logPath . '/audit-*.jsonl');
         if (!$files) return ['data' => [], 'total' => 0];
-        
+
         rsort($files); // Newest files first
 
-        $logs = [];
-        $count = 0;
-        $skipped = 0;
-        
-        // This is a simplified reader. For production with huge logs, 
-        // we might need a more robust solution (like keeping a separate index).
-        // For now, we iterate files.
-        
+        $matched = [];
         foreach ($files as $file) {
-            // Read file into array (careful with memory for huge files)
-            // Ideally read line by line backwards. 
-            // For MVP, file() is okay if daily logs aren't massive.
             $lines = file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
             if (!$lines) continue;
-            
+
             $lines = array_reverse($lines); // Newest lines first
 
             foreach ($lines as $line) {
                 $data = json_decode($line, true);
                 if (!$data) continue;
 
-                // Apply filters
                 if (!empty($filters['actor_user_id']) && ($data['actor_user_id'] ?? '') !== $filters['actor_user_id']) continue;
                 if (!empty($filters['company_id']) && ($data['company_id'] ?? '') !== $filters['company_id']) continue;
                 if (!empty($filters['action']) && ($data['action'] ?? '') !== $filters['action']) continue;
 
-                if ($skipped < $offset) {
-                    $skipped++;
-                    continue;
-                }
-
-                $logs[] = $data;
-                $count++;
-
-                if ($count >= $limit) break 2;
+                $matched[] = $data;
             }
         }
-        
-        return [
-            'data' => $logs,
-            'total' => $count + $skipped + 100 // Approximation since we don't scan all files for total count
-        ];
+
+        $total = count($matched);
+        $data = $limit > 0 ? array_slice($matched, max(0, $offset), $limit) : [];
+
+        return ['data' => $data, 'total' => $total];
     }
 
     private function uuid(): string

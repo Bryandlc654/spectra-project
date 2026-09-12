@@ -36,22 +36,16 @@ export default function FreelancerDashboard({ user, apiUrl, token }) {
     }
 
     try {
-        if (contract.envelope_provider === 'docusign') {
-            const res = await api.post(`/api/envelopes/${contract.envelope_db_id}?action=view`);
-            if (res.url) {
-                window.location.href = res.url;
-            } else {
-                alert(res.message || 'Error getting signing URL');
-            }
+        // Obtener el enlace del portal de firma (Spectra Sign)
+        const res = await api.post(`/api/envelopes/${contract.envelope_db_id}?action=view`);
+        if (res.token) {
+            window.location.href = `${window.location.origin}/sign/${res.token}`;
+        } else if (res.url) {
+            window.location.href = res.url;
+        } else if (res.status === 'completed' && res.pdf_url) {
+            window.open(res.pdf_url, '_blank', 'noopener');
         } else {
-            // Local signing
-            // In a real flow, we might want to show the document first.
-            // For now, we'll ask for confirmation and sign.
-            if (window.confirm(`Do you want to sign "${contract.title}"?`)) {
-                await api.post(`/api/envelopes/${contract.envelope_db_id}?action=sign`);
-                alert('Contract signed successfully!');
-                fetchContracts();
-            }
+            alert(res.message || 'No se pudo obtener el enlace de firma');
         }
     } catch (err) {
         console.error('Error signing contract:', err);
@@ -144,9 +138,9 @@ export default function FreelancerDashboard({ user, apiUrl, token }) {
                             <p className="text-xs text-slate-500">
                                 {contract.company_name} • {new Date(contract.created_at).toLocaleDateString()}
                             </p>
-                            {contract.envelope_provider === 'docusign' && (
-                                <span className="mt-1 inline-flex items-center rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
-                                    DocuSign
+                            {contract.envelope_provider === 'spectra_sign' && (
+                                <span className="mt-1 inline-flex items-center rounded bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                                    Firma Electrónica
                                 </span>
                             )}
                             {contract.envelope_provider === 'local' && (

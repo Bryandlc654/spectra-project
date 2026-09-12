@@ -15,6 +15,7 @@ class ProjectController
     public function __construct(Database $database)
     {
         $this->pdo = $database->pdo();
+        if (\App\Support\Schema::needsMigration($this->pdo)) { $this->ensureTables(); }
     }
 
     private function getCompanyId(): ?string
@@ -36,8 +37,6 @@ class ProjectController
         $seg2 = $segments[2] ?? null;
         $seg3 = $segments[3] ?? null;
         $seg4 = $segments[4] ?? null;
-
-        $this->ensureTables();
 
         // 1. Sub-resources accessed directly (milestones, deliverables)
         if ($seg2 === 'milestones' && $seg3) {

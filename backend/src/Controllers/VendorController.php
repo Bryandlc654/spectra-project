@@ -15,6 +15,7 @@ class VendorController
     public function __construct(Database $database)
     {
         $this->pdo = $database->pdo();
+        if (\App\Support\Schema::needsMigration($this->pdo)) { $this->ensureTables(); }
     }
 
     private function getCompanyId(): ?string
@@ -32,7 +33,6 @@ class VendorController
 
     public function handle(array $segments, string $method): void
     {
-        $this->ensureTables();
         $id = $segments[2] ?? null;
 
         if ($id) {
@@ -78,19 +78,24 @@ class VendorController
     private function index(): void
     {
         $companyId = $this->getCompanyId();
-        if (!$companyId) { Response::error('company_id required', 400); return; }
+        $role = Auth::user()['platform_role'] ?? '';
+        $isPlatform = in_array($role, ['super_admin', 'admin', 'finance', 'legal'], true);
+        if (!$companyId && !$isPlatform) { Response::error('company_id required', 400); return; }
         
         $page = max(1, (int)($_GET['page'] ?? 1));
         $limit = max(1, min(100, (int)($_GET['limit'] ?? 50)));
         $offset = ($page - 1) * $limit;
 
+        $where = $companyId ? 'WHERE company_id = :cid' : '';
+        $binds = $companyId ? [':cid' => $companyId] : [];
+
         // Count
-        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM vendors WHERE company_id = :cid");
-        $countStmt->execute([':cid' => $companyId]);
+        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM vendors $where");
+        $countStmt->execute($binds);
         $total = (int)$countStmt->fetchColumn();
 
-        $stmt = $this->pdo->prepare("SELECT * FROM vendors WHERE company_id = :cid ORDER BY name ASC LIMIT :limit OFFSET :offset");
-        $stmt->bindValue(':cid', $companyId);
+        $stmt = $this->pdo->prepare("SELECT * FROM vendors $where ORDER BY name ASC LIMIT :limit OFFSET :offset");
+        foreach ($binds as $k => $v) $stmt->bindValue($k, $v);
         $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
         $stmt->execute();
@@ -138,11 +143,31 @@ class VendorController
         $stmt->execute([':id' => $id]);
         $vendor = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$vendor) { Response::error('Vendor not found', 404); return; }
+
+        $companyId = $this->getCompanyId();
+        if ($companyId && ($vendor['company_id'] ?? null) !== $companyId) {
+            Response::error('Vendor not found', 404);
+            return;
+        }
         Response::json($vendor);
+    }
+
+    private function assertVendorInCompany(string $id): void
+    {
+        $companyId = $this->getCompanyId();
+        if (!$companyId) return;
+        $stmt = $this->pdo->prepare("SELECT company_id FROM vendors WHERE id LIKE :id");
+        $stmt->execute([':id' => $id]);
+        $owner = $stmt->fetchColumn();
+        if ($owner !== false && $owner !== $companyId) {
+            Response::error('Vendor not found', 404);
+            exit;
+        }
     }
 
     private function update(string $id): void
     {
+        $this->assertVendorInCompany($id);
         $data = json_decode(file_get_contents('php://input'), true);
         if (!is_array($data)) { Response::error('Invalid JSON body', 400); return; }
         
@@ -177,6 +202,7 @@ class VendorController
 
     private function delete(string $id): void
     {
+        $this->assertVendorInCompany($id);
         $stmt = $this->pdo->prepare("DELETE FROM vendors WHERE id LIKE :id");
         $stmt->execute([':id' => $id]);
         Response::json(['message' => 'Vendor deleted']);

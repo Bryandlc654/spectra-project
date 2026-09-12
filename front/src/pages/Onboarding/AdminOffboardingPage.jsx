@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useToast } from '../../components/ToastProvider';
 
 export default function AdminOffboardingPage({ apiUrl, token }) {
-    const { toast } = useToast();
+    const toast = useToast();
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedUser, setSelectedUser] = useState(null); // For details modal

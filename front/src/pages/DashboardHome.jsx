@@ -56,7 +56,7 @@ export default function DashboardHome({ user, apiUrl, token }) {
         ] = await Promise.all([
           api.get('/api/tenants?per_page=1'),
           api.get('/api/users?status=active&per_page=1'),
-          api.get('/api/kyb_requests?status=pending&per_page=1').catch(() => ({ data: [], meta: { total: 0 } })),
+          api.get('/api/kyb?status=pending_review&limit=1').catch(() => ({ data: [], meta: { total: 0 } })),
           api.get('/api/freelancers?per_page=1').catch(() => ({ data: [], meta: { total: 0 } })),
           api.get('/api/global-contracts?per_page=1').catch(() => ({ data: [], meta: { total: 0 } })),
           api.get('/api/finance/invoices?per_page=1').catch(() => ({ data: [], meta: { total: 0 } })),

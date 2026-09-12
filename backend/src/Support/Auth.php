@@ -29,7 +29,7 @@ class Auth
             if (isset($claims['exp']) && time() >= (int)$claims['exp']) return;
             if (isset($claims['iss']) && $claims['iss'] !== ($jwtConfig['issuer'] ?? null)) return;
 
-            $stmt = $pdo->prepare('SELECT id, full_name, email, status, platform_role FROM users WHERE id LIKE :id LIMIT 1');
+            $stmt = $pdo->prepare('SELECT id, full_name, email, status, platform_role FROM users WHERE id = :id LIMIT 1');
             $stmt->execute([':id' => $claims['sub']]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -38,13 +38,15 @@ class Auth
             // Session check
             $tokenHash = hash('sha256', $token);
             try {
-                $stmt = $pdo->prepare("SELECT id, is_active FROM user_sessions WHERE token_hash LIKE :hash LIMIT 1");
+                $stmt = $pdo->prepare("SELECT id, last_activity, is_active FROM user_sessions WHERE token_hash = :hash LIMIT 1");
                 $stmt->execute([':hash' => $tokenHash]);
                 $session = $stmt->fetch(PDO::FETCH_ASSOC);
 
                 if ($session) {
                     if ($session['is_active'] == 0) return;
-                    $pdo->prepare("UPDATE user_sessions SET last_activity = NOW() WHERE id LIKE :id")->execute([':id' => $session['id']]);
+                    self::bumpActivity($pdo, $session);
+                } else {
+                    self::registerSession($pdo, $user['id'], $token);
                 }
             } catch (\Throwable $e) {}
 
@@ -102,7 +104,7 @@ class Auth
                 LEFT JOIN company_users cu ON cu.user_id = u.id AND cu.deleted_at IS NULL
                 LEFT JOIN companies c ON c.id = cu.company_id AND c.deleted_at IS NULL
                 LEFT JOIN company_settings cs ON cs.company_id = c.id
-                WHERE u.id LIKE :id 
+                WHERE u.id = :id 
                 LIMIT 1
             ');
             $stmt->execute([':id' => $claims['sub']]);
@@ -137,7 +139,7 @@ class Auth
             // For now, let's only block if we FIND a revoked session (is_active = 0).
             // If we don't find it, we assume it's a legacy token or session tracking failed but token is valid.
             try {
-                $stmt = $pdo->prepare("SELECT id, is_active FROM user_sessions WHERE token_hash = :hash LIMIT 1");
+                $stmt = $pdo->prepare("SELECT id, last_activity, is_active FROM user_sessions WHERE token_hash = :hash LIMIT 1");
                 $stmt->execute([':hash' => $tokenHash]);
                 $session = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -148,11 +150,11 @@ class Auth
                         exit;
                     }
                     
-                    // Update activity (optimistic, ignore errors)
-                    // Only update if > 5 min to reduce writes? For simplicity, update always for now.
-                    $pdo->exec("UPDATE user_sessions SET last_activity = NOW() WHERE id = '{$session['id']}'");
+                    // Update activity (optimistic, throttled to at most once every 5 minutes per session)
+                    self::bumpActivity($pdo, $session);
                 } else {
                     self::log('Auth warning: Session not found in DB (allowing access)');
+                    self::registerSession($pdo, $user['id'], $token);
                 }
             } catch (\Throwable $e) {
                 // Ignore DB errors (e.g. table missing) to not break auth
@@ -163,6 +165,9 @@ class Auth
 
             self::$user = $user;
             self::checkReadOnly();
+
+            // Gate central de módulos por rol (matriz de la plataforma)
+            ModuleAccess::guard($pdo);
         } catch (\Throwable $e) {
             self::log('Auth Exception: ' . $e->getMessage());
             Response::error('Error de autenticación', 401);
@@ -186,6 +191,47 @@ class Auth
                  exit;
              }
         }
+    }
+
+    private static function bumpActivity(PDO $pdo, array $session): void
+    {
+        try {
+            // Throttle: solo escribir como máximo una vez cada 5 minutos por sesión
+            $last = $session['last_activity'] ?? null;
+            if ($last !== null) {
+                $ts = strtotime((string)$last);
+                if ($ts !== false && time() - $ts < 300) return;
+            }
+            $pdo->prepare("UPDATE user_sessions SET last_activity = NOW() WHERE id = :id")
+                ->execute([':id' => $session['id']]);
+        } catch (\Throwable $e) {}
+    }
+
+    private static function registerSession(PDO $pdo, string $userId, string $token): void
+    {
+        try {
+            $stmt = $pdo->prepare("
+                INSERT INTO user_sessions (id, user_id, ip_address, user_agent, token_hash, last_activity)
+                VALUES (:id, :uid, :ip, :ua, :th, NOW())
+            ");
+            $stmt->execute([
+                ':id' => self::uuid4(),
+                ':uid' => $userId,
+                ':ip' => $_SERVER['REMOTE_ADDR'] ?? null,
+                ':ua' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                ':th' => hash('sha256', $token),
+            ]);
+        } catch (\Throwable $e) {
+            self::log('Auth warning: Failed to register session: ' . $e->getMessage());
+        }
+    }
+
+    private static function uuid4(): string
+    {
+        $data = random_bytes(16);
+        $data[6] = chr((ord($data[6]) & 0x0f) | 0x40);
+        $data[8] = chr((ord($data[8]) & 0x3f) | 0x80);
+        return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
     }
 
     private static function bearerToken(): ?string

@@ -14,7 +14,7 @@ class FreelancerController
     public function __construct(Database $database)
     {
         $this->pdo = $database->pdo();
-        $this->ensureTables();
+        if (\App\Support\Schema::needsMigration($this->pdo)) { $this->ensureTables(); }
     }
 
     private function ensureTables(): void
@@ -722,7 +722,11 @@ class FreelancerController
 
         $freelancerId = $_GET['freelancer_id'] ?? null;
         $status = $_GET['status'] ?? null;
+        $q = trim((string)($_GET['q'] ?? ''));
+        $rating = (int)($_GET['rating'] ?? 0);
+        $range = trim((string)($_GET['range'] ?? ''));
 
+        $joins = "JOIN users f ON r.freelancer_id = f.id JOIN users reviewer ON r.reviewer_id = reviewer.id";
         $where = "WHERE 1=1";
         $params = [];
 
@@ -736,14 +740,29 @@ class FreelancerController
             $params[':status'] = $status;
         }
 
-        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM freelancer_reviews r $where");
+        if ($q !== '') {
+            $where .= " AND (f.full_name LIKE :q1 OR reviewer.full_name LIKE :q2)";
+            $params[':q1'] = '%' . $q . '%';
+            $params[':q2'] = '%' . $q . '%';
+        }
+
+        if ($rating >= 1 && $rating <= 5) {
+            $where .= " AND r.rating = :rating";
+            $params[':rating'] = $rating;
+        }
+
+        if ($range === '7d' || $range === '30d') {
+            $days = $range === '7d' ? 7 : 30;
+            $where .= " AND r.created_at >= DATE_SUB(NOW(), INTERVAL $days DAY)";
+        }
+
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM freelancer_reviews r $joins $where");
         $stmt->execute($params);
         $total = $stmt->fetchColumn();
 
         $sql = "SELECT r.*, f.full_name as freelancer_name, reviewer.full_name as reviewer_name
                 FROM freelancer_reviews r
-                JOIN users f ON r.freelancer_id = f.id
-                JOIN users reviewer ON r.reviewer_id = reviewer.id
+                $joins
                 $where
                 ORDER BY r.created_at DESC
                 LIMIT $perPage OFFSET $offset";
@@ -1518,7 +1537,9 @@ class FreelancerController
                 c.*,
                 comp.legal_name as company_name,
                 e.envelope_id as docusign_envelope_id,
-                e.status as envelope_status
+                e.sign_token as docusign_sign_token,
+                e.status as envelope_status,
+                e.signed_at as signed_at
             FROM contracts c
             JOIN companies comp ON c.company_id = comp.id
             LEFT JOIN docusign_envelopes e ON c.id = e.contract_id

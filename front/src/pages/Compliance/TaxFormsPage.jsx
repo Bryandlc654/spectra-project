@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useToast } from '../../components/ToastProvider';
 
 export default function TaxFormsPage({ apiUrl, token }) {
-    const { toast } = useToast();
+    const toast = useToast();
     const [loading, setLoading] = useState(true);
     const [currentForm, setCurrentForm] = useState(null);
     const [view, setView] = useState('selector'); // selector, w9, w8ben
@@ -63,6 +63,21 @@ export default function TaxFormsPage({ apiUrl, token }) {
         }
     };
 
+    const handleDownload = async (form) => {
+        try {
+            const res = await fetch(`${apiUrl}/api/tax-forms/${form.id}/download`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (!res.ok) throw new Error('No se pudo descargar el formulario');
+            const html = await res.text();
+            const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+            window.open(url, '_blank', 'noopener');
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+        } catch (e) {
+            toast.error(e.message || 'Error al descargar el formulario');
+        }
+    };
+
     if (loading && !currentForm) return <div className="p-8 text-center">Cargando información fiscal...</div>;
 
     if (view === 'submitted' && currentForm) {
@@ -77,14 +92,13 @@ export default function TaxFormsPage({ apiUrl, token }) {
                         Has enviado tu formulario <span className="font-bold text-slate-900">{currentForm.type.toUpperCase()}</span> exitosamente el {new Date(currentForm.created_at).toLocaleDateString()}.
                     </p>
                     <div className="flex justify-center gap-4">
-                        <a 
-                            href={`${apiUrl}/api/tax-forms/${currentForm.id}/download`} 
-                            target="_blank"
+                        <button 
+                            onClick={() => handleDownload(currentForm)}
                             className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                         >
                             <i className="bi bi-file-earmark-pdf"></i>
                             Descargar PDF
-                        </a>
+                        </button>
                         <button 
                             onClick={() => setView('selector')}
                             className="px-4 py-2 text-slate-600 hover:text-slate-900 font-medium"

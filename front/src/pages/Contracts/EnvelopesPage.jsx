@@ -104,7 +104,7 @@ export default function EnvelopesPage({ apiUrl, token }) {
         setCreating(true);
         try {
             await api.post('/api/envelopes', { contract_id: selectedContractId });
-            toast.success('Sobre creado y enviado (simulado)');
+            toast.success('Contrato enviado para firma (Spectra Sign)');
             setIsCreateModalOpen(false);
             setSelectedCompanyId('');
             setSelectedContractId('');
@@ -144,6 +144,26 @@ export default function EnvelopesPage({ apiUrl, token }) {
         setIsVoidModalOpen(true);
     };
 
+    const signingLink = (envelope) => (
+        envelope.sign_token
+            ? `${window.location.origin}/sign/${envelope.sign_token}`
+            : envelope.signing_url
+    );
+
+    const handleCopyLink = async (envelope) => {
+        const link = signingLink(envelope);
+        if (!link) {
+            toast.error('Este sobre no tiene enlace de firma');
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(link);
+            toast.success('Enlace de firma copiado');
+        } catch {
+            window.prompt('Copia el enlace de firma:', link);
+        }
+    };
+
     const renderStatusBadge = (statusRaw) => {
         const status = String(statusRaw).toLowerCase();
         let cls = 'bg-slate-100 text-slate-700';
@@ -166,9 +186,9 @@ export default function EnvelopesPage({ apiUrl, token }) {
         <div className="space-y-5">
              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h3 className="text-lg font-bold text-slate-900">Sobres (Envelopes)</h3>
+                    <h3 className="text-lg font-bold text-slate-900">Sobres de Firma</h3>
                     <p className="text-xs text-slate-500">
-                        Gestión de firmas electrónicas y sobres de DocuSign.
+                        Firmas electrónicas con Spectra Sign (sin DocuSign).
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -245,6 +265,33 @@ export default function EnvelopesPage({ apiUrl, token }) {
                                     </td>
                                     <td className="px-4 py-3 text-right">
                                         <div className="flex justify-end gap-2">
+                                            {e.signing_url && (e.status === 'sent' || e.status === 'delivered') && (
+                                                <button
+                                                    onClick={() => window.open(signingLink(e), '_blank', 'noopener')}
+                                                    className="text-emerald-600 hover:text-emerald-800 text-xs font-semibold"
+                                                    title="Abrir portal de firma"
+                                                >
+                                                    Firmar
+                                                </button>
+                                            )}
+                                            {e.sign_token && e.status !== 'voided' && (
+                                                <button
+                                                    onClick={() => handleCopyLink(e)}
+                                                    className="text-slate-600 hover:text-slate-900 text-xs font-semibold"
+                                                    title="Copiar enlace de firma"
+                                                >
+                                                    Copiar
+                                                </button>
+                                            )}
+                                            {e.pdf_url && (
+                                                <button
+                                                    onClick={() => window.open(e.pdf_url, '_blank', 'noopener')}
+                                                    className="text-brand hover:text-brand-600 text-xs font-semibold"
+                                                    title="Descargar PDF firmado"
+                                                >
+                                                    PDF
+                                                </button>
+                                            )}
                                             <button 
                                                 onClick={() => handleSync(e.id)}
                                                 className="text-brand hover:text-brand-600 text-xs font-semibold"
@@ -293,7 +340,7 @@ export default function EnvelopesPage({ apiUrl, token }) {
             {isCreateModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
                     <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-                        <h3 className="mb-4 text-lg font-bold text-slate-900">Nuevo Sobre DocuSign</h3>
+                        <h3 className="mb-4 text-lg font-bold text-slate-900">Nuevo Sobre de Firma</h3>
                         <form onSubmit={handleCreate} className="space-y-4">
                             <div>
                                 <label className="block text-xs font-medium text-slate-700">Empresa (Tenant)</label>

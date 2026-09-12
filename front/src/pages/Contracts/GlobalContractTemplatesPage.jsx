@@ -1,5 +1,24 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useToast } from '../../components/ToastProvider';
+import RichTextEditor from '../../components/RichTextEditor';
+
+const TEMPLATE_VARIABLES = [
+    { token: '{{company_name}}', label: 'Empresa' },
+    { token: '{{company_tax_id}}', label: 'RUC / Tax ID' },
+    { token: '{{company_address}}', label: 'Dirección empresa' },
+    { token: '{{representative_name}}', label: 'Representante' },
+    { token: '{{employee_name}}', label: 'Nombre trabajador' },
+    { token: '{{employee_id_number}}', label: 'DNI trabajador' },
+    { token: '{{employee_nationality}}', label: 'Nacionalidad' },
+    { token: '{{employee_address}}', label: 'Dirección trabajador' },
+    { token: '{{position}}', label: 'Cargo' },
+    { token: '{{functions}}', label: 'Funciones' },
+    { token: '{{work_modality}}', label: 'Modalidad' },
+    { token: '{{start_date}}', label: 'Fecha inicio' },
+    { token: '{{salary}}', label: 'Salario' },
+    { token: '{{currency}}', label: 'Moneda' },
+    { token: '{{notice_period}}', label: 'Preaviso (días)' }
+];
 
 export default function GlobalContractTemplatesPage({ apiUrl, token }) {
     // Basic API wrapper since we might not have the full `api` object passed as prop like in Tenant tabs
@@ -42,6 +61,13 @@ export default function GlobalContractTemplatesPage({ apiUrl, token }) {
 
     const [statusFilter, setStatusFilter] = useState('');
     const [search, setSearch] = useState('');
+    const [debouncedSearch, setDebouncedSearch] = useState('');
+
+    // Debounce search to avoid hitting the API on every keystroke
+    useEffect(() => {
+        const timer = setTimeout(() => setDebouncedSearch(search), 400);
+        return () => clearTimeout(timer);
+    }, [search]);
 
     // Modal state
     const [showModal, setShowModal] = useState(false);
@@ -70,7 +96,7 @@ export default function GlobalContractTemplatesPage({ apiUrl, token }) {
 
     useEffect(() => {
         load();
-    }, [api, page, statusFilter, search]);
+    }, [api, page, statusFilter, debouncedSearch]);
 
     async function load() {
         setLoading(true);
@@ -79,7 +105,7 @@ export default function GlobalContractTemplatesPage({ apiUrl, token }) {
             const params = new URLSearchParams();
             params.set('page', String(page));
             if (statusFilter) params.set('status', statusFilter);
-            if (search) params.set('q', search.trim());
+            if (debouncedSearch) params.set('q', debouncedSearch.trim());
 
             const res = await api.get(`/api/global-contract-templates?${params.toString()}`);
             let items = [];
@@ -92,7 +118,7 @@ export default function GlobalContractTemplatesPage({ apiUrl, token }) {
                 pages = res.pages || res.meta?.total_pages || 1;
             } else if (Array.isArray(res.data)) {
                 items = res.data;
-                pages = res.meta?.total_pages || res.pages || 1;
+                pages = res.meta?.total_pages || res.meta?.last_page || res.pages || 1;
             }
 
             setTemplates(items);
@@ -180,6 +206,11 @@ export default function GlobalContractTemplatesPage({ apiUrl, token }) {
 
     const handleSave = async (e) => {
         e.preventDefault();
+        const body = (formData.body || '').replace(/<[^>]*>/g, '').trim();
+        if (!body) {
+            toast.error('Escribe el contenido de la plantilla');
+            return;
+        }
         setSaving(true);
         try {
             if (editingItem) {
@@ -248,7 +279,7 @@ export default function GlobalContractTemplatesPage({ apiUrl, token }) {
                     <button
                         type="button"
                         onClick={async () => {
-                            if (!window.confirm('Esto convertirá todas las plantillas existentes a texto plano. ¿Continuar?')) return;
+                            if (!window.confirm('Esto limpiará el HTML de todas las plantillas conservando el formato (negritas, listas, párrafos). ¿Continuar?')) return;
                             try {
                                 const res = await fetch(`${apiUrl}/api/global-contract-templates/sanitize`, {
                                     method: 'POST',
@@ -264,10 +295,10 @@ export default function GlobalContractTemplatesPage({ apiUrl, token }) {
                             }
                         }}
                         className="inline-flex items-center gap-1 rounded-xl border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
-                        title="Quitar HTML de todas las plantillas"
+                        title="Eliminar HTML no permitido de todas las plantillas"
                     >
                         <i className="bi bi-broom" />
-                        Quitar HTML
+                        Limpiar HTML
                     </button>
 
                     <button
@@ -454,21 +485,24 @@ export default function GlobalContractTemplatesPage({ apiUrl, token }) {
                                 </div>
                             </div>
                             <div>
-                                <label className="mb-1 block text-xs font-semibold text-slate-700">Contenido (texto plano)</label>
-                                <textarea
-                                    required
-                                    rows={10}
-                                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono text-xs"
+                                <div className="mb-1 flex items-center justify-between">
+                                    <label className="text-xs font-semibold text-slate-700">Contenido del contrato</label>
+                                    <span className="text-[11px] text-slate-400">Editor de texto enriquecido</span>
+                                </div>
+                                <RichTextEditor
                                     value={formData.body}
-                                    onChange={e => setFormData({ ...formData, body: e.target.value })}
+                                    onChange={(html) => setFormData({ ...formData, body: html })}
+                                    variables={TEMPLATE_VARIABLES}
+                                    placeholder="Escribe el contenido del contrato... Usa la barra de herramientas para formato: negritas, títulos, listas, citas y variables."
                                 />
                                 <div className="mt-1 text-[11px] text-slate-500">
-                                    Usa solo texto plano. Variables permitidas:{" "}
-                                    <span className="font-mono">{'{{company_name}}'}</span>,{" "}
+                                    Puedes insertar variables del contrato con el selector{" "}
+                                    <span className="font-semibold text-slate-600">"Insertar variable"</span>, o escribir
+                                    tokens como <span className="font-mono">{'{{company_name}}'}</span>,{" "}
                                     <span className="font-mono">{'{{employee_name}}'}</span>,{" "}
                                     <span className="font-mono">{'{{start_date}}'}</span>,{" "}
-                                    <span className="font-mono">{'{{salary}}'}</span>,{" "}
-                                    <span className="font-mono">{'{{currency}}'}</span>, etc.
+                                    <span className="font-mono">{'{{salary}}'}</span>. Se reemplazan automáticamente al generar el
+                                    contrato o el PDF.
                                 </div>
                             </div>
                             <div className="flex justify-end gap-3 pt-2">

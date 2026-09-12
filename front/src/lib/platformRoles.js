@@ -232,7 +232,7 @@ export function hasAccess(role, section, tenantRoles = []) {
       return [PLATFORM_ROLES.LEGAL, PLATFORM_ROLES.SECURITY].includes(role);
 
     case 'offboarding_admin':
-      return false;
+      return [PLATFORM_ROLES.LEGAL].includes(role);
 
     case 'time_off':
       return [PLATFORM_ROLES.FINANCE, PLATFORM_ROLES.COMPANY_ADMIN].includes(role);
@@ -244,6 +244,9 @@ export function hasAccess(role, section, tenantRoles = []) {
         return [PLATFORM_ROLES.LEGAL, PLATFORM_ROLES.COMPANY_ADMIN].includes(role);
 
       case 'onboarding':
+      return [PLATFORM_ROLES.LEGAL].includes(role);
+
+    case 'onboarding_admin':
       return [PLATFORM_ROLES.LEGAL].includes(role);
 
     case 'offboarding':

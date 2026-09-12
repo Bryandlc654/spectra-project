@@ -71,7 +71,7 @@ class BankAccountController
 
     public function handle(array $segments, string $method): void
     {
-        $this->ensureTables();
+        if (\App\Support\Schema::needsMigration($this->pdo)) { $this->ensureTables(); }
 
         // /api/bank-accounts
         $id = $segments[2] ?? null;

@@ -15,7 +15,7 @@ class PayrollController
     public function __construct(Database $database)
     {
         $this->pdo = $database->pdo();
-        $this->ensureTables();
+        if (\App\Support\Schema::needsMigration($this->pdo)) { $this->ensureTables(); }
         $this->ensureIndexes();
     }
 

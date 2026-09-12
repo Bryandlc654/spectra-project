@@ -5,20 +5,33 @@ error_reporting(E_ALL);
 
 require __DIR__ . '/../vendor/autoload.php';
 
+// Cargar .env
+try {
+    $dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/../');
+    $dotenv->safeLoad();
+} catch (Throwable $e) {
+}
+
+if (empty($_ENV['SMTP_HOST']) || empty($_ENV['SMTP_PASS'])) {
+    http_response_code(500);
+    echo "Configuración SMTP incompleta en .env (SMTP_HOST y SMTP_PASS son obligatorios).";
+    exit;
+}
+
 // Load config to get DB credentials
 $config = require __DIR__ . '/../config/config.php';
 $db = new \App\Database($config['db']);
 $pdo = $db->pdo();
 
-// New settings to apply (Matched with .env)
+// Settings leídas desde .env (sin credenciales en código)
 $newSettings = [
-    'smtp_host' => 'mail.spectralatam.com',
-    'smtp_port' => '465',
-    'smtp_user' => 'info@spectralatam.com',
-    'smtp_pass' => 'tdm8sn8HwWnV',
-    'smtp_encryption' => 'ssl',
-    'smtp_from_email' => 'info@spectralatam.com',
-    'smtp_from_name' => 'Spectra ERP'
+    'smtp_host' => $_ENV['SMTP_HOST'],
+    'smtp_port' => $_ENV['SMTP_PORT'] ?? '465',
+    'smtp_user' => $_ENV['SMTP_USER'] ?? '',
+    'smtp_pass' => $_ENV['SMTP_PASS'],
+    'smtp_encryption' => $_ENV['SMTP_ENCRYPTION'] ?? 'ssl',
+    'smtp_from_email' => $_ENV['SMTP_FROM_EMAIL'] ?? ($_ENV['SMTP_USER'] ?? ''),
+    'smtp_from_name' => $_ENV['SMTP_FROM_NAME'] ?? 'Spectra ERP'
 ];
 
 echo "<h1>Actualización de Configuración SMTP en Base de Datos</h1>";

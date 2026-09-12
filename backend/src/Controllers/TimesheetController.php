@@ -15,6 +15,7 @@ class TimesheetController
     public function __construct(Database $database)
     {
         $this->pdo = $database->pdo();
+        if (\App\Support\Schema::needsMigration($this->pdo)) { $this->ensureTables(); }
     }
 
     private function getCompanyId(): ?string
@@ -32,8 +33,6 @@ class TimesheetController
 
     public function handle(array $segments, string $method): void
     {
-        $this->ensureTables();
-        
         // Lazy migration for rejection_reason
         try {
             $this->pdo->exec("ALTER TABLE timesheets ADD COLUMN rejection_reason TEXT AFTER notes");

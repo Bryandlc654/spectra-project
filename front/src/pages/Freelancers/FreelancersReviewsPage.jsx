@@ -100,7 +100,7 @@ export default function FreelancersReviewsPage({ apiUrl, token }) {
               className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-brand/20 focus:border-brand transition-all"
               placeholder="Buscar freelancer..."
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={e => { setSearch(e.target.value); setPage(1); }}
             />
           </div>
           
@@ -194,6 +194,7 @@ export default function FreelancersReviewsPage({ apiUrl, token }) {
                           setRatingFilter('');
                           setStatusFilter('all');
                           setRange('all');
+                          setPage(1);
                         }}
                         className="mt-4 text-brand font-medium hover:underline"
                       >

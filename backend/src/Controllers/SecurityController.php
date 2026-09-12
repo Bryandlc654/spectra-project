@@ -14,7 +14,7 @@ class SecurityController
     public function __construct(Database $database)
     {
         $this->pdo = $database->pdo();
-        $this->ensureTables();
+        if (\App\Support\Schema::needsMigration($this->pdo)) { $this->ensureTables(); }
     }
 
     private function ensureTables(): void
@@ -67,7 +67,7 @@ class SecurityController
                 return;
             }
 
-            if ($method === 'GET') {
+            if ($method === 'GET' && $id === null) {
                 $this->listSessions();
                 return;
             }
@@ -83,7 +83,7 @@ class SecurityController
         // Users see their own.
         
         $role = $user['platform_role'] ?? '';
-        $canViewAll = in_array($role, ['super_admin', 'admin', 'security', 'support']);
+        $canViewAll = in_array($role, ['super_admin', 'admin', 'security']);
 
         $page = (int)($_GET['page'] ?? 1);
         $perPage = (int)($_GET['per_page'] ?? 20);

@@ -2,6 +2,29 @@
   background-color: #006d71;
 }
 
-.bg-brand {
-  background-color: #006d71;
+/* Documento de contrato en el portal de firma (Spectra Sign) */
+.contract-doc {
+  color: #1e293b;
+  font-size: 14px;
+  line-height: 1.7;
 }
+.contract-doc p { margin: 0 0 10px; }
+.contract-doc h1 { font-size: 22px; font-weight: 700; margin: 18px 0 10px; }
+.contract-doc h2 { font-size: 18px; font-weight: 700; margin: 16px 0 8px; }
+.contract-doc h3 { font-size: 16px; font-weight: 700; margin: 14px 0 6px; }
+.contract-doc h4 { font-size: 14px; font-weight: 700; margin: 12px 0 6px; }
+.contract-doc ul { list-style: disc; margin: 0 0 10px 22px; padding: 0; }
+.contract-doc ol { list-style: decimal; margin: 0 0 10px 22px; padding: 0; }
+.contract-doc li { margin-bottom: 4px; }
+.contract-doc blockquote {
+  margin: 10px 0;
+  padding: 6px 14px;
+  border-left: 3px solid #cbd5e1;
+  color: #475569;
+  font-style: italic;
+}
+.contract-doc hr { border: none; border-top: 1px solid #cbd5e1; margin: 14px 0; }
+.contract-doc strong, .contract-doc b { font-weight: 700; }
+.contract-doc em, .contract-doc i { font-style: italic; }
+.contract-doc u { text-decoration: underline; }
+.contract-doc s, .contract-doc strike { text-decoration: line-through; }

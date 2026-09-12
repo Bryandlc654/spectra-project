@@ -13,6 +13,7 @@ export default function ReconciliationPage({ apiUrl, token }) {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [perPage] = useState(20);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState(''); // ''=all, '1'=reconciled, '0'=pending
@@ -82,7 +83,7 @@ export default function ReconciliationPage({ apiUrl, token }) {
     return () => {
       cancelled = true;
     };
-  }, [apiUrl, token, page, search, statusFilter, companyId, perPage]);
+  }, [apiUrl, token, page, search, statusFilter, companyId, perPage, refreshKey]);
 
   // Load aux data for create modal
   useEffect(() => {
@@ -93,8 +94,8 @@ export default function ReconciliationPage({ apiUrl, token }) {
             .catch(() => {});
           
           // Fetch currencies
-          apiFetch(apiUrl, '/api/currencies', { token }) // Assuming this endpoint exists
-            .then(res => setCurrencies(res || []))
+          apiFetch(apiUrl, '/api/currencies', { token })
+            .then(res => setCurrencies(res?.data || (Array.isArray(res) ? res : [])))
             .catch(() => {});
       }
   }, [createModalOpen, apiUrl, token, companies.length]);
@@ -102,30 +103,8 @@ export default function ReconciliationPage({ apiUrl, token }) {
 
   const handleReload = () => {
     setPage(1);
-    // Force re-fetch by toggling a key or just relying on page=1 reset which triggers effect
-    // To be sure, we can just clear transactions to show loading state
-    setTransactions([]);
-    setLoading(true); 
-    // Effect will run because state changes or we can extract load function.
-    // Actually, setting transactions to [] won't trigger effect.
-    // But setting page to 1 does. If page is already 1, we need another trigger.
-    // Let's just implement a simple refresh trigger if needed, but usually search/filter change is enough.
-    // For now, I'll just re-trigger the effect by modifying a dummy state or just calling load if I extracted it.
-    // Simplest: just set loading true, and the effect dependency array needs to include a 'refresh' counter.
-    // But I'll leave it as setPage(1) for now, which covers most cases.
-    // If page is 1, setPage(1) does nothing. 
-    // Let's add a refreshKey
     setRefreshKey(k => k + 1);
   };
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  // Add refreshKey to useEffect dependency
-  useEffect(() => {
-     // This is the same load logic, just duplicated for now or I should have defined it outside.
-     // To avoid duplication, I will rely on the previous useEffect.
-     // I need to add refreshKey to the dependency array of the main useEffect.
-  }, [refreshKey]);
-
 
   const handleToggleReconciliation = async (tx) => {
       try {
@@ -152,9 +131,9 @@ export default function ReconciliationPage({ apiUrl, token }) {
       e.preventDefault();
       setCreating(true);
       try {
-          await apiFetch(apiUrl, '/api/finance/reconciliation', {
+          await apiFetch(apiUrl, '/api/finance/reconciliation/adjustment', {
               method: 'POST',
-              body: JSON.stringify(newAdjustment),
+              body: newAdjustment,
               token
           });
           toast.success('Ajuste creado correctamente');

@@ -14,8 +14,11 @@ class FiscalParameterController
     public function __construct(PDO $pdo)
     {
         $this->pdo = $pdo;
-        $this->ensureTable();
-        $this->ensureColumns();
+        if (\App\Support\Cache::get('fiscal_params_schema_v1') === null) {
+            $this->ensureTable();
+            $this->ensureColumns();
+            \App\Support\Cache::set('fiscal_params_schema_v1', time(), 86400 * 365);
+        }
     }
 
     private function ensureTable(): void
@@ -23,12 +26,14 @@ class FiscalParameterController
         $this->pdo->exec("
             CREATE TABLE IF NOT EXISTS fiscal_parameters (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                country_id INT UNSIGNED NOT NULL,
+                country_id INT NOT NULL,
                 name VARCHAR(100) NOT NULL,
                 code VARCHAR(50) NOT NULL,
                 percentage DECIMAL(10, 4) DEFAULT 0,
                 is_active BOOLEAN DEFAULT TRUE,
                 description TEXT NULL,
+                valid_from DATE NULL,
+                valid_to DATE NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 FOREIGN KEY (country_id) REFERENCES countries(id) ON DELETE CASCADE
@@ -42,7 +47,9 @@ class FiscalParameterController
             "ADD COLUMN type VARCHAR(50) NOT NULL DEFAULT 'tax' AFTER code",
             "ADD COLUMN calculation_base VARCHAR(50) NOT NULL DEFAULT 'gross_fees' AFTER percentage",
             "ADD COLUMN payslip_trigger VARCHAR(50) DEFAULT 'on_payment' AFTER calculation_base",
-            "ADD COLUMN applies_to VARCHAR(20) NOT NULL DEFAULT 'any' AFTER payslip_trigger"
+            "ADD COLUMN applies_to VARCHAR(20) NOT NULL DEFAULT 'any' AFTER payslip_trigger",
+            "ADD COLUMN valid_from DATE NULL",
+            "ADD COLUMN valid_to DATE NULL"
         ];
 
         foreach ($columns as $sql) {
@@ -200,7 +207,7 @@ class FiscalParameterController
 
     private function store(int $countryId): void
     {
-        $data = json_decode(file_get_contents('php://input'), true);
+        $data = json_decode(file_get_contents('php://input'), true) ?? [];
         
         $name = trim((string)($data['name'] ?? ''));
         $code = strtoupper(trim((string)($data['code'] ?? '')));
@@ -212,6 +219,8 @@ class FiscalParameterController
         $calculationBase = trim((string)($data['calculation_base'] ?? 'gross_fees'));
         $payslipTrigger = trim((string)($data['payslip_trigger'] ?? 'on_payment'));
         $appliesTo = trim((string)($data['applies_to'] ?? 'any'));
+        $validFrom = !empty($data['valid_from']) ? $data['valid_from'] : null;
+        $validTo = !empty($data['valid_to']) ? $data['valid_to'] : null;
 
         if (!$name || !$code) {
             Response::error('Nombre y Código son requeridos', 422);
@@ -229,8 +238,8 @@ class FiscalParameterController
         }
 
         $stmt = $this->pdo->prepare("
-            INSERT INTO fiscal_parameters (country_id, name, code, percentage, description, type, calculation_base, payslip_trigger, applies_to)
-            VALUES (:country_id, :name, :code, :percentage, :description, :type, :calculation_base, :payslip_trigger, :applies_to)
+            INSERT INTO fiscal_parameters (country_id, name, code, percentage, description, type, calculation_base, payslip_trigger, applies_to, valid_from, valid_to)
+            VALUES (:country_id, :name, :code, :percentage, :description, :type, :calculation_base, :payslip_trigger, :applies_to, :valid_from, :valid_to)
         ");
         
         try {
@@ -243,7 +252,9 @@ class FiscalParameterController
                 ':type' => $type,
                 ':calculation_base' => $calculationBase,
                 ':payslip_trigger' => $payslipTrigger,
-                ':applies_to' => $appliesTo
+                ':applies_to' => $appliesTo,
+                ':valid_from' => $validFrom,
+                ':valid_to' => $validTo
             ]);
             Response::json(['message' => 'Parámetro creado', 'id' => $this->pdo->lastInsertId()], 201);
         } catch (Throwable $e) {
@@ -253,7 +264,7 @@ class FiscalParameterController
 
     private function update(int $id): void
     {
-        $data = json_decode(file_get_contents('php://input'), true);
+        $data = json_decode(file_get_contents('php://input'), true) ?? [];
         
         $sets = [];
         $params = [':id' => $id];
@@ -269,6 +280,8 @@ class FiscalParameterController
         if (array_key_exists('calculation_base', $data)) { $sets[] = "calculation_base = :calculation_base"; $params[':calculation_base'] = trim((string)$data['calculation_base']); }
         if (array_key_exists('payslip_trigger', $data)) { $sets[] = "payslip_trigger = :payslip_trigger"; $params[':payslip_trigger'] = trim((string)$data['payslip_trigger']); }
         if (array_key_exists('applies_to', $data)) { $sets[] = "applies_to = :applies_to"; $params[':applies_to'] = trim((string)$data['applies_to']); }
+        if (array_key_exists('valid_from', $data)) { $sets[] = "valid_from = :valid_from"; $params[':valid_from'] = !empty($data['valid_from']) ? $data['valid_from'] : null; }
+        if (array_key_exists('valid_to', $data)) { $sets[] = "valid_to = :valid_to"; $params[':valid_to'] = !empty($data['valid_to']) ? $data['valid_to'] : null; }
 
         if (empty($sets)) {
             Response::json(['message' => 'Nada que actualizar']);

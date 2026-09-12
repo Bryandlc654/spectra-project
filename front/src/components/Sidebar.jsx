@@ -276,6 +276,7 @@ export default function Sidebar({ user, onLogout, open = true, onClose, collapse
             <NavGroup icon="bi-briefcase" label="Freelancers" basePath="/dashboard/freelancers" collapsed={collapsed}>
               <NavItem to="/dashboard/freelancers" label="Directorio" end collapsed={collapsed} />
               <NavItem to="/dashboard/onboarding/admin" label="Progreso Onboarding" collapsed={collapsed} />
+              <NavItem to="/dashboard/offboarding/admin" label="Progreso Offboarding" collapsed={collapsed} />
               <NavItem to="/dashboard/freelancers/reviews" label="Revisiones y bloqueos" collapsed={collapsed} />
             </NavGroup>
           )}
@@ -284,7 +285,7 @@ export default function Sidebar({ user, onLogout, open = true, onClose, collapse
             <NavGroup icon="bi-file-earmark-text" label="Contratos" basePath="/dashboard/contracts" collapsed={collapsed}>
               <NavItem to="/dashboard/contracts/templates" label="Plantillas (globales)" collapsed={collapsed} />
               <NavItem to="/dashboard/contracts" label="Contratos (visor global)" end collapsed={collapsed} />
-              <NavItem to="/dashboard/contracts/envelopes" label="DocuSign / Envelopes" collapsed={collapsed} />
+              <NavItem to="/dashboard/contracts/envelopes" label="Firmas / Sobres" collapsed={collapsed} />
             </NavGroup>
           )}
 

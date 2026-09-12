@@ -48,9 +48,20 @@ class KybController
         // /api/kyb/{id}
         // /api/kyb/{id}/approve
         // /api/kyb/{id}/reject
+        // /api/kyb/{id}/reopen
+        // /api/kyb/{id}/documents/{attId}/download
 
         $id = $segments[2] ?? null;
         $action = $segments[3] ?? null;
+        $subId = $segments[4] ?? null;
+        $subAction = $segments[5] ?? null;
+
+        if (!$this->requireKybManager()) return;
+
+        if ($id && $action === 'documents' && $subId && $subAction === 'download' && $method === 'GET') {
+            $this->downloadDocument($id, $subId);
+            return;
+        }
 
         if ($id && $action === 'approve' && $method === 'POST') {
             $this->approve($id);
@@ -59,6 +70,11 @@ class KybController
 
         if ($id && $action === 'reject' && $method === 'POST') {
             $this->reject($id);
+            return;
+        }
+
+        if ($id && $action === 'reopen' && $method === 'POST') {
+            $this->reopen($id);
             return;
         }
 
@@ -81,10 +97,20 @@ class KybController
         Response::error('Ruta no encontrada', 404);
     }
 
+    private function requireKybManager(): bool
+    {
+        $user = Auth::user();
+        if (!in_array($user['platform_role'] ?? '', ['super_admin', 'admin', 'legal', 'security'], true)) {
+            Response::error('Acceso denegado', 403);
+            return false;
+        }
+        return true;
+    }
+
     private function index()
     {
         $status = $_GET['status'] ?? null;
-        $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
+        $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
         $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 20;
         $limit = max(1, min(100, $limit));
         $offset = ($page - 1) * $limit;
@@ -93,7 +119,7 @@ class KybController
         $params = [];
         
         if ($status) {
-            $baseSql .= " AND k.status LIKE :status";
+            $baseSql .= " AND k.status = :status";
             $params[':status'] = $status;
         }
 
@@ -145,7 +171,7 @@ class KybController
             FROM kyb_requests k
             JOIN companies c ON k.company_id = c.id
             LEFT JOIN users u ON k.reviewed_by_user_id = u.id
-            WHERE k.id LIKE :id
+            WHERE k.id = :id
             LIMIT 1
         ");
         $stmt->execute([':id' => $id]);
@@ -156,8 +182,35 @@ class KybController
             return;
         }
 
-        $item['documents'] = json_decode($item['documents'] ?? '[]', true);
+        $documents = [];
+
+        $stmt = $this->pdo->prepare("
+            SELECT a.*
+            FROM attachment_links al
+            JOIN attachments a ON a.id = al.attachment_id
+            WHERE al.object_type = 'kyb_request' AND al.object_id = :kid
+            ORDER BY a.created_at DESC
+        ");
+        $stmt->execute([':kid' => $item['id']]);
+        $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach (json_decode($item['documents'] ?? '[]', true) as $doc) {
+            $documents[] = is_string($doc) ? ['url' => $doc] : $doc;
+        }
+
+        $item['documents'] = $documents;
+        $this->hydrateReviewDates($item);
         Response::json(['data' => $item]);
+    }
+
+    private function hydrateReviewDates(array &$item): void
+    {
+        if ($item['status'] === 'approved') {
+            $item['approved_at'] = $item['reviewed_at'] ?? null;
+        }
+        if ($item['status'] === 'rejected') {
+            $item['rejected_at'] = $item['reviewed_at'] ?? null;
+        }
     }
 
     private function store()
@@ -172,7 +225,7 @@ class KybController
         }
 
         // Check if pending exists
-        $stmt = $this->pdo->prepare("SELECT id FROM kyb_requests WHERE company_id LIKE ? AND (status = 'pending' OR status = 'pending_review')");
+        $stmt = $this->pdo->prepare("SELECT id FROM kyb_requests WHERE company_id = ? AND (status = 'pending' OR status = 'pending_review')");
         $stmt->execute([$companyId]);
         if ($stmt->fetch()) {
             Response::error('Ya existe una solicitud pendiente para esta empresa', 409);
@@ -195,7 +248,7 @@ class KybController
 
     private function approve(string $id)
     {
-        $stmt = $this->pdo->prepare("SELECT * FROM kyb_requests WHERE id LIKE :id LIMIT 1");
+        $stmt = $this->pdo->prepare("SELECT * FROM kyb_requests WHERE id = :id LIMIT 1");
         $stmt->execute([':id' => $id]);
         $req = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -258,13 +311,89 @@ class KybController
                 rejection_reason = :reason,
                 reviewed_by_user_id = :uid, 
                 reviewed_at = NOW() 
-            WHERE id LIKE :id
+            WHERE id = :id
         ");
         $stmt->execute([':reason' => $reason, ':uid' => $userId, ':id' => $id]);
 
         $this->audit->log('kyb.rejected', 'company', $req['company_id'], ['kyb_id' => $id, 'reason' => $reason]);
 
         Response::json(['message' => 'Solicitud Rechazada']);
+    }
+
+    private function reopen(string $id)
+    {
+        $stmt = $this->pdo->prepare("SELECT * FROM kyb_requests WHERE id = :id LIMIT 1");
+        $stmt->execute([':id' => $id]);
+        $req = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$req) {
+            Response::error('Solicitud no encontrada', 404);
+            return;
+        }
+
+        if (!in_array($req['status'], ['rejected', 'more_info_required'], true)) {
+            Response::error('Solo se puede reabrir una solicitud rechazada o pendiente de más información', 400);
+            return;
+        }
+
+        $stmt = $this->pdo->prepare("
+            UPDATE kyb_requests 
+            SET status = 'pending_review',
+                rejection_reason = NULL,
+                reviewed_by_user_id = NULL,
+                reviewed_at = NULL
+            WHERE id = :id
+        ");
+        $stmt->execute([':id' => $id]);
+
+        $this->audit->log('kyb.reopened', 'company', $req['company_id'], ['kyb_id' => $id]);
+
+        Response::json(['message' => 'Solicitud reabierta para revisión']);
+    }
+
+    private function downloadDocument(string $kybId, string $attachmentId)
+    {
+        $stmt = $this->pdo->prepare("SELECT company_id FROM kyb_requests WHERE id = :id LIMIT 1");
+        $stmt->execute([':id' => $kybId]);
+        $kyb = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$kyb) {
+            Response::error('Solicitud KYB no encontrada', 404);
+            return;
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT a.*
+            FROM attachment_links al
+            JOIN attachments a ON a.id = al.attachment_id
+            WHERE al.object_type = 'kyb_request' AND al.object_id = :kid AND a.id = :aid
+            LIMIT 1
+        ");
+        $stmt->execute([':kid' => $kybId, ':aid' => $attachmentId]);
+        $att = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$att) {
+            Response::error('Documento no encontrado', 404);
+            return;
+        }
+
+        $filePath = __DIR__ . '/../../storage/' . ltrim((string)$att['object_key'], '/');
+        $realRoot = realpath(__DIR__ . '/../../storage/');
+        $realFile = realpath($filePath);
+
+        if ($realFile === false || $realRoot === false || strpos($realFile, $realRoot) !== 0 || !is_file($realFile)) {
+            Response::error('Archivo no encontrado', 404);
+            return;
+        }
+
+        $filename = basename((string)$att['file_name']);
+
+        header('Content-Type: ' . ($att['mime_type'] ?: 'application/octet-stream'));
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Content-Length: ' . (int)$att['size_bytes']);
+        header('X-Content-Type-Options: nosniff');
+        readfile($realFile);
+        exit;
     }
 
     private function uuid(): string

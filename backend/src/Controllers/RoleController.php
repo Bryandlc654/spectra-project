@@ -5,7 +5,7 @@ namespace App\Controllers;
 use App\Database;
 use App\Support\Response;
 use PDO;
-use App\Auth\Auth; // Assuming Auth class is in src/Auth/Auth.php or similar, check index.php
+use App\Support\Auth;
 
 class RoleController
 {
@@ -133,7 +133,7 @@ class RoleController
     public function __construct(Database $database)
     {
         $this->pdo = $database->pdo();
-        $this->ensureTables();
+        if (\App\Support\Schema::needsMigration($this->pdo)) { $this->ensureTables(); }
         $this->seedPermissions();
     }
 
@@ -269,6 +269,7 @@ class RoleController
         
         // /api/roles/system/permissions
         if ($resource === 'roles' && ($segments[2] ?? '') === 'system' && ($segments[3] ?? '') === 'permissions') {
+             if (!$this->requireRbacManager()) return;
              // ensureTables called in constructor now
              if ($method === 'GET') {
                  $this->getSystemPermissions();
@@ -280,6 +281,7 @@ class RoleController
 
         // /api/roles/system/stats
         if ($resource === 'roles' && ($segments[2] ?? '') === 'system' && ($segments[3] ?? '') === 'stats') {
+             if (!$this->requireRbacManager()) return;
              if ($method === 'GET') {
                  $this->getSystemRoleStats();
                  return;
@@ -288,6 +290,7 @@ class RoleController
         
         // /api/permissions
         if ($resource === 'permissions') {
+            if (!$this->requireRbacManager()) return;
             if ($method === 'GET') {
                 $this->listPermissions();
             } else {
@@ -299,6 +302,7 @@ class RoleController
         // /api/roles/templates
         if ($resource === 'roles') {
              if (isset($segments[2]) && $segments[2] === 'templates') {
+                 if (!$this->requireRbacManager()) return;
                  $this->listTemplates();
                  return;
              }
@@ -307,14 +311,16 @@ class RoleController
         // /api/companies/{id}/roles
         if ($resource === 'companies' && isset($segments[3]) && $segments[3] === 'roles') {
              $companyId = $segments[2];
-             
+
              // GET /api/companies/{id}/roles
              if (!isset($segments[4])) {
                  if ($method === 'GET') {
+                     if (!$this->requireCompanyRolesAccess($companyId, false)) return;
                      $this->listCompanyRoles($companyId);
                      return;
                  }
                  if ($method === 'POST') {
+                     if (!$this->requireCompanyRolesAccess($companyId, true)) return;
                      $this->createCompanyRole($companyId);
                      return;
                  }
@@ -322,12 +328,14 @@ class RoleController
              
              // POST /api/companies/{id}/roles/apply-template
              if (isset($segments[4]) && $segments[4] === 'apply-template' && $method === 'POST') {
+                 if (!$this->requireCompanyRolesAccess($companyId, true)) return;
                  $this->applyTemplate($companyId);
                  return;
              }
 
              // POST /api/companies/{id}/roles/restore-defaults
              if (isset($segments[4]) && $segments[4] === 'restore-defaults' && $method === 'POST') {
+                 if (!$this->requireCompanyRolesAccess($companyId, true)) return;
                  $this->restoreDefaults($companyId);
                  return;
              }
@@ -336,10 +344,12 @@ class RoleController
              if (isset($segments[4])) {
                  $roleId = $segments[4];
                  if ($method === 'PUT' || $method === 'PATCH') {
+                     if (!$this->requireCompanyRolesAccess($companyId, true)) return;
                      $this->updateCompanyRole($companyId, $roleId);
                      return;
                  }
                  if ($method === 'DELETE') {
+                     if (!$this->requireCompanyRolesAccess($companyId, true)) return;
                      $this->deleteCompanyRole($companyId, $roleId);
                      return;
                  }
@@ -682,6 +692,12 @@ class RoleController
             Response::error('Datos inválidos', 400);
             return;
         }
+
+        // Anti-escalation: solo super_admin puede modificar el rol super_admin
+        if ($role === 'super_admin' && (Auth::user()['platform_role'] ?? '') !== 'super_admin') {
+            Response::error('Acceso denegado', 403);
+            return;
+        }
         
         $this->pdo->beginTransaction();
         try {
@@ -709,6 +725,34 @@ class RoleController
             $this->pdo->rollBack();
             Response::error('Error guardando permisos: ' . $e->getMessage(), 500);
         }
+    }
+
+    private function requireRbacManager(): bool
+    {
+        $user = Auth::user();
+        if (!in_array($user['platform_role'] ?? '', ['super_admin', 'admin', 'security'], true)) {
+            Response::error('Acceso denegado', 403);
+            return false;
+        }
+        return true;
+    }
+
+    private function requireCompanyRolesAccess(string $companyId, bool $mutate): bool
+    {
+        $user = Auth::user();
+        $role = $user['platform_role'] ?? '';
+
+        // Gestores de RBAC pueden leer y modificar roles de cualquier empresa
+        if (in_array($role, ['super_admin', 'admin', 'security'], true)) return true;
+
+        // El company_admin de esa empresa gestiona sus propios roles
+        if ($role === 'company_admin' && ($user['company_id'] ?? '') === $companyId) return true;
+
+        // Lectura para roles con acceso al módulo Tenants
+        if (!$mutate && in_array($role, ['support', 'finance', 'legal'], true)) return true;
+
+        Response::error('Acceso denegado', 403);
+        return false;
     }
 
     private function uuid(): string

@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Database;
+use App\Support\Cache;
 use App\Support\Response;
 use PDO;
 use Throwable;
@@ -48,10 +49,30 @@ final class CurrencyController
         $where = [];
         $params = [];
 
-        if ($q !== '') {
-            $where[] = '(code LIKE :q OR name LIKE :q OR symbol LIKE :q)';
-            $params[':q'] = '%' . $q . '%';
+        if ($q === '') {
+            $records = Cache::remember('ref:currencies', 3600, function (): array {
+                $stmt = $this->pdo->query("SELECT id, code, name, symbol FROM currencies ORDER BY code ASC");
+                return $stmt->fetchAll() ?: [];
+            });
+
+            $total = count($records);
+            $offset = ($page - 1) * $perPage;
+            $items = array_values(array_slice($records, $offset, $perPage));
+
+            Response::json([
+                'data' => $items,
+                'meta' => [
+                    'page' => $page,
+                    'per_page' => $perPage,
+                    'total' => $total,
+                    'total_pages' => max(1, (int)ceil($total / max(1, $perPage))),
+                ],
+            ]);
+            return;
         }
+
+        $where[] = '(code LIKE :q OR name LIKE :q OR symbol LIKE :q)';
+        $params[':q'] = "%$q%";
 
         $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
 
@@ -118,6 +139,8 @@ final class CurrencyController
         $stmt = $this->pdo->prepare("INSERT INTO currencies (code, name, symbol) VALUES (:code, :name, :symbol)");
         $stmt->execute([':code' => $code, ':name' => $name, ':symbol' => $symbol]);
 
+        Cache::delete('ref:currencies');
+
         Response::json(['message' => 'Moneda creada', 'data' => ['id' => (int)$this->pdo->lastInsertId()]], 201);
     }
 
@@ -178,12 +201,21 @@ final class CurrencyController
         $stmt = $this->pdo->prepare("UPDATE currencies SET " . implode(', ', $sets) . " WHERE id = :id");
         $stmt->execute($params);
 
+        Cache::delete('ref:currencies');
+
         Response::json(['message' => 'Moneda actualizada']);
     }
 
     private function destroy(int $id): void
     {
         try {
+            $exists = $this->pdo->prepare("SELECT id FROM currencies WHERE id = :id LIMIT 1");
+            $exists->execute([':id' => $id]);
+            if (!$exists->fetchColumn()) {
+                Response::error('Moneda no encontrada', 404);
+                return;
+            }
+
             // Prevent deletion if currency is in use
             $refs = [
                 'companies' => 0,
@@ -240,6 +272,7 @@ final class CurrencyController
 
             $stmt = $this->pdo->prepare("DELETE FROM currencies WHERE id = :id");
             $stmt->execute([':id' => $id]);
+            Cache::delete('ref:currencies');
             Response::json(['message' => 'Moneda eliminada']);
         } catch (\Throwable $e) {
             Response::error(

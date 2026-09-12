@@ -61,6 +61,12 @@ class FinanceController
                     return;
                 }
 
+                // /api/finance/invoices/{id}/download
+                if (isset($segments[4]) && $segments[4] === 'download' && $method === 'GET') {
+                    $this->invoiceDownload($id);
+                    return;
+                }
+
                 if ($method === 'GET') {
                     $this->invoicesShow($id);
                 } else {
@@ -314,12 +320,15 @@ class FinanceController
         
         echo "SPECTRA ERP - COMPROBANTE DE PAGO\n";
         echo "===================================\n\n";
-        echo "Factura N°: " . $invoice['invoice_number'] . "\n";
-        echo "Fecha: " . $invoice['issue_date'] . "\n";
-        echo "Estado: " . $invoice['status'] . "\n\n";
+        echo "Factura N°: " . ($invoice['invoice_number'] ?? '') . "\n";
+        echo "Fecha de emisión: " . ($invoice['issue_date'] ?? '') . "\n";
+        echo "Vencimiento: " . ($invoice['due_date'] ?? '') . "\n";
+        echo "Estado: " . ($invoice['status'] ?? '') . "\n\n";
         echo "-----------------------------------\n";
-        echo "Descripción: " . $invoice['description'] . "\n";
-        echo "Monto: " . $invoice['amount'] . " " . $invoice['currency_id'] . "\n"; // Simplified currency
+        echo "Notas: " . ($invoice['notes'] ?? '—') . "\n";
+        echo "Subtotal: " . ($invoice['subtotal'] ?? 0) . "\n";
+        echo "Impuestos: " . ($invoice['tax_amount'] ?? 0) . "\n";
+        echo "Total: " . ($invoice['total_amount'] ?? 0) . " (moneda_id " . ($invoice['currency_id'] ?? '') . ")\n";
         echo "-----------------------------------\n\n";
         echo "Este es un comprobante generado automáticamente por Spectra ERP.\n";
         exit;
@@ -335,6 +344,7 @@ class FinanceController
 
         $companyId = $_GET['company_id'] ?? null;
         $freelancerId = $_GET['freelancer_id'] ?? null;
+        $q = trim((string)($_GET['q'] ?? ''));
 
         $where = [];
         $params = [];
@@ -346,6 +356,10 @@ class FinanceController
         if ($freelancerId) {
             $where[] = "i.freelancer_id = :freelancer_id";
             $params[':freelancer_id'] = $freelancerId;
+        }
+        if ($q !== '') {
+            $where[] = "(i.invoice_number LIKE :q OR comp.legal_name LIKE :q)";
+            $params[':q'] = "%$q%";
         }
 
         $whereClause = $where ? "WHERE " . implode(" AND ", $where) : "";
@@ -369,7 +383,7 @@ class FinanceController
             LIMIT :limit OFFSET :offset
         ";
 
-        $countSql = "SELECT COUNT(*) FROM invoices i $whereClause";
+        $countSql = "SELECT COUNT(*) FROM invoices i LEFT JOIN companies comp ON i.company_id = comp.id $whereClause";
         $countStmt = $this->pdo->prepare($countSql);
         foreach ($params as $key => $val) {
             $countStmt->bindValue($key, $val);
@@ -454,6 +468,7 @@ class FinanceController
 
     private function reconciliationIndex(): void
     {
+        $this->ensureWalletReconciliationColumns();
         $companyId = $_GET['company_id'] ?? null;
         $status = $_GET['status'] ?? null; // pending, completed, etc.
         $reconciled = $_GET['reconciled'] ?? null; // '1', '0'
@@ -534,6 +549,7 @@ class FinanceController
 
     private function reconciliationStore(): void
     {
+        $this->ensureWalletReconciliationColumns();
         $data = json_decode(file_get_contents('php://input'), true) ?? [];
         
         $companyId = $data['company_id'] ?? null;
@@ -598,6 +614,7 @@ class FinanceController
 
     private function reconciliationToggle(string $txId): void
     {
+        $this->ensureWalletReconciliationColumns();
         // Toggle is_reconciled
         $stmt = $this->pdo->prepare("SELECT is_reconciled FROM wallet_transactions WHERE id LIKE :id");
         $stmt->execute([':id' => $txId]);
@@ -619,6 +636,9 @@ class FinanceController
 
     private function ensureInvoicesTable(): void
     {
+        if (\App\Support\Cache::get('finance_invoices_schema_v1') !== null) {
+            return;
+        }
         // Create invoices table if not exists
         $this->pdo->exec("
             CREATE TABLE IF NOT EXISTS invoices (
@@ -668,6 +688,22 @@ class FinanceController
                 FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
         ");
+
+        \App\Support\Cache::set('finance_invoices_schema_v1', time(), 86400 * 365);
+    }
+
+    /**
+     * Asegura las columnas de conciliación en wallet_transactions.
+     * El DDL canónico (TenantController) no las incluye; se agregan de forma perezosa y cacheada.
+     */
+    private function ensureWalletReconciliationColumns(): void
+    {
+        if (\App\Support\Cache::get('wallet_recon_cols_v1') !== null) {
+            return;
+        }
+        try { $this->pdo->exec("ALTER TABLE wallet_transactions ADD COLUMN is_reconciled TINYINT(1) DEFAULT 0"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("ALTER TABLE wallet_transactions ADD COLUMN reconciled_at DATETIME NULL"); } catch (\Throwable $e) {}
+        \App\Support\Cache::set('wallet_recon_cols_v1', time(), 86400 * 365);
     }
 
     private function supportViewIndex(): void

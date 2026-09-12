@@ -17,7 +17,7 @@ class ModerationController
     {
         $this->pdo = $database->pdo();
         $this->audit = new AuditLogger();
-        $this->ensureTables();
+        if (\App\Support\Schema::needsMigration($this->pdo)) { $this->ensureTables(); }
     }
 
     private function ensureTables(): void

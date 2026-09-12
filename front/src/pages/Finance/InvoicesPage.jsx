@@ -14,11 +14,18 @@ export default function InvoicesPage({ apiUrl, token }) {
   const [totalPages, setTotalPages] = useState(1);
 
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
 
   // View Modal State
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [loadingInvoice, setLoadingInvoice] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 400);
+    return () => clearTimeout(t);
+  }, [search]);
 
   useEffect(() => {
     let cancelled = false;
@@ -28,7 +35,7 @@ export default function InvoicesPage({ apiUrl, token }) {
       try {
         const params = new URLSearchParams();
         params.set('page', String(page));
-        if (search) params.set('q', search.trim());
+        if (debouncedSearch) params.set('q', debouncedSearch);
 
         const res = await apiFetch(apiUrl, `/api/finance/invoices?${params.toString()}`, { token });
         
@@ -63,16 +70,11 @@ export default function InvoicesPage({ apiUrl, token }) {
     return () => {
       cancelled = true;
     };
-  }, [apiUrl, token, page, search]);
+  }, [apiUrl, token, page, debouncedSearch, reloadKey]);
 
   const handleReload = () => {
     setPage(1);
-    // Trigger reload by resetting state if needed or just letting effect run if dependecies change
-    // Since effect depends on page, setting page to 1 triggers it if page was not 1. 
-    // If page is 1, we might need a force reload. 
-    // For simplicity, let's just re-fetch in effect if we add a 'tick' dependency or just rely on search/page.
-    // Actually, calling setPage(1) works if we are not on page 1. If on page 1, we can just toggle a 'reload' flag.
-    // But let's keep it simple.
+    setReloadKey((k) => k + 1);
   };
 
   const handleView = async (invoiceId) => {

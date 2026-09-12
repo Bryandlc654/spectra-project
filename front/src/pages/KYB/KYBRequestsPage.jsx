@@ -2,41 +2,66 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { createApi } from '../../lib/api';
 
+const STATUS_LABELS = {
+  not_started: 'No iniciado',
+  pending_review: 'Pendiente',
+  approved: 'Aprobado',
+  rejected: 'Rechazado',
+  more_info_required: 'Requiere info'
+};
+
+const FILTERS = [
+  { value: 'pending_review', label: 'Pendientes' },
+  { value: 'more_info_required', label: 'Requieren info' },
+  { value: 'not_started', label: 'No iniciados' },
+  { value: 'approved', label: 'Aprobado' },
+  { value: 'rejected', label: 'Rechazado' },
+  { value: '', label: 'Todos' },
+];
+
+const PAGE_LIMIT = 20;
+
 export default function KYBRequestsPage({ apiUrl, token }) {
   const api = useMemo(() => createApi({ baseUrl: apiUrl, token }), [apiUrl, token]);
-
-  const STATUS_LABELS = {
-    not_started: 'No iniciado',
-    pending_review: 'Pendiente',
-    approved: 'Aprobado',
-    rejected: 'Rechazado',
-    more_info_required: 'Requiere info'
-  };
 
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
-  const [statusFilter, setStatusFilter] = useState('pending_review'); // default to pending as it's most actionable
+  const [statusFilter, setStatusFilter] = useState('pending_review');
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
 
   useEffect(() => {
     load();
     // eslint-disable-next-line
-  }, [statusFilter]);
+  }, [statusFilter, page]);
 
   async function load() {
     setLoading(true);
     setErr('');
     try {
-      // GET /kyb?status=...
-      const res = await api.get(`/api/kyb?status=${statusFilter}`);
-      const data = res.data || res || [];
+      const res = await api.get(`/api/kyb?status=${statusFilter}&page=${page}&limit=${PAGE_LIMIT}`);
+      const data = res.data || (Array.isArray(res) ? res : []);
+      const meta = res.meta || {};
       setRequests(Array.isArray(data) ? data : []);
+      const count = typeof meta.total === 'number' ? meta.total : (Array.isArray(data) ? data.length : 0);
+      setTotal(count);
+      setPages(Math.max(1, Math.ceil(count / PAGE_LIMIT)));
+      setPage(meta.page || page);
     } catch (e) {
       setErr(e.message || 'Error cargando solicitudes KYB');
     } finally {
       setLoading(false);
     }
   }
+
+  function changeFilter(value) {
+    setStatusFilter(value);
+    setPage(1);
+  }
+
+  const filterLabel = FILTERS.find((f) => f.value === statusFilter)?.label;
 
   return (
     <div className="space-y-6">
@@ -49,18 +74,18 @@ export default function KYBRequestsPage({ apiUrl, token }) {
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4">
-        <div className="mb-4 flex gap-2">
-            {['pending_review', 'approved', 'rejected', ''].map(s => (
+        <div className="mb-4 flex flex-wrap gap-2">
+            {FILTERS.map((f) => (
                 <button
-                    key={s}
-                    onClick={() => setStatusFilter(s)}
+                    key={f.value}
+                    onClick={() => changeFilter(f.value)}
                     className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${
-                        statusFilter === s 
+                        statusFilter === f.value 
                         ? 'bg-brand text-white shadow-sm' 
                         : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
                     }`}
                 >
-                    {s === '' ? 'Todos' : (s === 'pending_review' ? 'Pendientes' : s.charAt(0).toUpperCase() + s.slice(1))}
+                    {f.label}
                 </button>
             ))}
         </div>
@@ -111,12 +136,37 @@ export default function KYBRequestsPage({ apiUrl, token }) {
                 {!requests.length && (
                     <tr>
                         <td colSpan={4} className="py-8 text-center text-slate-500">
-                            No hay solicitudes {statusFilter ? `en estado "${statusFilter}"` : ''}.
+                            No hay solicitudes {filterLabel ? `en estado "${filterLabel}"` : ''}.
                         </td>
                     </tr>
                 )}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {!loading && !err && (
+          <div className="flex items-center justify-between pt-4">
+            <div className="text-xs text-slate-500">
+              {total} solicitud{total === 1 ? '' : 'es'}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                ← Anterior
+              </button>
+              <span className="text-xs text-slate-600">Página {page} de {pages}</span>
+              <button
+                onClick={() => setPage((p) => Math.min(pages, p + 1))}
+                disabled={page >= pages}
+                className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Siguiente →
+              </button>
+            </div>
           </div>
         )}
       </div>

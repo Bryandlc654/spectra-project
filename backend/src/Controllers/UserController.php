@@ -194,8 +194,9 @@ class UserController
 
         $params = [];
         if ($search) {
-            $sql .= " AND (u.full_name LIKE :s OR u.email LIKE :s)";
-            $params[':s'] = "%$search%";
+            $sql .= " AND (u.full_name LIKE :s1 OR u.email LIKE :s2)";
+            $params[':s1'] = "%$search%";
+            $params[':s2'] = "%$search%";
         }
 
         $sql .= " ORDER BY u.created_at DESC LIMIT $limit OFFSET $offset";
@@ -207,10 +208,10 @@ class UserController
         // Count total
         $countSql = "SELECT COUNT(*) FROM users u WHERE u.deleted_at IS NULL";
         if ($search) {
-            $countSql .= " AND (u.full_name LIKE :s OR u.email LIKE :s)";
+            $countSql .= " AND (u.full_name LIKE :s1 OR u.email LIKE :s2)";
         }
         $stmtCount = $this->pdo->prepare($countSql);
-        if ($search) $stmtCount->execute([':s' => "%$search%"]);
+        if ($search) $stmtCount->execute([':s1' => "%$search%", ':s2' => "%$search%"]);
         else $stmtCount->execute();
         $total = (int)$stmtCount->fetchColumn();
 
@@ -227,6 +228,7 @@ class UserController
 
     private function export(): void
     {
+        if (!$this->requireUserManager()) return;
         $search = trim((string)($_GET['q'] ?? $_GET['search'] ?? '')); 
         $status = trim((string)($_GET['status'] ?? ''));
         $type = trim((string)($_GET['auth_method'] ?? $_GET['type'] ?? ''));
@@ -238,8 +240,9 @@ class UserController
         $where = ["1=1", "u.deleted_at IS NULL"];
 
         if ($search !== '') {
-            $where[] = "(u.full_name LIKE :search OR u.email LIKE :search)";
-            $params[':search'] = "%$search%";
+            $where[] = "(u.full_name LIKE :search1 OR u.email LIKE :search2)";
+            $params[':search1'] = "%$search%";
+            $params[':search2'] = "%$search%";
         }
 
         if ($status !== '') {
@@ -251,7 +254,7 @@ class UserController
             $where[] = "u.platform_role LIKE :platform_role";
             $params[':platform_role'] = $platformRole;
         } elseif ($roleScope === 'internal') {
-            $where[] = "u.platform_role IN ('super_admin', 'admin', 'support', 'finance', 'legal', 'security', 'company_admin')";
+            $where[] = "u.platform_role IN ('super_admin', 'admin', 'support', 'finance', 'legal', 'security', 'it_admin', 'company_admin')";
             $where[] = "NOT EXISTS (SELECT 1 FROM company_users cu WHERE cu.user_id LIKE u.id)";
         } elseif ($roleScope === 'company') {
             $where[] = "u.platform_role IN ('user', 'company_admin')";
@@ -341,8 +344,11 @@ class UserController
         }
 
         if ($search !== '') {
-            $where[] = "(u.full_name LIKE :search OR u.email LIKE :search OR c.trade_name LIKE :search OR c.legal_name LIKE :search)";
-            $params[':search'] = "%$search%";
+            $where[] = "(u.full_name LIKE :search1 OR u.email LIKE :search2 OR c.trade_name LIKE :search3 OR c.legal_name LIKE :search4)";
+            $params[':search1'] = "%$search%";
+            $params[':search2'] = "%$search%";
+            $params[':search3'] = "%$search%";
+            $params[':search4'] = "%$search%";
         }
 
         $whereSql = implode(' AND ', $where);
@@ -408,8 +414,11 @@ class UserController
         }
 
         if ($search !== '') {
-            $where[] = "(u.full_name LIKE :search OR u.email LIKE :search OR c.trade_name LIKE :search OR c.legal_name LIKE :search)";
-            $params[':search'] = "%$search%";
+            $where[] = "(u.full_name LIKE :search1 OR u.email LIKE :search2 OR c.trade_name LIKE :search3 OR c.legal_name LIKE :search4)";
+            $params[':search1'] = "%$search%";
+            $params[':search2'] = "%$search%";
+            $params[':search3'] = "%$search%";
+            $params[':search4'] = "%$search%";
         }
 
         $whereSql = implode(' AND ', $where);
@@ -478,13 +487,14 @@ class UserController
 
     private function index(): void
     {
+        if (!$this->requireUserManager()) return;
         $page = max(1, (int)($_GET['page'] ?? 1));
         $perPage = max(5, min(100, (int)($_GET['per_page'] ?? 10)));
         $offset = ($page - 1) * $perPage;
 
         $search = trim((string)($_GET['search'] ?? '')); // name or email
         $status = trim((string)($_GET['status'] ?? ''));
-        $type = trim((string)($_GET['type'] ?? '')); // password, sso
+        $type = trim((string)($_GET['type'] ?? $_GET['auth_method'] ?? '')); // password, sso
         $companyId = trim((string)($_GET['company_id'] ?? ''));
         $roleScope = trim((string)($_GET['role_scope'] ?? '')); // internal, external
         $platformRole = trim((string)($_GET['platform_role'] ?? ''));
@@ -493,8 +503,9 @@ class UserController
         $where = ["1=1", "u.deleted_at IS NULL"];
 
         if ($search !== '') {
-            $where[] = "(u.full_name LIKE :search OR u.email LIKE :search)";
-            $params[':search'] = "%$search%";
+            $where[] = "(u.full_name LIKE :search1 OR u.email LIKE :search2)";
+            $params[':search1'] = "%$search%";
+            $params[':search2'] = "%$search%";
         }
 
         if ($status !== '') {
@@ -507,7 +518,7 @@ class UserController
             $params[':platform_role'] = $platformRole;
         } elseif ($roleScope === 'internal') {
             // Internal roles: Whitelist and exclude company members. Freelancers no pertenecen a Usuarios de Plataforma.
-            $where[] = "u.platform_role IN ('super_admin', 'admin', 'support', 'finance', 'legal', 'security', 'company_admin')";
+            $where[] = "u.platform_role IN ('super_admin', 'admin', 'support', 'finance', 'legal', 'security', 'it_admin', 'company_admin')";
             $where[] = "NOT EXISTS (SELECT 1 FROM company_users cu WHERE cu.user_id LIKE u.id)";
         } elseif ($roleScope === 'company') {
             $where[] = "u.platform_role IN ('user', 'company_admin')";
@@ -590,6 +601,7 @@ class UserController
 
     private function show(string $id): void
     {
+        if (!$this->requireUserManager()) return;
         // 1. User Info
         $stmt = $this->pdo->prepare("
             SELECT id, full_name, email, status, last_login_at, created_at, password_hash, platform_role, global_permissions
@@ -705,12 +717,23 @@ class UserController
 
     private function store(): void
     {
+        if (!$this->requireUserManager()) return;
         $data = $this->readPayload();
         
         $fullName = trim((string)($data['full_name'] ?? ''));
         $email = strtolower(trim((string)($data['email'] ?? '')));
         $password = (string)($data['password'] ?? '');
         $role = trim((string)($data['platform_role'] ?? 'user'));
+
+        $actor = Auth::user();
+        if ($role === 'super_admin' && ($actor['platform_role'] ?? '') !== 'super_admin') {
+            Response::error('Solo el Super Admin puede otorgar el rol super_admin', 403);
+            return;
+        }
+        $allowedRoles = ['user', 'support', 'company_admin', 'freelancer', 'freelance', 'super_admin', 'admin', 'finance', 'legal', 'security', 'it_admin'];
+        if (!in_array($role, $allowedRoles, true)) {
+            $role = 'user';
+        }
         
         if ($fullName === '' || $email === '' || $password === '') {
             Response::error('full_name, email y password son requeridos', 400);
@@ -792,8 +815,21 @@ class UserController
 
     private function update(string $id): void
     {
+        $actorRole = Auth::user()['platform_role'] ?? '';
+        $isManager = in_array($actorRole, ['super_admin', 'admin', 'security'], true);
+        $isSelf = (string)Auth::userId() === (string)$id;
+        if (!$isManager && !$isSelf) {
+            Response::error('Acceso denegado', 403);
+            return;
+        }
+
         $data = $this->readPayload();
-        
+
+        // Un usuario solo puede editar sus propios datos básicos (nunca rol/permisos)
+        if (!$isManager) {
+            $data = array_intersect_key($data, array_flip(['full_name', 'email']));
+        }
+
         $fields = [];
         $params = [':id' => $id];
 
@@ -816,8 +852,20 @@ class UserController
         }
 
         if (array_key_exists('platform_role', $data)) {
+             $newRole = trim((string)$data['platform_role']);
+             $actorRole = (Auth::user()['platform_role'] ?? '');
+             if ($actorRole !== 'super_admin') {
+                 $stmtT = $this->pdo->prepare("SELECT platform_role FROM users WHERE id LIKE :id");
+                 $stmtT->execute([':id' => $id]);
+                 $targetRole = $stmtT->fetchColumn();
+                 if ($targetRole === 'super_admin' || $newRole === 'super_admin') {
+                     Response::error('Solo el Super Admin puede modificar el rol super_admin', 403);
+                     return;
+                 }
+             }
+             if (!in_array($newRole, ['user', 'support', 'company_admin', 'freelancer', 'freelance', 'super_admin', 'admin', 'finance', 'legal', 'security', 'it_admin'], true)) $newRole = 'user';
              $fields[] = "platform_role = :role";
-             $params[':role'] = $data['platform_role'];
+             $params[':role'] = $newRole;
         }
         
         if (array_key_exists('global_permissions', $data)) {
@@ -848,14 +896,38 @@ class UserController
 
     private function block(string $id): void
     {
+        if (!$this->requireUserManager()) return;
+        $stmt = $this->pdo->prepare("SELECT platform_role FROM users WHERE id LIKE :id");
+        $stmt->execute([':id' => $id]);
+        $targetRole = $stmt->fetchColumn();
+        if ($targetRole === false) {
+            Response::error('Usuario no encontrado', 404);
+            return;
+        }
+        if ((Auth::user()['platform_role'] ?? '') !== 'super_admin' && $targetRole === 'super_admin') {
+            Response::error('Solo el Super Admin puede bloquear cuentas super_admin', 403);
+            return;
+        }
         $this->updateUserStatus($id, 'locked');
         $this->audit->log('user.blocked', 'user', $id);
-        $this->invalidateSessions($id);
+        $this->revokeSessions($id);
         Response::json(['message' => 'Usuario bloqueado']);
     }
 
     private function unblock(string $id): void
     {
+        if (!$this->requireUserManager()) return;
+        $stmt = $this->pdo->prepare("SELECT platform_role FROM users WHERE id LIKE :id");
+        $stmt->execute([':id' => $id]);
+        $targetRole = $stmt->fetchColumn();
+        if ($targetRole === false) {
+            Response::error('Usuario no encontrado', 404);
+            return;
+        }
+        if ((Auth::user()['platform_role'] ?? '') !== 'super_admin' && $targetRole === 'super_admin') {
+            Response::error('Solo el Super Admin puede desbloquear cuentas super_admin', 403);
+            return;
+        }
         $this->updateUserStatus($id, 'active');
         $this->audit->log('user.unblocked', 'user', $id);
         Response::json(['message' => 'Usuario desbloqueado correctamente']);
@@ -867,15 +939,22 @@ class UserController
         $stmt->execute([':status' => $status, ':id' => $id]);
     }
 
-    private function invalidateSessions(string $id): void
+    private function revokeSessions(string $id): void
     {
         $stmt = $this->pdo->prepare("UPDATE user_sessions SET is_active = 0 WHERE user_id LIKE :id AND is_active = 1");
         $stmt->execute([':id' => $id]);
+    }
+
+    private function invalidateSessions(string $id): void
+    {
+        if (!$this->requireUserManager()) return;
+        $this->revokeSessions($id);
         Response::json(['message' => 'Sesiones invalidadas correctamente']);
     }
 
     private function addMembership(string $userId): void
     {
+        if (!$this->requireUserManager()) return;
         $data = $this->readPayload();
         
         $companyId = $data['company_id'] ?? null;
@@ -888,11 +967,47 @@ class UserController
             return;
         }
 
+        $stmtCompany = $this->pdo->prepare("SELECT id, legal_name FROM companies WHERE id LIKE :cid AND deleted_at IS NULL");
+        $stmtCompany->execute([':cid' => $companyId]);
+        $company = $stmtCompany->fetch(PDO::FETCH_ASSOC);
+        if (!$company) {
+            Response::error('Empresa no encontrada', 404);
+            return;
+        }
+
         // Check if already exists
-        $stmt = $this->pdo->prepare("SELECT id FROM company_users WHERE user_id LIKE :uid AND company_id LIKE :cid");
+        $stmt = $this->pdo->prepare("SELECT id, deleted_at FROM company_users WHERE user_id LIKE :uid AND company_id LIKE :cid");
         $stmt->execute([':uid' => $userId, ':cid' => $companyId]);
-        if ($stmt->fetch()) {
+        $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($existing && $existing['deleted_at'] === null) {
             Response::error('El usuario ya pertenece a esta empresa', 409);
+            return;
+        }
+
+        if ($existing) {
+            try {
+                $stmt = $this->pdo->prepare("UPDATE company_users SET status = 'active', deleted_at = NULL, department = :dept, job_title = :job, updated_at = NOW() WHERE id LIKE :mid");
+                $stmt->execute([
+                    ':mid' => $existing['id'],
+                    ':dept' => $department,
+                    ':job' => $jobTitle
+                ]);
+                if ($roleId) {
+                    $stmtRole = $this->pdo->prepare("SELECT id FROM roles WHERE id LIKE :rid AND company_id LIKE :cid");
+                    $stmtRole->execute([':rid' => $roleId, ':cid' => $companyId]);
+                    if ($stmtRole->fetch()) {
+                        $stmtHas = $this->pdo->prepare("SELECT 1 FROM user_roles WHERE company_user_id LIKE :cuid AND role_id LIKE :rid");
+                        $stmtHas->execute([':cuid' => $existing['id'], ':rid' => $roleId]);
+                        if (!$stmtHas->fetch()) {
+                            $stmt = $this->pdo->prepare("INSERT INTO user_roles (company_user_id, role_id) VALUES (:cuid, :rid)");
+                            $stmt->execute([':cuid' => $existing['id'], ':rid' => $roleId]);
+                        }
+                    }
+                }
+                Response::json(['message' => 'Membresía reactivada', 'id' => $existing['id']], 200);
+            } catch (Throwable $e) {
+                throw $e;
+            }
             return;
         }
 
@@ -937,6 +1052,7 @@ class UserController
 
     private function updateMembership(string $userId, string $membershipId): void
     {
+        if (!$this->requireUserManager()) return;
         // Verify ownership (optional but good)
         $stmt = $this->pdo->prepare("SELECT id FROM company_users WHERE id LIKE :mid AND user_id LIKE :uid");
         $stmt->execute([':mid' => $membershipId, ':uid' => $userId]);
@@ -994,6 +1110,7 @@ class UserController
 
     private function removeMembership(string $userId, string $membershipId): void
     {
+        if (!$this->requireUserManager()) return;
         // Check existence
         $stmt = $this->pdo->prepare("SELECT id FROM company_users WHERE id LIKE :mid AND user_id LIKE :uid");
         $stmt->execute([':mid' => $membershipId, ':uid' => $userId]);
@@ -1012,12 +1129,18 @@ class UserController
 
     private function destroy(string $id): void
     {
-        $stmt = $this->pdo->prepare("SELECT id, email FROM users WHERE id LIKE :id");
+        if (!$this->requireUserManager()) return;
+        $stmt = $this->pdo->prepare("SELECT id, email, platform_role FROM users WHERE id LIKE :id");
         $stmt->execute([':id' => $id]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$user) {
             Response::error('Usuario no encontrado', 404);
+            return;
+        }
+
+        if ((Auth::user()['platform_role'] ?? '') !== 'super_admin' && ($user['platform_role'] ?? '') === 'super_admin') {
+            Response::error('Solo el Super Admin puede eliminar cuentas super_admin', 403);
             return;
         }
 
@@ -1079,6 +1202,13 @@ class UserController
 
     private function sendPasswordReset(string $id): void
     {
+        $actorRole = Auth::user()['platform_role'] ?? '';
+        $isSelf = (string)Auth::userId() === (string)$id;
+        $isPrivileged = in_array($actorRole, ['super_admin', 'admin', 'support', 'finance', 'legal', 'security', 'it_admin'], true);
+        if (!$isSelf && !$isPrivileged) {
+            Response::error('Unauthorized', 403);
+            return;
+        }
         $this->ensurePasswordResetsTable();
 
         $stmt = $this->pdo->prepare("SELECT email, full_name FROM users WHERE id LIKE :id");
@@ -1208,6 +1338,37 @@ class UserController
          } catch (Throwable $e) {}
 
          return 'http://localhost:5173';
+    }
+
+    private function requireSuperAdmin(): bool
+    {
+        $user = Auth::user();
+        if (($user['platform_role'] ?? '') !== 'super_admin') {
+            Response::error('Acceso denegado', 403);
+            return false;
+        }
+        return true;
+    }
+
+    private function requirePrivilegedActor(): bool
+    {
+        $user = Auth::user();
+        $role = $user['platform_role'] ?? '';
+        if (!in_array($role, ['super_admin', 'admin', 'support', 'finance', 'legal', 'security', 'it_admin'], true)) {
+            Response::error('Unauthorized', 403);
+            return false;
+        }
+        return true;
+    }
+
+    private function requireUserManager(): bool
+    {
+        $user = Auth::user();
+        if (!in_array($user['platform_role'] ?? '', ['super_admin', 'admin', 'security'], true)) {
+            Response::error('Acceso denegado', 403);
+            return false;
+        }
+        return true;
     }
 
     private function readPayload(): array

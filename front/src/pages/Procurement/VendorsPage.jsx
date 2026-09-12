@@ -277,7 +277,7 @@ export default function VendorsPage({ apiUrl }) {
                     disabled={saving}
                     className="px-4 py-2 bg-brand text-white font-bold rounded-lg hover:bg-brand/90 disabled:opacity-50"
                 >
-                    {saving ? 'Guardando...' : 'Crear Proveedor'}
+                    {saving ? 'Guardando...' : (editingId ? 'Guardar Cambios' : 'Crear Proveedor')}
                 </button>
             </div>
         </form>

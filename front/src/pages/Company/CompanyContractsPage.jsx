@@ -290,7 +290,7 @@ function CompanyContractsList({ companyId, api, countries }) {
     };
 
     const handleSign = async (contract) => {
-        if (!window.confirm(`¿Enviar "${contract.title}" para firma digital (DocuSign)?`)) return;
+        if (!window.confirm(`¿Enviar "${contract.title}" para firma digital (Spectra Sign)?`)) return;
         try {
             await api.post('/api/envelopes', { contract_id: contract.id });
             toast.success('Enviado a firma');
@@ -437,7 +437,7 @@ function CompanyContractsList({ companyId, api, countries }) {
                                         </span>
                                         {c.envelope_status && (
                                             <div className="mt-1 text-[10px] text-slate-500">
-                                                DocuSign: {c.envelope_status}
+                                                Firma: {c.envelope_status}
                                             </div>
                                         )}
                                     </td>

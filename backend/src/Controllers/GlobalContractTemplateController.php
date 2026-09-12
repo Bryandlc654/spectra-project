@@ -120,7 +120,8 @@ class GlobalContractTemplateController
                 'page' => $page,
                 'per_page' => $perPage,
                 'total' => $total,
-                'last_page' => ceil($total / $perPage)
+                'last_page' => ceil($total / $perPage),
+                'total_pages' => ceil($total / $perPage)
             ]
         ]);
     }
@@ -139,6 +140,29 @@ class GlobalContractTemplateController
         Response::json(['data' => $item]);
     }
 
+    private function sanitizeBody(string $body): string
+    {
+        $body = str_ireplace(['<div>', '</div>'], ['<p>', '</p>'], $body);
+        $allowed = '<p><br><b><strong><i><em><u><s><strike><ul><ol><li><h1><h2><h3><h4><blockquote><hr>';
+        $body = strip_tags($body, $allowed);
+        return trim($body);
+    }
+
+    private function renderBodyPdf(string $body): string
+    {
+        $html = $this->sanitizeBody($body);
+        // Si el cuerpo es texto plano legacy (sin etiquetas), envolver en párrafos
+        if (stripos($html, '<p') === false
+            && stripos($html, '<br') === false
+            && stripos($html, '<h') === false
+            && stripos($html, '<li') === false) {
+            $html = preg_replace("/\r\n?/", "\n", $html);
+            $html = trim($html);
+            $html = '<p>' . str_replace(["\n\n", "\n"], ["</p><p>", '<br>'], $html) . '</p>';
+        }
+        return $html;
+    }
+
     private function store(): void
     {
         $data = json_decode(file_get_contents('php://input'), true);
@@ -149,12 +173,30 @@ class GlobalContractTemplateController
             return;
         }
 
-        $body = (string)($data['body'] ?? '');
-        $body = preg_replace('/<br\s*\/?>/i', "\n", $body);
-        $body = strip_tags($body);
-        $body = html_entity_decode($body, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $body = preg_replace("/\r\n?/", "\n", $body);
-        $body = trim($body);
+        $validTypes = ['hourly', 'retainer', 'fixed', 'project'];
+        if (!in_array($data['type'], $validTypes, true)) {
+            Response::error('Tipo inválido', 422);
+            return;
+        }
+
+        $validStatus = ['active', 'archived'];
+        $status = $data['status'] ?? 'active';
+        if (!in_array($status, $validStatus, true)) {
+            Response::error('Estado inválido', 422);
+            return;
+        }
+
+        $countryId = (int)$data['country_id'];
+        if ($countryId <= 0) {
+            Response::error('País inválido', 422);
+            return;
+        }
+
+        $body = $this->sanitizeBody((string)($data['body'] ?? ''));
+        if ($body === '') {
+            Response::error('Faltan campos requeridos (title, body, type, country_id)', 422);
+            return;
+        }
 
         $id = $this->uuid();
         $sql = "INSERT INTO contract_templates (
@@ -167,12 +209,12 @@ class GlobalContractTemplateController
         $stmt->execute([
             ':id' => $id,
             ':type' => $data['type'],
-            ':country_id' => $data['country_id'],
+            ':country_id' => $countryId,
             ':language_code' => $data['language_code'] ?? 'es',
             ':title' => $data['title'],
             ':body' => $body,
             ':variables_schema' => isset($data['variables_schema']) ? json_encode($data['variables_schema']) : null,
-            ':status' => $data['status'] ?? 'active',
+            ':status' => $status,
             ':docusign_template_id' => $data['docusign_template_id'] ?? null
         ]);
 
@@ -220,11 +262,7 @@ class GlobalContractTemplateController
                     }
                 }
                 if ($col === 'body') {
-                    $val = preg_replace('/<br\s*\/?>/i', "\n", (string)$val);
-                    $val = strip_tags((string)$val);
-                    $val = html_entity_decode((string)$val, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-                    $val = preg_replace("/\r\n?/", "\n", (string)$val);
-                    $val = trim((string)$val);
+                    $val = $this->sanitizeBody((string)$val);
                 }
                 if ($col === 'variables_schema' && is_array($val)) $val = json_encode($val);
                 $fields[] = "$col = :$col";
@@ -284,7 +322,7 @@ class GlobalContractTemplateController
 
     private function previewPdf(string $id): void
     {
-        $stmt = $this->pdo->prepare("SELECT * FROM contract_templates WHERE id = :id");
+        $stmt = $this->pdo->prepare("SELECT * FROM contract_templates WHERE id = :id AND company_id IS NULL LIMIT 1");
         $stmt->execute([':id' => $id]);
         $template = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -312,24 +350,23 @@ class GlobalContractTemplateController
             '{{notice_period}}' => '30'
         ];
 
-        // Sanitize stored template as plain text first
-        $text = (string)$template['body'];
-        $text = preg_replace('/<br\s*\/?>/i', "\n", $text);
-        $text = strip_tags($text);
-        $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $text = preg_replace("/\r\n?/", "\n", $text);
-        $text = trim($text);
+        // Sanitize + render body as HTML (rich text)
+        $content = $this->renderBodyPdf((string)$template['body']);
 
         foreach ($dummyData as $key => $value) {
-            $text = str_replace($key, $value, $text);
+            $content = str_replace($key, htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), $content);
         }
 
-        // Escape to HTML and preserve newlines using <pre>
-        $escaped = htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         $html = "<html><head><meta charset=\"utf-8\"><style>
-            body { font-family: DejaVu Sans, sans-serif; font-size: 12px; color: #111; }
-            pre { white-space: pre-wrap; word-wrap: break-word; }
-        </style></head><body><pre>{$escaped}</pre></body></html>";
+            body { font-family: DejaVu Sans, sans-serif; font-size: 11px; color: #111; line-height: 1.5; }
+            p { margin: 0 0 8px; }
+            ul, ol { margin: 0 0 8px 18px; padding: 0; }
+            li { margin-bottom: 3px; }
+            h1, h2, h3, h4 { font-weight: bold; margin: 12px 0 6px; }
+            h1 { font-size: 18px; } h2 { font-size: 16px; } h3 { font-size: 14px; } h4 { font-size: 12px; }
+            blockquote { margin: 8px 20px; font-style: italic; color: #333; }
+            hr { border: none; border-top: 1px solid #999; margin: 10px 0; }
+        </style></head><body>{$content}</body></html>";
 
         $dompdf = new Dompdf();
         $dompdf->loadHtml($html);
@@ -346,7 +383,7 @@ class GlobalContractTemplateController
     {
         $user = Auth::user();
         $role = $user['platform_role'] ?? '';
-        if (!in_array($role, ['super_admin'], true)) {
+        if (!in_array($role, ['super_admin', 'admin', 'finance', 'legal'], true)) {
             Response::error('Acceso denegado', 403);
             return;
         }
@@ -358,11 +395,7 @@ class GlobalContractTemplateController
             $upd = $this->pdo->prepare("UPDATE contract_templates SET body = :body WHERE id = :id");
             foreach ($rows as $r) {
                 $orig = (string)($r['body'] ?? '');
-                $san = preg_replace('/<br\s*\/?>/i', "\n", $orig);
-                $san = strip_tags((string)$san);
-                $san = html_entity_decode((string)$san, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-                $san = preg_replace("/\r\n?/", "\n", (string)$san);
-                $san = trim((string)$san);
+                $san = $this->sanitizeBody($orig);
                 if ($san !== $orig) {
                     $upd->execute([':body' => $san, ':id' => $r['id']]);
                     $updated++;

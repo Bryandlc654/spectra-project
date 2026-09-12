@@ -5,19 +5,30 @@ namespace App\Controllers;
 use App\Database;
 use App\Support\Response;
 use App\Support\Auth;
-use App\Services\DocuSignService;
 use PDO;
 
 class EnvelopeController
 {
     private PDO $pdo;
-    private DocuSignService $docusign;
 
     public function __construct(Database $database)
     {
         $this->pdo = $database->pdo();
-        $this->docusign = new DocuSignService();
+        if (\App\Support\Schema::needsMigration($this->pdo)) { $this->ensureTables(); }
+        $this->ensureSignatureSchema();
+    }
+
+    /**
+     * Garantiza las columnas de Spectra Sign incluso en BDs ya migradas.
+     * Cacheado para no ejecutar DDL en cada request.
+     */
+    private function ensureSignatureSchema(): void
+    {
+        if (\App\Support\Cache::get('spectra_sign_schema_v1') !== null) {
+            return;
+        }
         $this->ensureTables();
+        \App\Support\Cache::set('spectra_sign_schema_v1', time(), 86400 * 365);
     }
 
     private function ensureTables(): void
@@ -51,6 +62,39 @@ class EnvelopeController
             $this->pdo->exec("CREATE INDEX idx_provider ON docusign_envelopes(provider)");
         } catch (\Exception $e) {
             // Column likely exists
+        }
+
+        // Spectra Sign: columnas para firma digital dibujada (sin DocuSign)
+        $this->addColumn('docusign_envelopes', 'sign_token', "VARCHAR(64) NULL");
+        $this->addColumn('docusign_envelopes', 'signer_name', "VARCHAR(200) NULL");
+        $this->addColumn('docusign_envelopes', 'signer_email', "VARCHAR(200) NULL");
+        $this->addColumn('docusign_envelopes', 'signer_id', "CHAR(36) NULL");
+        $this->addColumn('docusign_envelopes', 'signature_data', "LONGTEXT NULL");
+        $this->addColumn('docusign_envelopes', 'signature_svg', "LONGTEXT NULL");
+        $this->addColumn('docusign_envelopes', 'signed_pdf', "LONGTEXT NULL");
+        $this->addColumn('docusign_envelopes', 'signature_ip', "VARCHAR(64) NULL");
+        $this->addColumn('docusign_envelopes', 'signature_ua', "VARCHAR(255) NULL");
+        $this->addColumn('docusign_envelopes', 'signed_at', "DATETIME NULL");
+        $this->addColumn('docusign_envelopes', 'expires_at', "DATETIME NULL");
+        try {
+            $this->pdo->exec("CREATE UNIQUE INDEX idx_sign_token ON docusign_envelopes(sign_token)");
+        } catch (\Exception $e) {
+            // Index already exists
+        }
+
+        \App\Support\Cache::set('spectra_sign_schema_v1', time(), 86400 * 365);
+    }
+
+    private function addColumn(string $table, string $column, string $definition): void
+    {
+        try {
+            $stmt = $this->pdo->prepare("SHOW COLUMNS FROM `$table` LIKE '$column'");
+            $stmt->execute();
+            if ($stmt->fetchColumn() === false) {
+                $this->pdo->exec("ALTER TABLE `$table` ADD COLUMN `$column` $definition");
+            }
+        } catch (\Exception $e) {
+            // Tabla o columna inexistente: se ignora
         }
     }
 
@@ -143,7 +187,8 @@ class EnvelopeController
         $sql = "
             SELECT 
                 e.*,
-                ct.title as contract_title,
+                COALESCE(c.title, ct.title) as contract_title,
+                ct.title as template_title,
                 comp.legal_name as company_name,
                 comp.id as company_id
             $sqlBase
@@ -158,6 +203,10 @@ class EnvelopeController
         $stmt->execute();
 
         $data = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($data as &$row) {
+            $this->attachLinks($row);
+        }
+        unset($row);
 
         Response::json([
             'data' => $data,
@@ -175,7 +224,8 @@ class EnvelopeController
         $stmt = $this->pdo->prepare("
             SELECT 
                 e.*,
-                ct.title as contract_title,
+                COALESCE(c.title, ct.title) as contract_title,
+                ct.title as template_title,
                 comp.legal_name as company_name
             FROM docusign_envelopes e
             LEFT JOIN contracts c ON e.contract_id = c.id
@@ -192,6 +242,8 @@ class EnvelopeController
             return;
         }
 
+        $this->attachLinks($item);
+
         Response::json(['data' => $item]);
     }
 
@@ -206,35 +258,16 @@ class EnvelopeController
             return;
         }
 
-        // Check Provider
-        $provider = $item['provider'] ?? 'docusign';
-        if ($provider === 'local') {
-            Response::json(['message' => 'Local envelope managed manually', 'status' => $item['status']]);
-            return;
+        // Spectra Sign: el estado se calcula de la firma guardada (sin API externa)
+        if (!empty($item['signed_at']) && $item['status'] !== 'completed') {
+            $this->pdo->prepare("UPDATE docusign_envelopes SET status = 'completed', last_event_at = NOW() WHERE id LIKE :id")
+                 ->execute([':id' => $id]);
+            $status = 'completed';
+        } else {
+            $status = $item['status'];
         }
 
-        try {
-            $status = $this->docusign->getEnvelopeStatus($item['envelope_id']);
-            
-            // Update envelope status
-            $stmt = $this->pdo->prepare("UPDATE docusign_envelopes SET status = :status, last_event_at = NOW() WHERE id LIKE :id");
-            $stmt->execute([':status' => $status, ':id' => $id]);
-
-            // AUTOMATION: If status is 'completed' (Signed)
-            if ($status === 'completed') {
-                if (!empty($item['amendment_id'])) {
-                    $this->handleAmendmentSigned($item['amendment_id']);
-                } else {
-                    $this->handleContractSigned($item['contract_id']);
-                }
-            }
-
-            Response::json(['message' => 'Sincronización exitosa', 'status' => $status]);
-        } catch (\Exception $e) {
-            // Fallback for simulation or error
-            $this->pdo->prepare("UPDATE docusign_envelopes SET last_event_at = NOW() WHERE id LIKE :id")->execute([':id' => $id]);
-            Response::json(['message' => 'Sincronización simulada (API Error: ' . $e->getMessage() . ')']);
-        }
+        Response::json(['message' => 'Estado sincronizado', 'status' => $status, 'signed_at' => $item['signed_at'] ?? null]);
     }
 
     private function sign(string $id): void
@@ -248,8 +281,23 @@ class EnvelopeController
             return;
         }
 
-        if (($item['provider'] ?? 'docusign') !== 'local') {
-            Response::error('Only local envelopes can be signed via this endpoint', 400);
+        $provider = $item['provider'] ?? 'docusign';
+
+        // Los sobres Spectra Sign se firman en el portal público (/sign/{token}) con la firma dibujada.
+        if ($provider === 'spectra_sign') {
+            if (!empty($item['sign_token'])) {
+                Response::json([
+                    'message' => 'Abre el enlace de firma para dibujar y guardar tu firma',
+                    'url' => $this->signingUrl($item['sign_token'])
+                ]);
+            } else {
+                Response::error('Este sobre no tiene enlace de firma válido', 400);
+            }
+            return;
+        }
+
+        if ($provider !== 'local') {
+            Response::error('Este sobre fue creado con DocuSign, servicio discontinuado. Crea un nuevo sobre para firmar.', 400);
             return;
         }
 
@@ -408,52 +456,23 @@ class EnvelopeController
         $docContent .= "Signatures:\n\n__________________________\n" . ($amendment['user_name'] ?? 'Contractor') . "\n";
         $docContent .= "\n__________________________\n" . ($amendment['company_name'] ?? 'Company Representative');
 
-        $docBase64 = base64_encode($docContent);
-
-        // 3. Create Envelope
-        $provider = 'docusign';
-        $envelopeId = null;
-        $errorMsg = null;
-
-        try {
-            if ($this->docusign->isConfigured()) {
-                $envelopeId = $this->docusign->createEnvelope(
-                    [[
-                        'name' => 'Amendment_' . $amendmentId . '.txt', 
-                        'file_base64' => $docBase64, 
-                        'file_extension' => 'txt'
-                    ]],
-                    [[
-                        'email' => $amendment['user_email'] ?? 'demo@example.com',
-                        'name' => $amendment['user_name'] ?? 'Signer',
-                        'recipientId' => '1'
-                    ]],
-                    'Please sign the amendment for ' . ($amendment['title'] ?? 'Contract')
-                );
-            } else {
-                $provider = 'local';
-            }
-        } catch (\Exception $e) {
-            $errorMsg = $e->getMessage();
-            $provider = 'local';
-        }
-
-        if ($provider === 'local') {
-            $envelopeId = 'LOC-' . $this->uuid();
-        }
+        // 3. Crear sobre de firma (Spectra Sign: portal propio, sin DocuSign)
+        $token = $this->newSignToken();
+        $envelopeId = 'SPEC-' . $this->uuid();
+        $signingUrl = $this->signingUrl($token);
 
         try {
             $id = $this->uuid();
             $stmt = $this->pdo->prepare("
-                INSERT INTO docusign_envelopes (id, contract_id, amendment_id, envelope_id, status, last_event_at, provider)
-                VALUES (:id, :cid, :aid, :eid, 'sent', NOW(), :provider)
+                INSERT INTO docusign_envelopes (id, contract_id, amendment_id, envelope_id, status, last_event_at, provider, sign_token)
+                VALUES (:id, :cid, :aid, :eid, 'sent', NOW(), 'spectra_sign', :token)
             ");
             $stmt->execute([
                 ':id' => $id,
                 ':cid' => $amendment['contract_id'],
                 ':aid' => $amendmentId,
                 ':eid' => $envelopeId,
-                ':provider' => $provider
+                ':token' => $token
             ]);
             
             // Update Amendment status
@@ -461,10 +480,10 @@ class EnvelopeController
                  ->execute([':eid' => $envelopeId, ':id' => $amendmentId]);
 
             Response::json([
-                'message' => $provider === 'local' ? 'Amendment envelope created locally (Fallback)' : 'Amendment envelope sent',
+                'message' => 'Enmienda enviada para firma (Spectra Sign)',
                 'envelope_id' => $envelopeId,
-                'provider' => $provider,
-                'warning' => $errorMsg
+                'provider' => 'spectra_sign',
+                'signing_url' => $signingUrl
             ]);
         } catch (\Exception $e) {
             Response::error('Database Error: ' . $e->getMessage(), 500);
@@ -493,69 +512,23 @@ class EnvelopeController
             return;
         }
 
-        $provider = 'docusign';
-        $envelopeId = null;
-        $errorMsg = null;
-
-        try {
-            if ($this->docusign->isConfigured()) {
-                if (!empty($contract['docusign_template_id'])) {
-                    // Create Envelope from Template
-                    $envelopeId = $this->docusign->createEnvelopeFromTemplate(
-                        $contract['docusign_template_id'],
-                        [[
-                            'email' => $contract['user_email'] ?? 'demo@example.com',
-                            'name' => $contract['user_name'] ?? 'Signer',
-                            'roleName' => 'Signer',
-                            'clientUserId' => (string)($contract['freelancer_id'] ?? $contract['user_id'] ?? '1001')
-                        ]],
-                        'Please sign your contract with ' . ($contract['company_name'] ?? 'Spectra')
-                    );
-                } else {
-                    // Prepare Document Content
-                    $docContent = $this->generateContractDocument($contract);
-                    $docBase64 = base64_encode($docContent);
-
-                    // Create Envelope via Service
-                    $envelopeId = $this->docusign->createEnvelope(
-                        [[
-                            'name' => 'Contract_' . $contractId . '.txt', 
-                            'file_base64' => $docBase64, 
-                            'file_extension' => 'txt'
-                        ]],
-                        [[
-                            'email' => $contract['user_email'] ?? 'demo@example.com',
-                            'name' => $contract['user_name'] ?? 'Signer',
-                            'recipientId' => '1',
-                            'clientUserId' => (string)($contract['freelancer_id'] ?? $contract['user_id'] ?? '1001')
-                        ]],
-                        'Please sign your contract with ' . ($contract['company_name'] ?? 'Spectra')
-                    );
-                }
-            } else {
-                $provider = 'local';
-            }
-        } catch (\Exception $e) {
-            $errorMsg = $e->getMessage();
-            $provider = 'local';
-        }
-
-        if ($provider === 'local') {
-            $envelopeId = 'LOC-' . $this->uuid();
-        }
+        // Crear sobre de firma (Spectra Sign: portal propio, sin DocuSign)
+        $token = $this->newSignToken();
+        $envelopeId = 'SPEC-' . $this->uuid();
+        $signingUrl = $this->signingUrl($token);
 
         try {
             // Save Envelope Record
             $id = $this->uuid();
             $stmt = $this->pdo->prepare("
-                INSERT INTO docusign_envelopes (id, contract_id, envelope_id, status, last_event_at, provider)
-                VALUES (:id, :cid, :eid, 'sent', NOW(), :provider)
+                INSERT INTO docusign_envelopes (id, contract_id, envelope_id, status, last_event_at, provider, sign_token)
+                VALUES (:id, :cid, :eid, 'sent', NOW(), 'spectra_sign', :token)
             ");
             $stmt->execute([
                 ':id' => $id,
                 ':cid' => $contractId,
                 ':eid' => $envelopeId,
-                ':provider' => $provider
+                ':token' => $token
             ]);
 
             // Update contract status to pending
@@ -563,10 +536,10 @@ class EnvelopeController
             $stmt->execute([':id' => $contractId]);
 
             Response::json([
-                'message' => $provider === 'local' ? 'Contract envelope created locally (Fallback)' : 'Contract envelope created',
+                'message' => 'Contrato enviado para firma digital (Spectra Sign)',
                 'envelope_id' => $envelopeId,
-                'provider' => $provider,
-                'warning' => $errorMsg
+                'provider' => 'spectra_sign',
+                'signing_url' => $signingUrl
             ]);
 
         } catch (\Exception $e) {
@@ -608,6 +581,25 @@ class EnvelopeController
             return;
         }
 
+        if (($envelope['provider'] ?? 'docusign') === 'spectra_sign') {
+            if (!empty($envelope['sign_token'])) {
+                $payload = [
+                    'provider' => 'spectra_sign',
+                    'token' => $envelope['sign_token'],
+                    'url' => $this->signingUrl($envelope['sign_token']),
+                    'status' => $envelope['status'],
+                    'signed_at' => $envelope['signed_at'] ?? null
+                ];
+                if (!empty($envelope['signed_pdf'])) {
+                    $payload['pdf_url'] = $this->pdfUrl($envelope['sign_token']);
+                }
+                Response::json($payload);
+                return;
+            }
+            Response::error('Este sobre no tiene enlace de firma válido', 400);
+            return;
+        }
+
         if (($envelope['provider'] ?? 'docusign') === 'local') {
             $contract = $this->getContractDetails($envelope['contract_id']);
             if (!$contract) {
@@ -620,39 +612,14 @@ class EnvelopeController
             header('Content-Type: text/plain; charset=utf-8');
             echo $content;
             exit;
-        } else {
-            $contract = $this->getContractDetails($envelope['contract_id']);
-            if (!$contract) {
-                Response::error('Contract not found', 404);
-                return;
-            }
-
-            try {
-                $clientUserId = (string)($contract['freelancer_id'] ?? $contract['user_id'] ?? '1001');
-                // Use a default return URL for now - can be updated to environment variable later
-                $returnUrl = 'http://localhost:5173/signing-complete'; 
-
-                $url = $this->docusign->createRecipientView(
-                    $envelope['envelope_id'],
-                    $contract['user_name'] ?? 'Signer',
-                    $contract['user_email'] ?? 'demo@example.com',
-                    $clientUserId,
-                    $returnUrl
-                );
-
-                Response::json([
-                    'provider' => 'docusign',
-                    'url' => $url
-                ]);
-            } catch (\Exception $e) {
-                Response::json([
-                    'message' => 'This is a DocuSign envelope. Please check your email to sign.',
-                    'provider' => 'docusign',
-                    'status' => $envelope['status'],
-                    'error' => $e->getMessage()
-                ]);
-            }
         }
+
+        // DocuSign heredado: servicio discontinuado
+        Response::json([
+            'message' => 'Este sobre fue creado con DocuSign, servicio discontinuado. Crea un nuevo sobre para firmar.',
+            'provider' => 'docusign',
+            'status' => $envelope['status']
+        ]);
     }
 
     private function getContractDetails(string $contractId): ?array
@@ -706,12 +673,8 @@ class EnvelopeController
     {
         if (!empty($contract['template_body'])) {
             $docContent = $contract['template_body'];
-            $docContent = preg_replace('/<br\s*\/?>/i', "\n", $docContent);
-            $docContent = strip_tags((string)$docContent);
-            $docContent = html_entity_decode((string)$docContent, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-            $docContent = preg_replace("/\r\n?/", "\n", $docContent);
-            $docContent = trim((string)$docContent);
-            
+            $docContent = $this->plainText($docContent);
+
             $replacements = [
                 '{{company_name}}' => $contract['company_name'] ?? 'Company',
                 '{{company_tax_id}}' => $contract['company_tax_id'] ?? 'N/A',
@@ -743,7 +706,7 @@ class EnvelopeController
             ];
             
             foreach ($replacements as $key => $val) {
-                $docContent = str_replace($key, (string)$val, $docContent);
+                $docContent = str_replace($key, $this->plainText((string)$val), $docContent);
             }
             
             return preg_replace('/\{\{[^}]+\}\}/', '_____', $docContent);
@@ -760,6 +723,83 @@ class EnvelopeController
         $docContent .= "\n\nSignatures:\n\n__________________________\n" . ($contract['user_name'] ?? 'Contractor');
         
         return $docContent;
+    }
+
+    private function plainText(string $html): string
+    {
+        $html = str_ireplace(['<div>', '</div>'], ["\n", ''], $html);
+        $html = preg_replace('/<br\s*\/?>/i', "\n", $html);
+        $html = str_ireplace(
+            ['</p>', '</h1>', '</h2>', '</h3>', '</h4>', '</li>', '</ul>', '</ol>', '</blockquote>', '<hr>', '<hr/>', '<hr />'],
+            "\n",
+            $html
+        );
+        $text = strip_tags($html);
+        $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = preg_replace("/\r\n?/", "\n", $text);
+        $text = preg_replace("/\n{3,}/", "\n\n", $text);
+        return trim($text);
+    }
+
+    /**
+     * Dispara las automatizaciones tras una firma (contrato activo / enmienda aplicada).
+     * Lo usa el portal público de firma (SignatureController).
+     */
+    public function handleSignedEnvelope(string $envelopeId): void
+    {
+        $stmt = $this->pdo->prepare("SELECT * FROM docusign_envelopes WHERE id = :id LIMIT 1");
+        $stmt->execute([':id' => $envelopeId]);
+        $item = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$item) {
+            return;
+        }
+        if (!empty($item['amendment_id'])) {
+            $this->handleAmendmentSigned($item['amendment_id']);
+        } else {
+            $this->handleContractSigned($item['contract_id']);
+        }
+    }
+
+    public function attachLinks(array &$row): void
+    {
+        $token = $row['sign_token'] ?? null;
+        if ($token) {
+            $row['signing_url'] = $this->signingUrl($token);
+            if (!empty($row['signed_pdf'])) {
+                $row['pdf_url'] = $this->pdfUrl($token);
+            }
+        }
+    }
+
+    private function signingUrl(string $token): string
+    {
+        return $this->baseUrl() . '/sign/' . $token;
+    }
+
+    private function pdfUrl(string $token): string
+    {
+        return $this->apiBaseUrl() . '/api/sign/' . $token . '/pdf';
+    }
+
+    private function baseUrl(): string
+    {
+        $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        return $scheme . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost');
+    }
+
+    private function apiBaseUrl(): string
+    {
+        $base = $this->baseUrl();
+        $script = $_SERVER['SCRIPT_NAME'] ?? '';
+        if (strpos($script, '/public/') !== false) {
+            return $base . str_replace('/index.php', '', $script);
+        }
+        return $base;
+    }
+
+    private function newSignToken(): string
+    {
+        return bin2hex(random_bytes(32));
     }
 
     private function uuid(): string

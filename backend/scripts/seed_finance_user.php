@@ -29,9 +29,18 @@ try {
     $pdo = $database->pdo();
 
     $email = getenv('FINOPS_SEED_EMAIL') ?: 'finance.ops@frontspectra.test';
-    $password = getenv('FINOPS_SEED_PASSWORD') ?: 'Spectra#2026';
+    $password = getenv('FINOPS_SEED_PASSWORD') ?: '';
     $fullName = getenv('FINOPS_SEED_NAME') ?: 'Finance Ops';
     $platformRole = 'finance';
+
+    if ($password === '') {
+        http_response_code(500);
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'La variable de entorno FINOPS_SEED_PASSWORD es obligatoria. No se usan contraseñas por defecto.',
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        exit;
+    }
 
     $stmt = $pdo->prepare("SELECT id, status, platform_role FROM users WHERE email LIKE :email AND deleted_at IS NULL");
     $stmt->execute([':email' => strtolower($email)]);

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { createApi } from '../../lib/api';
+import { getStoredSession } from '../../session';
 import ConfirmModal from '../../components/ConfirmModal';
 import { useToast } from '../../components/ToastProvider';
 
@@ -40,8 +41,8 @@ function RejectModal({ open, onClose, onConfirm, loading }) {
 
 export default function KYBDetailPage({ apiUrl, token }) {
   const { id } = useParams();
-  const navigate = useNavigate();
   const api = useMemo(() => createApi({ baseUrl: apiUrl, token }), [apiUrl, token]);
+  const toast = useToast();
 
   const STATUS_LABELS = {
     not_started: 'No iniciado',
@@ -57,7 +58,9 @@ export default function KYBDetailPage({ apiUrl, token }) {
   
   const [showReject, setShowReject] = useState(false);
   const [confirmApprove, setConfirmApprove] = useState(false);
+  const [confirmReopen, setConfirmReopen] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [downloading, setDownloading] = useState(null);
 
   useEffect(() => {
     load();
@@ -102,6 +105,51 @@ export default function KYBDetailPage({ apiUrl, token }) {
           toast.error(e.message || 'Error al rechazar');
       } finally {
           setActionLoading(false);
+      }
+  }
+
+  async function handleReopen() {
+      setActionLoading(true);
+      try {
+          await api.post(`/api/kyb/${id}/reopen`);
+          toast.success('Solicitud reabierta para revisión');
+          setConfirmReopen(false);
+          load();
+      } catch (e) {
+          toast.error(e.message || 'Error al reabrir');
+      } finally {
+          setActionLoading(false);
+      }
+  }
+
+  async function downloadDoc(doc) {
+      const isAttachment = doc?.id && !doc?.url;
+      const href = typeof doc === 'string' ? doc : (doc?.url || (isAttachment ? `${apiUrl}/api/kyb/${request.id}/documents/${doc.id}/download` : null));
+      if (!href) return;
+
+      if (isAttachment) {
+          setDownloading(doc.id);
+          try {
+              const current = getStoredSession();
+              const bearer = current?.token || token;
+              const res = await fetch(href, { headers: bearer ? { Authorization: `Bearer ${bearer}` } : {} });
+              if (!res.ok) throw new Error('Error al descargar el documento');
+              const blob = await res.blob();
+              const objectUrl = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = objectUrl;
+              a.download = doc.file_name || `documento_${doc.id}`;
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+              URL.revokeObjectURL(objectUrl);
+          } catch (e) {
+              toast.error(e.message || 'Error al descargar el documento');
+          } finally {
+              setDownloading(null);
+          }
+      } else {
+          window.open(href, '_blank', 'noreferrer');
       }
   }
 
@@ -156,12 +204,12 @@ export default function KYBDetailPage({ apiUrl, token }) {
                                 <div className="font-medium mt-1 text-red-600">{new Date(request.rejected_at).toLocaleString()}</div>
                             </div>
                         )}
-                         {request.reviewer && (
+                         {request.reviewer_name && (
                              <div className="col-span-2">
                                 <div className="text-slate-500">Revisado por</div>
                                 <div className="font-medium mt-1 flex items-center gap-2">
                                     <div className="h-5 w-5 rounded-full bg-slate-200" />
-                                    {request.reviewer.name || 'Admin'}
+                                    {request.reviewer_name || 'Admin'}
                                 </div>
                             </div>
                         )}
@@ -181,24 +229,43 @@ export default function KYBDetailPage({ apiUrl, token }) {
                         {(request.documents || []).length === 0 ? (
                             <div className="text-sm text-slate-500 italic">No hay documentos adjuntos.</div>
                         ) : (
-                            (request.documents || []).map((doc, i) => (
-                                <a 
-                                    key={i} 
-                                    href={typeof doc === 'string' ? doc : doc.url} 
-                                    target="_blank" 
-                                    rel="noreferrer"
-                                    className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 hover:bg-slate-50 transition group"
-                                >
-                                    <div className="h-10 w-10 grid place-items-center rounded-lg bg-blue-50 text-blue-600 group-hover:bg-blue-100 transition">
-                                        <i className="bi bi-file-earmark-text" />
+                            (request.documents || []).map((doc, i) => {
+                                const isAttachment = doc?.id && !doc?.url;
+                                const href = typeof doc === 'string' ? doc : doc?.url;
+                                const downloadingThis = downloading === doc?.id;
+                                const inner = (
+                                    <div className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 hover:bg-slate-50 transition group">
+                                        <div className="h-10 w-10 grid place-items-center rounded-lg bg-blue-50 text-blue-600 group-hover:bg-blue-100 transition">
+                                            <i className={downloadingThis ? 'bi bi-arrow-clockwise animate-spin' : 'bi bi-file-earmark-text'} />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-sm font-semibold text-slate-700 truncate">
+                                                {doc?.file_name || `Documento ${i + 1}`}
+                                            </div>
+                                            <div className="text-xs text-slate-500 truncate">
+                                                {isAttachment ? 'Descargar documento' : (href ? 'Ver documento' : (doc?.mime_type || 'Documento adjunto'))}
+                                            </div>
+                                        </div>
+                                        {isAttachment && <i className="bi bi-download text-slate-400" />}
+                                        {href && !isAttachment && <i className="bi bi-box-arrow-up-right text-slate-400" />}
                                     </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="text-sm font-semibold text-slate-700 truncate">Documento {i + 1}</div>
-                                        <div className="text-xs text-slate-500 truncate">{typeof doc === 'string' ? doc : 'Ver documento'}</div>
-                                    </div>
-                                    <i className="bi bi-box-arrow-up-right text-slate-400" />
-                                </a>
-                            ))
+                                );
+                                return isAttachment ? (
+                                    <button
+                                        key={i}
+                                        type="button"
+                                        onClick={() => downloadDoc(doc)}
+                                        disabled={!!downloading}
+                                        className="w-full text-left cursor-pointer disabled:cursor-wait"
+                                    >
+                                        {inner}
+                                    </button>
+                                ) : href ? (
+                                    <a key={i} href={href} target="_blank" rel="noreferrer">{inner}</a>
+                                ) : (
+                                    <div key={i}>{inner}</div>
+                                );
+                            })
                         )}
                      </div>
                 </div>
@@ -227,8 +294,19 @@ export default function KYBDetailPage({ apiUrl, token }) {
                             </button>
                         </div>
                     ) : (
-                        <div className="text-center py-4 text-sm text-slate-500">
-                            Esta solicitud ya fue procesada.
+                        <div className="space-y-3">
+                            {(request.status === 'rejected' || request.status === 'more_info_required') && (
+                                <button 
+                                    onClick={() => setConfirmReopen(true)}
+                                    disabled={actionLoading}
+                                    className="w-full rounded-xl border border-amber-200 bg-white px-4 py-2.5 text-sm font-bold text-amber-700 hover:bg-amber-50 transition disabled:opacity-50"
+                                >
+                                    Reabrir Revisión
+                                </button>
+                            )}
+                            <div className="text-center py-3 text-sm text-slate-500">
+                                Esta solicitud ya fue procesada.
+                            </div>
                         </div>
                     )}
                 </div>
@@ -252,6 +330,18 @@ export default function KYBDetailPage({ apiUrl, token }) {
             loading={actionLoading}
             onClose={() => setConfirmApprove(false)}
             onConfirm={handleApprove}
+        />
+
+        <ConfirmModal
+            open={confirmReopen}
+            title="Reabrir Revisión KYB"
+            message="¿Deseas reabrir esta solicitud para revisión? Volverá a estar pendiente y un revisor podrá evaluarla nuevamente."
+            confirmText="Reabrir"
+            cancelText="Cancelar"
+            danger={false}
+            loading={actionLoading}
+            onClose={() => setConfirmReopen(false)}
+            onConfirm={handleReopen}
         />
     </div>
   );

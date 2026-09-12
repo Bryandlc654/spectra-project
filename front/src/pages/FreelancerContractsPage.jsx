@@ -35,8 +35,10 @@ export default function FreelancerContractsPage({ user, apiUrl, token }) {
             returnUrl: window.location.href 
         });
         
-        if (res && res.url) {
-            window.location.href = res.url;
+        if (res && (res.token || res.url)) {
+            // Preferir la ruta del SPA para evitar saltos de host
+            const link = res.token ? `${window.location.origin}/sign/${res.token}` : res.url;
+            window.location.href = link;
         } else {
             alert('No se pudo obtener la URL de firma. Por favor contacta a soporte.');
         }
@@ -49,6 +51,9 @@ export default function FreelancerContractsPage({ user, apiUrl, token }) {
   const handleDownload = (contract) => {
       if (contract.file_url) {
           window.open(contract.file_url, '_blank');
+      } else if (contract.docusign_sign_token) {
+          const base = String(apiUrl || '').replace(/\/$/, '');
+          window.open(`${base}/api/sign/${contract.docusign_sign_token}/pdf`, '_blank', 'noopener');
       } else {
           // Fallback or alert
           alert('El documento no está disponible para descarga directa en este momento.');
