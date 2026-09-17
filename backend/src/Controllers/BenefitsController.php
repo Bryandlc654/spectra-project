@@ -45,7 +45,7 @@ class BenefitsController
                 user_id VARCHAR(36) NOT NULL,
                 plan_id CHAR(36) NOT NULL,
                 status ENUM('pending', 'active', 'cancelled') DEFAULT 'pending',
-                enrollment_date DATE DEFAULT CURRENT_DATE,
+                enrollment_date DATE DEFAULT (CURRENT_DATE),
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 UNIQUE KEY unique_enrollment (user_id, plan_id),

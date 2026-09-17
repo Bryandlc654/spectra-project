@@ -39,7 +39,7 @@ class EquipmentController
                 id CHAR(36) PRIMARY KEY,
                 user_id VARCHAR(36) NOT NULL,
                 equipment_id CHAR(36) NOT NULL,
-                assigned_date DATE DEFAULT CURRENT_DATE,
+                assigned_date DATE DEFAULT (CURRENT_DATE),
                 returned_date DATE NULL,
                 status ENUM('active', 'returned') DEFAULT 'active',
                 notes TEXT,
