@@ -4,8 +4,8 @@ return [
         'host' => getenv('DB_HOST') ?: '127.0.0.1',
         'port' => getenv('DB_PORT') ?: '3306',
         'database' => getenv('DB_DATABASE') ?: 'core_spectra',
-        'username' => getenv('DB_USERNAME') ?: 'manage_spect_usr',
-        'password' => getenv('DB_PASSWORD') ?: 'admin@123',
+        'username' => getenv('DB_USERNAME') ?: 'manage_spect',
+        'password' => getenv('DB_PASSWORD') ?: '',
         'charset' => 'utf8mb4',
     ],
     'pagination' => [
