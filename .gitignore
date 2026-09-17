@@ -51,6 +51,9 @@ pnpm-debug.log*
 # Backend cache
 backend/storage/cache/
 
+# Dependencias PHP (se instalan con: cd backend && composer install)
+backend/vendor/
+
 # Backend storage (artefactos locales de QA)
 backend/storage/*.sqlite
 backend/storage/*.sqlite-journal
