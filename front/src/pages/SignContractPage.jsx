@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import SignaturePad from '../components/SignaturePad';
 import { resolveApiUrl } from '../lib/api';
+import { sanitizeHtml } from '../lib/sanitizeHtml';
 
 export default function SignContractPage({ apiUrl }) {
     const { token } = useParams();
@@ -171,7 +172,7 @@ export default function SignContractPage({ apiUrl }) {
                         <div className="rounded-2xl bg-white p-6 shadow-sm sm:p-10">
                             <div
                                 className="contract-doc max-w-none"
-                                dangerouslySetInnerHTML={{ __html: data.content_html || '<p>Sin contenido.</p>' }}
+                                dangerouslySetInnerHTML={{ __html: sanitizeHtml(data.content_html || '<p>Sin contenido.</p>') }}
                             />
                         </div>
 

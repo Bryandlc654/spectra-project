@@ -383,13 +383,14 @@ class SignatureController
         }
 
         // Fallback manual
+        $e = static fn($v) => htmlspecialchars((string)$v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         $lines = [];
         $lines[] = '<p><b>CONTRACT AGREEMENT</b></p>';
-        $lines[] = '<p>Between: <b>' . ($contract['company_name'] ?? 'Company') . '</b></p>';
-        $lines[] = '<p>And: <b>' . ($contract['user_name'] ?? 'Contractor') . '</b></p>';
-        $lines[] = '<p>Job Title: ' . ($contract['title'] ?? 'N/A') . '</p>';
-        $lines[] = '<p>Start Date: ' . ($contract['start_date'] ?? 'N/A') . '</p>';
-        $lines[] = '<p>Rate: ' . ($contract['rate'] ?? '0') . ' ' . ($contract['currency_code'] ?? 'USD') . '</p>';
+        $lines[] = '<p>Between: <b>' . $e($contract['company_name'] ?? 'Company') . '</b></p>';
+        $lines[] = '<p>And: <b>' . $e($contract['user_name'] ?? 'Contractor') . '</b></p>';
+        $lines[] = '<p>Job Title: ' . $e($contract['title'] ?? 'N/A') . '</p>';
+        $lines[] = '<p>Start Date: ' . $e($contract['start_date'] ?? 'N/A') . '</p>';
+        $lines[] = '<p>Rate: ' . $e($contract['rate'] ?? '0') . ' ' . $e($contract['currency_code'] ?? 'USD') . '</p>';
         $lines[] = '<p>Scope of Work:</p>';
         $lines[] = '<p>' . nl2br(htmlspecialchars((string)($contract['scope_of_work'] ?? 'See attached details.'), ENT_QUOTES, 'UTF-8')) . '</p>';
         return implode("\n", $lines);
@@ -502,6 +503,9 @@ class SignatureController
         $body = str_ireplace(['<div>', '</div>'], ['<p>', '</p>'], $body);
         $allowed = '<p><br><b><strong><i><em><u><s><strike><ul><ol><li><h1><h2><h3><h4><blockquote><hr>';
         $body = strip_tags($body, $allowed);
+        // strip_tags conserva los atributos (<p onclick=...>, <b onmouseover=...>):
+        // ninguna etiqueta permitida los necesita, así que se eliminan todos.
+        $body = preg_replace('/<(\/?)([a-z][a-z0-9]*)\b[^>]*?(\/?)>/i', '<$1$2$3>', $body) ?? '';
         return trim($body);
     }
 

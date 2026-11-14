@@ -339,9 +339,9 @@ class AuthController
             ], 200);
 
         } catch (Throwable $e) {
-            Response::error('Error interno en login', 500, [
-                'message' => $e->getMessage(),
-            ]);
+            // No devolver el mensaje interno al cliente (puede revelar SQL/rutas)
+            error_log('[Spectra] Login error: ' . $e->getMessage());
+            Response::error('Error interno en login', 500);
             return;
         }
     }
@@ -1122,6 +1122,9 @@ class AuthController
             ]);
         } catch (Throwable $e) {
             error_log('Session record failed: ' . $e->getMessage());
+            // Auth exige sesión registrada: sin ella el token no serviría, así que
+            // es mejor que el login falle de forma visible.
+            throw $e;
         }
     }
 
@@ -1152,7 +1155,7 @@ class AuthController
         $refreshHash = hash('sha256', $refresh);
         try {
             $stmt = $this->pdo->prepare("
-                SELECT us.user_id, us.refresh_expires_at, u.platform_role
+                SELECT us.id AS session_id, us.user_id, us.refresh_expires_at, u.platform_role, u.status
                 FROM user_sessions us
                 JOIN users u ON u.id = us.user_id
                 WHERE us.refresh_token_hash = :h AND us.is_active = 1
@@ -1166,6 +1169,18 @@ class AuthController
             }
             if (!empty($row['refresh_expires_at']) && strtotime($row['refresh_expires_at']) <= time()) {
                 Response::error('Refresh expirado', 401);
+                return;
+            }
+            if (($row['status'] ?? '') !== 'active') {
+                Response::error('La cuenta no está activa', 403);
+                return;
+            }
+            // Rotación de un solo uso: consumir el refresh token de forma atómica.
+            // Si otra petición ya lo usó (o se reutiliza uno robado), rowCount = 0.
+            $consume = $this->pdo->prepare("UPDATE user_sessions SET refresh_token_hash = NULL WHERE id = :id AND refresh_token_hash = :h");
+            $consume->execute([':id' => $row['session_id'], ':h' => $refreshHash]);
+            if ($consume->rowCount() !== 1) {
+                Response::error('Refresh inválido', 401);
                 return;
             }
             $now = time();

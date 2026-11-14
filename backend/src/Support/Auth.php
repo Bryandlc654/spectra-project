@@ -35,20 +35,10 @@ class Auth
 
             if (!$user || ($user['status'] ?? '') !== 'active') return;
 
-            // Session check
-            $tokenHash = hash('sha256', $token);
-            try {
-                $stmt = $pdo->prepare("SELECT id, last_activity, is_active FROM user_sessions WHERE token_hash = :hash LIMIT 1");
-                $stmt->execute([':hash' => $tokenHash]);
-                $session = $stmt->fetch(PDO::FETCH_ASSOC);
-
-                if ($session) {
-                    if ($session['is_active'] == 0) return;
-                    self::bumpActivity($pdo, $session);
-                } else {
-                    self::registerSession($pdo, $user['id'], $token);
-                }
-            } catch (\Throwable $e) {}
+            // Session check (fail-closed): sin sesión activa registrada -> anónimo
+            $session = self::activeSession($pdo, $token);
+            if ($session === null) return;
+            self::bumpActivity($pdo, $session);
 
             self::$user = $user;
             self::checkReadOnly();
@@ -133,35 +123,17 @@ class Auth
 
             // Validar sesión en base de datos (revocación y tracking)
             // Calculamos el hash del token para buscar la sesión
-            $tokenHash = hash('sha256', $token);
-            
-            // Check session status
-            // Note: If session table doesn't exist or row missing, we might want to fail-safe (allow).
-            // But if we want security, we should probably check.
-            // For now, let's only block if we FIND a revoked session (is_active = 0).
-            // If we don't find it, we assume it's a legacy token or session tracking failed but token is valid.
-            try {
-                $stmt = $pdo->prepare("SELECT id, last_activity, is_active FROM user_sessions WHERE token_hash = :hash LIMIT 1");
-                $stmt->execute([':hash' => $tokenHash]);
-                $session = $stmt->fetch(PDO::FETCH_ASSOC);
-
-                if ($session) {
-                    if ($session['is_active'] == 0) {
-                        self::log('Auth failed: Session revoked for hash: ' . $tokenHash);
-                        Response::error('Sesión revocada', 401);
-                        exit;
-                    }
-                    
-                    // Update activity (optimistic, throttled to at most once every 5 minutes per session)
-                    self::bumpActivity($pdo, $session);
-                } else {
-                    self::log('Auth warning: Session not found in DB (allowing access)');
-                    self::registerSession($pdo, $user['id'], $token);
-                }
-            } catch (\Throwable $e) {
-                // Ignore DB errors (e.g. table missing) to not break auth
-                self::log('Auth warning: Session check failed: ' . $e->getMessage());
+            // Fail-closed: el token solo vale si tiene una sesión ACTIVA registrada
+            // (login/refresh siempre la crean). Así cerrar sesión o revocar desde
+            // Seguridad invalida el token de inmediato. Si la consulta falla, se deniega.
+            $session = self::activeSession($pdo, $token);
+            if ($session === null) {
+                self::log('Auth failed: session missing, revoked or check failed');
+                Response::error('Sesión no válida o revocada', 401);
+                exit;
             }
+            // Update activity (throttled to at most once every 5 minutes per session)
+            self::bumpActivity($pdo, $session);
 
             // self::log('Auth success for user: ' . $user['email']); // Uncomment for verbose logging
 
@@ -209,22 +181,22 @@ class Auth
         } catch (\Throwable $e) {}
     }
 
-    private static function registerSession(PDO $pdo, string $userId, string $token): void
+    /**
+     * Devuelve la sesión activa asociada al token, o null si no existe, está
+     * revocada o la consulta falla (fail-closed). Antes se aceptaba cualquier
+     * token sin sesión y se le creaba una al vuelo, lo que impedía revocar.
+     */
+    private static function activeSession(PDO $pdo, string $token): ?array
     {
         try {
-            $stmt = $pdo->prepare("
-                INSERT INTO user_sessions (id, user_id, ip_address, user_agent, token_hash, last_activity)
-                VALUES (:id, :uid, :ip, :ua, :th, NOW())
-            ");
-            $stmt->execute([
-                ':id' => self::uuid4(),
-                ':uid' => $userId,
-                ':ip' => $_SERVER['REMOTE_ADDR'] ?? null,
-                ':ua' => $_SERVER['HTTP_USER_AGENT'] ?? null,
-                ':th' => hash('sha256', $token),
-            ]);
+            $stmt = $pdo->prepare("SELECT id, last_activity, is_active FROM user_sessions WHERE token_hash = :hash LIMIT 1");
+            $stmt->execute([':hash' => hash('sha256', $token)]);
+            $session = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$session || (int)($session['is_active'] ?? 0) !== 1) return null;
+            return $session;
         } catch (\Throwable $e) {
-            self::log('Auth warning: Failed to register session: ' . $e->getMessage());
+            self::log('Auth failed: session check error: ' . $e->getMessage());
+            return null;
         }
     }
 

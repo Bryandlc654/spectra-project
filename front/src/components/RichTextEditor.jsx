@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { sanitizeHtml } from '../lib/sanitizeHtml';
 
 const BTN = 'inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 transition-colors hover:bg-slate-200 hover:text-slate-900';
 
@@ -8,7 +9,8 @@ export default function RichTextEditor({ value = '', onChange, variables = [], p
     useEffect(() => {
         const el = ref.current;
         if (el && el.innerHTML !== (value || '')) {
-            el.innerHTML = value || '';
+            // El contenido viene del servidor (plantillas): limpiarlo antes de inyectarlo
+            el.innerHTML = sanitizeHtml(value || '');
         }
     }, [value]);
 

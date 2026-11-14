@@ -1,6 +1,10 @@
 import { getStoredSession, persistSession } from '../session';
 
-async function tryRefreshToken(baseUrl) {
+// El backend rota el refresh token y lo invalida al usarlo (un solo uso).
+// Por eso todas las peticiones que reciben 401 a la vez comparten UN refresh.
+let refreshInFlight = null;
+
+async function doRefresh(baseUrl) {
   const url = String(baseUrl).replace(/\/$/, '');
   const current = getStoredSession();
   const rt = current?.refreshToken;
@@ -11,10 +15,25 @@ async function tryRefreshToken(baseUrl) {
     body: JSON.stringify({ refresh_token: rt })
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data?.token) return null;
+  if (!res.ok || !data?.token) {
+    // Otra pestaña pudo haber rotado el refresh justo antes: usar su token nuevo
+    const latest = getStoredSession();
+    if (latest?.token && latest.refreshToken && latest.refreshToken !== rt) return latest.token;
+    return null;
+  }
   const next = { ...(current || {}), token: data.token, refreshToken: data.refresh_token || current.refreshToken };
   persistSession(next);
   return next.token;
+}
+
+async function tryRefreshToken(baseUrl, failedToken) {
+  // Si otra petición/pestaña ya renovó el token, reutilizarlo sin gastar el refresh
+  const current = getStoredSession();
+  if (failedToken && current?.token && current.token !== failedToken) return current.token;
+  if (!refreshInFlight) {
+    refreshInFlight = doRefresh(baseUrl).finally(() => { refreshInFlight = null; });
+  }
+  return refreshInFlight;
 }
 
 export function createApi({ baseUrl, token }) {
@@ -49,7 +68,7 @@ export function createApi({ baseUrl, token }) {
                 throw err;
             }
             if (res.status === 401) {
-                const newToken = await tryRefreshToken(url).catch(() => null);
+                const newToken = await tryRefreshToken(url, bearer).catch(() => null);
                 if (newToken) {
                     opts = { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${newToken}` } };
                     res = await fetch(`${url}${path}`, opts);
@@ -121,7 +140,7 @@ export async function apiFetch(apiUrl, path, { token, method = 'GET', body, para
       throw err;
     }
     if (res.status === 401) {
-      const newToken = await tryRefreshToken(apiUrl).catch(() => null);
+      const newToken = await tryRefreshToken(apiUrl, bearer).catch(() => null);
       if (newToken) {
         const retryHeaders = { ...headers, Authorization: `Bearer ${newToken}` };
         res = await fetch(url.toString(), { method, headers: retryHeaders, body: payloadBody });
