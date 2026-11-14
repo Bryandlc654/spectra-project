@@ -1,3 +1,5 @@
+import ConfirmModal from '../../components/ConfirmModal';
+import { getStoredSession } from '../../session';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useToast } from '../../components/ToastProvider';
 import RichTextEditor from '../../components/RichTextEditor';
@@ -21,6 +23,29 @@ const TEMPLATE_VARIABLES = [
 ];
 
 export default function GlobalContractTemplatesPage({ apiUrl, token }) {
+    // Confirmación de la limpieza masiva con el modal de la app (antes window.confirm)
+    const [confirmSanitize, setConfirmSanitize] = useState(false);
+    const [sanitizing, setSanitizing] = useState(false);
+    async function runSanitize() {
+        setSanitizing(true);
+        try {
+            const res = await fetch(`${apiUrl}/api/global-contract-templates/sanitize`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${getStoredSession()?.token || token}` }
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data?.message || 'Error al sanear');
+            toast.success(`Plantillas saneadas: ${data.actualizadas ?? 0} de ${data.total ?? 0}`);
+            setConfirmSanitize(false);
+            handleReload();
+        } catch (e) {
+            console.error(e);
+            toast.error(e.message || 'Error al sanear');
+        } finally {
+            setSanitizing(false);
+        }
+    }
+
     // Basic API wrapper since we might not have the full `api` object passed as prop like in Tenant tabs
     const api = useMemo(() => {
         const headers = {
@@ -174,14 +199,21 @@ export default function GlobalContractTemplatesPage({ apiUrl, token }) {
         setShowModal(true);
     };
 
-    const handleDelete = async (id) => {
-        if (!window.confirm('¿Estás seguro de eliminar esta plantilla global?')) return;
+    const [deleteId, setDeleteId] = useState(null);
+    const [deleting, setDeleting] = useState(false);
+    const handleDelete = (id) => setDeleteId(id);
+    const confirmDelete = async () => {
+        if (!deleteId) return;
+        setDeleting(true);
         try {
-            await api.delete(`/api/global-contract-templates/${id}`);
+            await api.delete(`/api/global-contract-templates/${deleteId}`);
             toast.success('Plantilla eliminada');
+            setDeleteId(null);
             load();
         } catch (e) {
             toast.error(e.message || 'Error al eliminar');
+        } finally {
+            setDeleting(false);
         }
     };
 
@@ -189,7 +221,7 @@ export default function GlobalContractTemplatesPage({ apiUrl, token }) {
         try {
             const res = await fetch(`${apiUrl}/api/global-contract-templates/${id}?action=pdf`, {
                 headers: {
-                    'Authorization': `Bearer ${token}`
+                    'Authorization': `Bearer ${getStoredSession()?.token || token}`
                 }
             });
             
@@ -244,6 +276,24 @@ export default function GlobalContractTemplatesPage({ apiUrl, token }) {
 
     return (
         <div className="space-y-5">
+            <ConfirmModal
+                open={!!deleteId}
+                title="Eliminar plantilla global"
+                message="La plantilla dejará de estar disponible para todas las empresas."
+                confirmText="Eliminar"
+                loading={deleting}
+                onConfirm={confirmDelete}
+                onClose={() => !deleting && setDeleteId(null)}
+            />
+            <ConfirmModal
+                open={confirmSanitize}
+                title="Limpiar HTML de todas las plantillas"
+                message="Se eliminará el HTML no permitido (estilos, scripts y atributos) de TODAS las plantillas globales, conservando negritas, listas y párrafos. No se puede deshacer."
+                confirmText="Limpiar"
+                loading={sanitizing}
+                onConfirm={runSanitize}
+                onClose={() => !sanitizing && setConfirmSanitize(false)}
+            />
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h3 className="text-lg font-bold text-slate-900">Plantillas Globales de Contratos</h3>
@@ -253,6 +303,7 @@ export default function GlobalContractTemplatesPage({ apiUrl, token }) {
                 </div>
                 <div className="flex flex-wrap gap-2">
                     <select
+                        aria-label="Filtrar por estado"
                         value={statusFilter}
                         onChange={(e) => {
                             setStatusFilter(e.target.value);
@@ -267,6 +318,7 @@ export default function GlobalContractTemplatesPage({ apiUrl, token }) {
 
                     <input
                         type="search"
+                        aria-label="Buscar plantillas"
                         value={search}
                         onChange={(e) => {
                             setSearch(e.target.value);
@@ -278,22 +330,7 @@ export default function GlobalContractTemplatesPage({ apiUrl, token }) {
 
                     <button
                         type="button"
-                        onClick={async () => {
-                            if (!window.confirm('Esto limpiará el HTML de todas las plantillas conservando el formato (negritas, listas, párrafos). ¿Continuar?')) return;
-                            try {
-                                const res = await fetch(`${apiUrl}/api/global-contract-templates/sanitize`, {
-                                    method: 'POST',
-                                    headers: { 'Authorization': `Bearer ${token}` }
-                                });
-                                const data = await res.json().catch(() => ({}));
-                                if (!res.ok) throw new Error(data?.message || 'Error al sanear');
-                                toast.success(`Plantillas saneadas: ${data.actualizadas ?? 'OK'}`);
-                                handleReload();
-                            } catch (e) {
-                                console.error(e);
-                                toast.error(e.message || 'Error al sanear');
-                            }
-                        }}
+                        onClick={() => setConfirmSanitize(true)}
                         className="inline-flex items-center gap-1 rounded-xl border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
                         title="Eliminar HTML no permitido de todas las plantillas"
                     >
@@ -351,7 +388,7 @@ export default function GlobalContractTemplatesPage({ apiUrl, token }) {
                                         {t.title}
                                     </td>
                                     <td className="px-4 py-3 text-slate-700 capitalize">
-                                        {t.type}
+                                        {({ fixed: 'Precio fijo', hourly: 'Por hora', retainer: 'Retainer', milestone: 'Por hitos', employment: 'Laboral', services: 'Servicios' })[String(t.type || '').toLowerCase()] || t.type || '—'}
                                     </td>
                                     <td className="px-4 py-3 text-slate-700">
                                         {countries.find(c => c.id == t.country_id)?.name || t.country_id} / {t.language_code}

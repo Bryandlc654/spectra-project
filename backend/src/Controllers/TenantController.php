@@ -2842,9 +2842,12 @@ final class TenantController
             $this->pdo->beginTransaction();
 
             // 1. Update Wallet Balance
-            $newBalance = (float)$wallet['balance'] + $amount;
-            $stmt = $this->pdo->prepare("UPDATE wallets SET balance = :bal, updated_at = NOW() WHERE company_id = :cid");
-            $stmt->execute([':bal' => $newBalance, ':cid' => $companyId]);
+            // Crédito/ajuste atómico (antes se sobrescribía con un saldo leído antes)
+            $stmt = $this->pdo->prepare("UPDATE wallets SET balance = balance + :amt, updated_at = NOW() WHERE company_id = :cid");
+            $stmt->execute([':amt' => $amount, ':cid' => $companyId]);
+            $balStmt = $this->pdo->prepare("SELECT balance FROM wallets WHERE company_id = :cid LIMIT 1");
+            $balStmt->execute([':cid' => $companyId]);
+            $newBalance = (float)$balStmt->fetchColumn();
 
             // 2. Log Transaction
             $txId = $this->uuid();
@@ -3543,9 +3546,18 @@ final class TenantController
             $this->pdo->beginTransaction();
 
             // 3. Deduct from Wallet (Payroll + Fee)
-            $newBalance = (float)$wallet['balance'] - $totalRequired;
-            $stmt = $this->pdo->prepare("UPDATE wallets SET balance = :bal, updated_at = NOW() WHERE company_id = :cid");
-            $stmt->execute([':bal' => $newBalance, ':cid' => $companyId]);
+            // Débito atómico y condicionado al saldo: dos pagos simultáneos ya no
+            // pueden pasar ambos la comprobación y dejar el saldo en negativo.
+            $stmt = $this->pdo->prepare("UPDATE wallets SET balance = balance - :amt, updated_at = NOW() WHERE company_id = :cid AND balance >= :amt_chk");
+            $stmt->execute([':amt' => $totalRequired, ':amt_chk' => $totalRequired, ':cid' => $companyId]);
+            if ($stmt->rowCount() !== 1) {
+                $this->pdo->rollBack();
+                Response::error('Saldo insuficiente en el wallet', 400);
+                return;
+            }
+            $balStmt = $this->pdo->prepare("SELECT balance FROM wallets WHERE company_id = :cid LIMIT 1");
+            $balStmt->execute([':cid' => $companyId]);
+            $newBalance = (float)$balStmt->fetchColumn();
 
             // 4. Create Transaction (Payroll)
             $txId = $this->uuid();
@@ -6202,9 +6214,18 @@ final class TenantController
             $this->pdo->beginTransaction();
 
             // Deduct Total (Invoice + Fee)
-            $newBalance = (float)$wallet['balance'] - $totalRequired;
-            $stmt = $this->pdo->prepare("UPDATE wallets SET balance = :bal, updated_at = NOW() WHERE company_id = :cid");
-            $stmt->execute([':bal' => $newBalance, ':cid' => $companyId]);
+            // Débito atómico y condicionado al saldo: dos pagos simultáneos ya no
+            // pueden pasar ambos la comprobación y dejar el saldo en negativo.
+            $stmt = $this->pdo->prepare("UPDATE wallets SET balance = balance - :amt, updated_at = NOW() WHERE company_id = :cid AND balance >= :amt_chk");
+            $stmt->execute([':amt' => $totalRequired, ':amt_chk' => $totalRequired, ':cid' => $companyId]);
+            if ($stmt->rowCount() !== 1) {
+                $this->pdo->rollBack();
+                Response::error('Saldo insuficiente en el wallet', 400);
+                return;
+            }
+            $balStmt = $this->pdo->prepare("SELECT balance FROM wallets WHERE company_id = :cid LIMIT 1");
+            $balStmt->execute([':cid' => $companyId]);
+            $newBalance = (float)$balStmt->fetchColumn();
 
             // Transaction 1: Invoice Payment
             $txId = $this->uuid();

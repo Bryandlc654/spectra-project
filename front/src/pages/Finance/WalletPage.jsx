@@ -1,3 +1,4 @@
+import { formatMoney } from '../../lib/money';
 import React, { useEffect, useState } from 'react';
 import { useToast } from '../../components/ToastProvider';
 import Modal from '../../components/Modal';
@@ -42,6 +43,7 @@ export default function WalletPage({ apiUrl, token }) {
 }
 
 function BalancesTab({ apiUrl, token }) {
+  const [includeDeleted, setIncludeDeleted] = useState(false);
   const [wallets, setWallets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
@@ -58,13 +60,13 @@ function BalancesTab({ apiUrl, token }) {
 
   useEffect(() => {
     loadWallets();
-  }, []);
+  }, [includeDeleted]);
 
   const loadWallets = async () => {
     setLoading(true);
     setErr('');
     try {
-      const res = await apiFetch(apiUrl, '/api/finance/wallet', { token });
+      const res = await apiFetch(apiUrl, '/api/finance/wallet' + (includeDeleted ? '?include_deleted=1' : ''), { token });
       setWallets(res.data || []);
     } catch (e) {
       setErr(e.message || 'Error cargando wallets');
@@ -101,11 +103,12 @@ function BalancesTab({ apiUrl, token }) {
   };
 
   const formatCurrency = (amount, symbol) => {
-    return `${symbol || ''} ${Number(amount).toLocaleString('es-PE', { minimumFractionDigits: 2 })}`;
+    return formatMoney(amount, symbol);
   };
 
   return (
     <>
+      <div className="mb-3 flex justify-end px-4 pt-3"><label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600"><input type="checkbox" className="rounded border-slate-300" checked={includeDeleted} onChange={(e) => setIncludeDeleted(e.target.checked)} /> Incluir empresas eliminadas</label></div>
       <div className="bg-white rounded-lg shadow overflow-hidden">
         {loading && <div className="p-8 text-center text-gray-500">Cargando saldos...</div>}
         {err && <div className="p-8 text-center text-red-500">{err}</div>}
@@ -344,19 +347,20 @@ function AdjustBalanceModal({ isOpen, onClose, wallet, apiUrl, token, onSuccess 
 }
 
 function LedgerTab({ apiUrl, token }) {
+  const [includeDeleted, setIncludeDeleted] = useState(false);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
 
   useEffect(() => {
     loadTransactions();
-  }, []);
+  }, [includeDeleted]);
 
   const loadTransactions = async () => {
     setLoading(true);
     setErr('');
     try {
-      const res = await apiFetch(apiUrl, '/api/finance/wallet/transactions', { token });
+      const res = await apiFetch(apiUrl, '/api/finance/wallet/transactions' + (includeDeleted ? '?include_deleted=1' : ''), { token });
       setTransactions(res.data || []);
     } catch (e) {
       setErr(e.message || 'Error cargando libro mayor');
@@ -366,11 +370,12 @@ function LedgerTab({ apiUrl, token }) {
   };
 
   const formatCurrency = (amount, symbol) => {
-    return `${symbol || ''} ${Number(amount).toLocaleString('es-PE', { minimumFractionDigits: 2 })}`;
+    return formatMoney(amount, symbol);
   };
 
   return (
     <div className="bg-white rounded-lg shadow overflow-hidden">
+        <div className="mb-3 flex justify-end px-4 pt-3"><label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600"><input type="checkbox" className="rounded border-slate-300" checked={includeDeleted} onChange={(e) => setIncludeDeleted(e.target.checked)} /> Incluir empresas eliminadas</label></div>
         {loading && <div className="p-8 text-center text-gray-500">Cargando transacciones...</div>}
         {err && <div className="p-8 text-center text-red-500">{err}</div>}
         

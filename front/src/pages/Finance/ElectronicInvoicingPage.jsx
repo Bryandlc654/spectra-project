@@ -1,3 +1,4 @@
+import ConfirmModal from '../../components/ConfirmModal';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createApi } from '../../lib/api';
 import Modal from '../../components/Modal';
@@ -207,26 +208,47 @@ export default function ElectronicInvoicingPage({ apiUrl, token }) {
     }
   };
 
-  const handleDelete = async (invoice) => {
-    if (!window.confirm(t('invoices.keyfacilForm.deleteConfirm'))) return;
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [voidTarget, setVoidTarget] = useState(null);
+  const [voidReason, setVoidReason] = useState('');
+  const [busyAction, setBusyAction] = useState(false);
+
+  const handleDelete = (invoice) => setDeleteTarget(invoice);
+  const confirmDelete = async () => {
+    const invoice = deleteTarget;
+    if (!invoice) return;
+    setBusyAction(true);
     try {
       await api.del(`/api/finance/keyfacil/invoices/${invoice.id}`);
       toast.success(t('invoices.keyfacilForm.deleteSuccess'));
+      setDeleteTarget(null);
       await loadInvoices();
     } catch (err) {
       toast.error(err?.message || t('invoices.keyfacilForm.deleteError'));
+    } finally {
+      setBusyAction(false);
     }
   };
 
-  const handleVoid = async (invoice) => {
-    const reason = window.prompt(t('invoices.keyfacilForm.voidPrompt'));
-    if (!reason || !reason.trim()) return;
+  const handleVoid = (invoice) => { setVoidReason(''); setVoidTarget(invoice); };
+  const confirmVoid = async () => {
+    const invoice = voidTarget;
+    const reason = voidReason.trim();
+    if (!invoice) return;
+    if (!reason) {
+      toast.error(t('invoices.keyfacilForm.voidPrompt'));
+      return;
+    }
+    setBusyAction(true);
     try {
-      await api.post(`/api/finance/keyfacil/invoices/${invoice.id}/void`, { motivo: reason.trim() });
+      await api.post(`/api/finance/keyfacil/invoices/${invoice.id}/void`, { motivo: reason });
       toast.success(t('invoices.keyfacilForm.voidSuccess'));
+      setVoidTarget(null);
       await loadInvoices();
     } catch (err) {
       toast.error(err?.message || t('invoices.keyfacilForm.voidError'));
+    } finally {
+      setBusyAction(false);
     }
   };
 
@@ -307,6 +329,27 @@ export default function ElectronicInvoicingPage({ apiUrl, token }) {
 
   return (
     <div className="space-y-6">
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="Eliminar comprobante"
+        message={t('invoices.keyfacilForm.deleteConfirm')}
+        confirmText="Eliminar"
+        loading={busyAction}
+        onConfirm={confirmDelete}
+        onClose={() => !busyAction && setDeleteTarget(null)}
+      />
+      <ConfirmModal
+        open={!!voidTarget}
+        title="Anular comprobante"
+        message="La anulación se comunica a Keyfacil/SUNAT y no se puede revertir."
+        confirmText="Anular"
+        loading={busyAction}
+        onConfirm={confirmVoid}
+        onClose={() => !busyAction && setVoidTarget(null)}
+      >
+        <label htmlFor="void-reason" className="mt-3 block text-sm font-medium text-slate-700">{t('invoices.keyfacilForm.voidPrompt')}</label>
+        <textarea id="void-reason" rows={3} value={voidReason} onChange={(e) => setVoidReason(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 p-2.5 text-sm" />
+      </ConfirmModal>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">
@@ -344,6 +387,7 @@ export default function ElectronicInvoicingPage({ apiUrl, token }) {
           <div>
             <label className="text-xs font-semibold text-slate-600">{t('invoices.electronicKeyfacilType')}</label>
             <select
+              aria-label="Tipo de comprobante"
               value={kfForm.tipo}
               onChange={(e) => handleKfTypeChange(e.target.value)}
               className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-brand focus:bg-white focus:ring-4 focus:ring-brand/15"
@@ -355,6 +399,7 @@ export default function ElectronicInvoicingPage({ apiUrl, token }) {
           <div>
             <label className="text-xs font-semibold text-slate-600">{t('invoices.electronicKeyfacilSerie')}</label>
             <input
+              aria-label="Serie del comprobante"
               value={kfForm.serie}
               onChange={(e) => setKfForm((prev) => ({ ...prev, serie: e.target.value.toUpperCase() }))}
               placeholder="F001"
@@ -366,6 +411,7 @@ export default function ElectronicInvoicingPage({ apiUrl, token }) {
             <input
               type="number"
               min="1"
+              aria-label="Número del comprobante"
               value={kfForm.numero}
               onChange={(e) => setKfForm((prev) => ({ ...prev, numero: e.target.value }))}
               placeholder="1"

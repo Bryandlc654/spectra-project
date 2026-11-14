@@ -120,6 +120,8 @@ class GlobalContractController
             if ($this->tableHasColumn('contracts', 'deleted_at')) {
                 $where[] = 'c.deleted_at IS NULL';
             }
+            // No mostrar contratos de empresas eliminadas (antes aparecían como "active")
+            $where[] = '(comp.id IS NULL OR comp.deleted_at IS NULL)';
 
             if ($this->isContractViewer()) {
                 if (!empty($_GET['status'])) {

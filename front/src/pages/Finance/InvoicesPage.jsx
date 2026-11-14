@@ -1,3 +1,4 @@
+import { formatMoney } from '../../lib/money';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useToast } from '../../components/ToastProvider';
 import Modal from '../../components/Modal';
@@ -9,6 +10,7 @@ export default function InvoicesPage({ apiUrl, token }) {
   const { t, language } = useI18n();
   const locale = language === 'en' ? 'en-US' : 'es-ES';
   
+  const [includeDeleted, setIncludeDeleted] = useState(false);
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
@@ -41,6 +43,7 @@ export default function InvoicesPage({ apiUrl, token }) {
         params.set('page', String(page));
         if (debouncedSearch) params.set('q', debouncedSearch);
         if (monthFilter) params.set('month', monthFilter);
+        if (includeDeleted) params.set('include_deleted', '1');
 
         const res = await apiFetch(apiUrl, `/api/finance/invoices?${params.toString()}`, { token });
         
@@ -75,7 +78,7 @@ export default function InvoicesPage({ apiUrl, token }) {
     return () => {
       cancelled = true;
     };
-  }, [apiUrl, token, page, debouncedSearch, monthFilter, reloadKey, t]);
+  }, [apiUrl, token, page, debouncedSearch, monthFilter, reloadKey, t, includeDeleted]);
 
   const handleReload = () => {
     setPage(1);
@@ -109,7 +112,7 @@ export default function InvoicesPage({ apiUrl, token }) {
     const symbol = row.currency_symbol || '$';
     const code = row.currency_code || '';
     return {
-      text: `${symbol} ${amount.toLocaleString(locale, { minimumFractionDigits: 2 })}`,
+      text: formatMoney(amount, symbol),
       code,
     };
   };
@@ -145,6 +148,7 @@ export default function InvoicesPage({ apiUrl, token }) {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">{t('invoices.title')}</h1>
+          <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600"><input type="checkbox" className="rounded border-slate-300" checked={includeDeleted} onChange={(e) => setIncludeDeleted(e.target.checked)} /> Incluir empresas eliminadas</label>
           <p className="text-sm text-slate-500">{t('invoices.subtitle')}</p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -160,6 +164,7 @@ export default function InvoicesPage({ apiUrl, token }) {
             className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 focus:border-brand focus:ring-brand"
           />
           <input
+            aria-label="Buscar facturas"
             type="search"
             value={search}
             onChange={(e) => {
@@ -213,7 +218,7 @@ export default function InvoicesPage({ apiUrl, token }) {
                     </div>
                     <div className="text-right">
                          <div className="text-2xl font-bold text-brand">
-                             {selectedInvoice.currency_symbol} {Number(selectedInvoice.total_amount || 0).toLocaleString()}
+                             {formatMoney(selectedInvoice.total_amount || 0, selectedInvoice.currency_symbol)}
                          </div>
                          <div className="text-xs text-slate-500 uppercase">{selectedInvoice.currency_code}</div>
                          <div className="mt-2">
@@ -258,10 +263,10 @@ export default function InvoicesPage({ apiUrl, token }) {
                                         <td className="px-4 py-2 text-slate-700">{item.description}</td>
                                         <td className="px-4 py-2 text-right text-slate-600">{item.quantity}</td>
                                         <td className="px-4 py-2 text-right text-slate-600">
-                                            {Number(item.unit_price).toLocaleString(locale, {minimumFractionDigits: 2})}
+                                            {formatMoney(item.unit_price)}
                                         </td>
                                         <td className="px-4 py-2 text-right font-medium text-slate-900">
-                                            {(item.quantity * item.unit_price).toLocaleString(locale, {minimumFractionDigits: 2})}
+                                            {formatMoney(item.quantity * item.unit_price)}
                                         </td>
                                     </tr>
                                 ))}
@@ -270,7 +275,7 @@ export default function InvoicesPage({ apiUrl, token }) {
                                 <tr>
                                     <td colSpan="3" className="px-4 py-2 text-right text-slate-900">{t('invoices.total')}</td>
                                     <td className="px-4 py-2 text-right text-brand">
-                                        {selectedInvoice.currency_symbol} {Number(selectedInvoice.total_amount).toLocaleString(locale, {minimumFractionDigits: 2})}
+                                        {formatMoney(selectedInvoice.total_amount, selectedInvoice.currency_symbol)}
                                     </td>
                                 </tr>
                             </tfoot>

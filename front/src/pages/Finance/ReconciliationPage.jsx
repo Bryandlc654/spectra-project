@@ -1,3 +1,4 @@
+import { formatMoney, txTypeLabel, txReferenceLabel } from '../../lib/money';
 import React, { useEffect, useState } from 'react';
 import { useToast } from '../../components/ToastProvider';
 import Modal from '../../components/Modal';
@@ -6,6 +7,7 @@ import { apiFetch } from '../../lib/api';
 export default function ReconciliationPage({ apiUrl, token }) {
   const toast = useToast();
   
+  const [includeDeleted, setIncludeDeleted] = useState(false);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
@@ -52,6 +54,7 @@ export default function ReconciliationPage({ apiUrl, token }) {
         if (search) params.set('q', search.trim());
         if (statusFilter !== '') params.set('reconciled', statusFilter);
         if (companyId) params.set('company_id', companyId);
+        if (includeDeleted) params.set('include_deleted', '1');
 
         const res = await apiFetch(apiUrl, `/api/finance/reconciliation?${params.toString()}`, { token });
         
@@ -83,7 +86,7 @@ export default function ReconciliationPage({ apiUrl, token }) {
     return () => {
       cancelled = true;
     };
-  }, [apiUrl, token, page, search, statusFilter, companyId, perPage, refreshKey]);
+  }, [apiUrl, token, page, search, statusFilter, companyId, perPage, refreshKey, includeDeleted]);
 
   // Load aux data for create modal
   useEffect(() => {
@@ -160,7 +163,7 @@ export default function ReconciliationPage({ apiUrl, token }) {
       const color = amt >= 0 ? 'text-emerald-600' : 'text-red-600';
       return (
           <span className={`font-mono font-bold ${color}`}>
-              {symbol} {Math.abs(amt).toLocaleString(undefined, {minimumFractionDigits: 2})}
+              {formatMoney(Math.abs(amt), symbol)}
               {amt < 0 ? ' (DR)' : ' (CR)'}
           </span>
       );
@@ -171,6 +174,7 @@ export default function ReconciliationPage({ apiUrl, token }) {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Conciliación / Reconciliation</h1>
+          <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600"><input type="checkbox" className="rounded border-slate-300" checked={includeDeleted} onChange={(e) => setIncludeDeleted(e.target.checked)} /> Incluir empresas eliminadas</label>
           <p className="text-sm text-slate-500">Gestión de transacciones y conciliación bancaria</p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -189,6 +193,7 @@ export default function ReconciliationPage({ apiUrl, token }) {
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex-1 min-w-[200px]">
               <input
+                aria-label="Buscar movimientos"
                 type="search"
                 value={search}
                 onChange={(e) => {
@@ -201,6 +206,7 @@ export default function ReconciliationPage({ apiUrl, token }) {
           </div>
           <div>
               <select
+                  aria-label="Filtrar por estado"
                   value={statusFilter}
                   onChange={(e) => {
                       setStatusFilter(e.target.value);
@@ -261,7 +267,7 @@ export default function ReconciliationPage({ apiUrl, token }) {
                     </td>
                     <td className="px-4 py-3 text-slate-700">
                         <div className="font-medium text-slate-900">{tx.description}</div>
-                        <div className="text-xs text-slate-500 capitalize">{tx.type} • {tx.reference_type || 'Manual'}</div>
+                        <div className="text-xs text-slate-500">{txTypeLabel(tx.type)} • {txReferenceLabel(tx.reference_type)}</div>
                     </td>
                     <td className="px-4 py-3 text-slate-700">
                         {tx.company_name}

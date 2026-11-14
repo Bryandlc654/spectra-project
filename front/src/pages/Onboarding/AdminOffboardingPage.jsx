@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useToast } from '../../components/ToastProvider';
+import ConfirmModal from '../../components/ConfirmModal';
 
 export default function AdminOffboardingPage({ apiUrl, token }) {
     const toast = useToast();
@@ -48,9 +49,12 @@ export default function AdminOffboardingPage({ apiUrl, token }) {
         }
     };
 
-    const handleInitiateOffboarding = async (user) => {
-        if (!window.confirm(`¿Estás seguro de iniciar el proceso de salida para ${user.full_name}?`)) return;
-        
+    const [offboardTarget, setOffboardTarget] = useState(null);
+    const handleInitiateOffboarding = (user) => setOffboardTarget(user);
+    const confirmOffboarding = async () => {
+        const user = offboardTarget;
+        if (!user) return;
+        setOffboardTarget(null);
         setProcessingId(user.id);
         try {
             await api.post('/api/onboarding/trigger-offboarding', { user_id: user.id });
@@ -65,6 +69,15 @@ export default function AdminOffboardingPage({ apiUrl, token }) {
 
     return (
         <div className="p-6">
+            <ConfirmModal
+                open={!!offboardTarget}
+                title="Iniciar offboarding"
+                message={`Se iniciará el proceso de salida de ${offboardTarget?.full_name || ''}. Se crearán sus tareas de salida.`}
+                confirmText="Iniciar salida"
+                danger={false}
+                onConfirm={confirmOffboarding}
+                onClose={() => setOffboardTarget(null)}
+            />
             <div className="mb-6 flex justify-between items-center">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900">Seguimiento de Offboarding</h1>
@@ -88,6 +101,9 @@ export default function AdminOffboardingPage({ apiUrl, token }) {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
+                            {!loading && users.length === 0 && (
+                                <tr><td colSpan={5} className="px-6 py-10 text-center text-sm text-slate-500">No hay procesos de offboarding en curso.</td></tr>
+                            )}
                             {users.map(u => (
                                 <tr key={u.id} className="hover:bg-slate-50">
                                     <td className="px-6 py-4">
@@ -98,7 +114,7 @@ export default function AdminOffboardingPage({ apiUrl, token }) {
                                     </td>
                                     <td className="px-6 py-4">
                                         <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-800">
-                                            {u.platform_role}
+                                            {({ company_admin: 'Admin Empresa', freelancer: 'Freelance', freelance: 'Freelance', user: 'Usuario', super_admin: 'Super Admin', support: 'Soporte', finance: 'Finanzas', legal: 'Legal', security: 'Seguridad', it_admin: 'IT Admin', admin: 'Admin' })[u.platform_role] || u.platform_role || '—'}
                                         </span>
                                     </td>
                                     <td className="px-6 py-4">

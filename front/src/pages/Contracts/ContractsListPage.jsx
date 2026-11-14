@@ -77,7 +77,7 @@ export default function ContractsListPage({ apiUrl, token }) {
         else if (status === 'pending') cls = 'bg-amber-50 text-amber-700';
         return (
             <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${cls}`}>
-                {status}
+                {({ active: 'Activo', draft: 'Borrador', pending: 'Pendiente', expired: 'Expirado', terminated: 'Terminado', signed: 'Firmado', cancelled: 'Cancelado', completed: 'Completado' })[status] || status}
             </span>
         );
     };
@@ -122,6 +122,7 @@ export default function ContractsListPage({ apiUrl, token }) {
                 </div>
                 <div className="flex flex-wrap gap-2">
                     <select
+                        aria-label="Filtrar por estado"
                         value={statusFilter}
                         onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
                         className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700"
@@ -134,6 +135,7 @@ export default function ContractsListPage({ apiUrl, token }) {
                     </select>
                     <input
                         type="search"
+                        aria-label="Buscar contratos"
                         value={search}
                         onChange={e => { setSearch(e.target.value); setPage(1); }}
                         placeholder="Buscar..."
@@ -178,8 +180,8 @@ export default function ContractsListPage({ apiUrl, token }) {
                                     <td className="px-4 py-3 text-slate-700">
                                         {c.company_name || c.company_id}
                                     </td>
-                                    <td className="px-4 py-3 text-slate-700 capitalize">
-                                        {c.type}
+                                    <td className="px-4 py-3 text-slate-700">
+                                        {({ fixed: 'Precio fijo', hourly: 'Por hora', retainer: 'Retainer', milestone: 'Por hitos', employment: 'Laboral', services: 'Servicios' })[String(c.type || '').toLowerCase()] || c.type || '—'}
                                     </td>
                                     <td className="px-4 py-3">
                                         {renderStatusBadge(c.status)}

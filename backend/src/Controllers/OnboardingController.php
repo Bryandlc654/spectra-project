@@ -552,6 +552,12 @@ class OnboardingController
             $whereClauses[] = "u.status = 'active'";
             // Solo Admin de Empresa y Freelancer realizan onboarding propio.
             $whereClauses[] = "u.platform_role IN ('company_admin', 'freelancer', 'freelance')";
+            // Un Admin de Empresa solo cuenta si pertenece a alguna empresa activa
+            // (antes aparecían admins de empresas eliminadas).
+            $whereClauses[] = "(u.platform_role <> 'company_admin' OR EXISTS (
+                SELECT 1 FROM company_users cu_a
+                JOIN companies co_a ON co_a.id = cu_a.company_id AND co_a.deleted_at IS NULL
+                WHERE cu_a.user_id = u.id AND cu_a.deleted_at IS NULL))";
         }
 
         if (!empty($whereClauses)) {

@@ -94,7 +94,7 @@ export default function AdminOnboardingPage({ apiUrl, token }) {
                                         </td>
                                         <td className="px-6 py-4">
                                             <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-800">
-                                                {u.platform_role}
+                                                {({ company_admin: 'Admin Empresa', freelancer: 'Freelance', freelance: 'Freelance', user: 'Usuario', super_admin: 'Super Admin', support: 'Soporte', finance: 'Finanzas', legal: 'Legal', security: 'Seguridad', it_admin: 'IT Admin', admin: 'Admin' })[u.platform_role] || u.platform_role || '—'}
                                             </span>
                                         </td>
                                         <td className="px-6 py-4">

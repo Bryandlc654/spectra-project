@@ -990,9 +990,18 @@ class PayrollController
                 $this->pdo->beginTransaction();
 
                 // 3. Deduct from Wallet
-                $newBalance = (float)$wallet['balance'] - $totalToPay;
-                $this->pdo->prepare("UPDATE wallets SET balance = :bal, updated_at = NOW() WHERE company_id = :id")
-                    ->execute([':bal' => $newBalance, ':id' => $companyId]);
+                // Débito atómico y condicionado al saldo: dos pagos simultáneos ya no
+                // pueden pasar ambos la comprobación y dejar el saldo en negativo.
+                $debitStmt = $this->pdo->prepare("UPDATE wallets SET balance = balance - :amt, updated_at = NOW() WHERE company_id = :id AND balance >= :amt_chk");
+                $debitStmt->execute([':amt' => $totalToPay, ':amt_chk' => $totalToPay, ':id' => $companyId]);
+                if ($debitStmt->rowCount() !== 1) {
+                    $this->pdo->rollBack();
+                    Response::error('Saldo insuficiente en el wallet', 400);
+                    return;
+                }
+                $balStmt = $this->pdo->prepare("SELECT balance FROM wallets WHERE company_id = :id LIMIT 1");
+                $balStmt->execute([':id' => $companyId]);
+                $newBalance = (float)$balStmt->fetchColumn();
 
                 // 4. Record Wallet Transaction
                 $this->pdo->prepare("

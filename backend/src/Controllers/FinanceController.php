@@ -36,6 +36,17 @@ class FinanceController
             }
         }
 
+        // Roles de empresa y freelancers: ModuleAccess no los filtra, así que aquí
+        // se limita su alcance. Antes un company_admin podía leer wallets, facturas
+        // y movimientos de TODAS las empresas y crear ajustes de saldo.
+        $role = (string)($user['platform_role'] ?? '');
+        if (in_array($role, ['company_admin', 'user', '', 'none', 'freelancer', 'freelance'], true)) {
+            if (!$this->companyScopedFinanceAccess($resource, $id, $segments, $method, (string)($user['company_id'] ?? ''), $role)) {
+                Response::error('Acceso denegado', 403);
+                return;
+            }
+        }
+
         if ($resource === 'support-view') {
              if ($method === 'GET') {
                  $this->supportViewIndex();
@@ -201,6 +212,38 @@ class FinanceController
         Response::error('Recurso no encontrado', 404);
     }
 
+    /**
+     * Qué puede hacer un usuario de nivel empresa en Finanzas: solo LEER datos de
+     * su propia empresa (listado de facturas forzado a su empresa, una factura o
+     * su descarga si es suya, y el wallet de su empresa). Freelancers: nada.
+     */
+    private function companyScopedFinanceAccess(?string $resource, ?string $id, array $segments, string $method, string $myCompany, string $role): bool
+    {
+        if ($role === 'freelancer' || $role === 'freelance' || $myCompany === '' || $method !== 'GET') {
+            return false;
+        }
+        if ($resource === 'invoices' && ($id === null || $id === '')) {
+            $_GET['company_id'] = $myCompany; // ignora cualquier company_id del cliente
+            unset($_GET['include_deleted']);
+            return true;
+        }
+        if ($resource === 'invoices') {
+            $stmt = $this->pdo->prepare("SELECT company_id FROM invoices WHERE id = :id LIMIT 1");
+            $stmt->execute([':id' => $id]);
+            return (string)$stmt->fetchColumn() === $myCompany;
+        }
+        if ($resource === 'wallet' && $id === $myCompany) {
+            return true;
+        }
+        return false;
+    }
+
+    /** Las vistas globales ocultan empresas eliminadas salvo que se pida ?include_deleted=1 (auditoría). */
+    private function includeDeletedCompanies(): bool
+    {
+        return filter_var($_GET['include_deleted'] ?? false, FILTER_VALIDATE_BOOLEAN);
+    }
+
     private function walletIndex(): void
     {
         $page = max(1, (int)($_GET['page'] ?? 1));
@@ -219,11 +262,12 @@ class FinanceController
             JOIN companies c ON w.company_id = c.id
             LEFT JOIN company_settings cs ON c.id = cs.company_id
             JOIN currencies cur ON w.currency_id = cur.id
+            " . ($this->includeDeletedCompanies() ? "" : "WHERE c.deleted_at IS NULL") . "
             ORDER BY w.balance DESC
             LIMIT :limit OFFSET :offset
         ";
 
-        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM wallets");
+        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM wallets w" . ($this->includeDeletedCompanies() ? "" : " WHERE EXISTS (SELECT 1 FROM companies c_act WHERE c_act.id = w.company_id AND c_act.deleted_at IS NULL)"));
         $countStmt->execute();
         $total = (int)$countStmt->fetchColumn();
         
@@ -259,11 +303,12 @@ class FinanceController
             FROM wallet_transactions wt
             JOIN companies c ON wt.company_id = c.id
             JOIN currencies cur ON wt.currency_id = cur.id
+            " . ($this->includeDeletedCompanies() ? "" : "WHERE c.deleted_at IS NULL") . "
             ORDER BY wt.created_at DESC
             LIMIT :limit OFFSET :offset
         ";
         
-        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM wallet_transactions");
+        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM wallet_transactions wt" . ($this->includeDeletedCompanies() ? "" : " WHERE EXISTS (SELECT 1 FROM companies c_act WHERE c_act.id = wt.company_id AND c_act.deleted_at IS NULL)"));
         $countStmt->execute();
         $total = (int)$countStmt->fetchColumn();
 
@@ -899,6 +944,13 @@ class FinanceController
             return;
         }
         $this->pdo->prepare('DELETE FROM keyfacil_invoices WHERE id = :id')->execute([':id' => $id]);
+        try {
+            // Borrado definitivo de un comprobante tributario: dejar rastro
+            (new \App\Support\AuditLogger())->log('finance.keyfacil_invoice.deleted', 'keyfacil_invoice', $id, [
+                'serie' => $invoice['serie'] ?? null, 'numero' => $invoice['numero'] ?? null, 'status' => $invoice['status'] ?? null,
+            ]);
+        } catch (\Throwable $e) {
+        }
         Response::json(['message' => 'Comprobante eliminado']);
     }
 
@@ -1061,6 +1113,9 @@ class FinanceController
 
         $where = [];
         $params = [];
+        if (!$this->includeDeletedCompanies()) {
+            $where[] = "(comp.id IS NULL OR comp.deleted_at IS NULL)";
+        }
 
         if ($companyId) {
             $where[] = "i.company_id = :company_id";
@@ -1202,6 +1257,9 @@ class FinanceController
 
         $where = ["1=1"];
         $params = [];
+        if (!$this->includeDeletedCompanies()) {
+            $where[] = "EXISTS (SELECT 1 FROM companies c_act WHERE c_act.id = wt.company_id AND c_act.deleted_at IS NULL)";
+        }
 
         if ($companyId) {
             $where[] = "wt.company_id = :cid";
@@ -1280,23 +1338,37 @@ class FinanceController
         $description = trim($data['description'] ?? '');
         $type = 'adjustment'; // Force type adjustment
         
-        if (!$companyId || $amount == 0 || $currencyId <= 0 || !$description) {
+        $actorRole = (string)(Auth::user()['platform_role'] ?? '');
+        if (!in_array($actorRole, ['super_admin', 'admin', 'finance'], true)) {
+            Response::error('Solo el equipo de Finanzas puede ajustar saldos', 403);
+            return;
+        }
+
+        if (!$companyId || !is_finite($amount) || $amount == 0 || abs($amount) > 1e12 || $currencyId <= 0 || !$description) {
             Response::error('Datos incompletos', 422);
             return;
         }
 
-        // Check wallet
-        $stmt = $this->pdo->prepare("SELECT * FROM wallets WHERE company_id = :cid AND currency_id = :cur LIMIT 1");
-        $stmt->execute([':cid' => $companyId, ':cur' => $currencyId]);
-        $wallet = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        if (!$wallet) {
-             Response::error('No existe wallet para esta empresa y moneda', 404);
-             return;
+        $stmt = $this->pdo->prepare("SELECT 1 FROM companies WHERE id = :cid AND deleted_at IS NULL");
+        $stmt->execute([':cid' => $companyId]);
+        if (!$stmt->fetchColumn()) {
+            Response::error('La empresa no existe o fue eliminada', 404);
+            return;
         }
 
         try {
             $this->pdo->beginTransaction();
+
+            // Bloquea la fila del wallet dentro de la transacción (antes se leía
+            // fuera y luego se sobrescribía el saldo: ajustes simultáneos se perdían).
+            $stmt = $this->pdo->prepare("SELECT * FROM wallets WHERE company_id = :cid AND currency_id = :cur LIMIT 1 FOR UPDATE");
+            $stmt->execute([':cid' => $companyId, ':cur' => $currencyId]);
+            $wallet = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$wallet) {
+                $this->pdo->rollBack();
+                Response::error('No existe wallet para esta empresa y moneda', 404);
+                return;
+            }
 
             // Create Transaction
             $txId = $this->uuid();
@@ -1319,18 +1391,23 @@ class FinanceController
                 ':desc' => $description
             ]);
 
-            // Update Wallet Balance
-            $newBalance = (float)$wallet['balance'] + $amount;
-            $upd = $this->pdo->prepare("UPDATE wallets SET balance = :bal, updated_at = NOW() WHERE company_id = :cid AND currency_id = :cur");
-            $upd->execute([':bal' => $newBalance, ':cid' => $companyId, ':cur' => $currencyId]);
+            // Actualización atómica del saldo
+            $upd = $this->pdo->prepare("UPDATE wallets SET balance = balance + :amt, updated_at = NOW() WHERE company_id = :cid AND currency_id = :cur");
+            $upd->execute([':amt' => $amount, ':cid' => $companyId, ':cur' => $currencyId]);
 
             $this->pdo->commit();
+
+            try {
+                (new \App\Support\AuditLogger())->log('finance.wallet.adjustment', 'wallet_transaction', $txId, ['amount' => $amount, 'currency_id' => $currencyId, 'description' => $description], $companyId);
+            } catch (\Throwable $e) {
+            }
 
             Response::json(['message' => 'Ajuste creado correctamente', 'id' => $txId]);
 
         } catch (\Throwable $e) {
             if ($this->pdo->inTransaction()) $this->pdo->rollBack();
-            Response::error('Error al crear ajuste: ' . $e->getMessage(), 500);
+            error_log('[Spectra] Error al crear ajuste: ' . $e->getMessage());
+            Response::error('Error al crear ajuste', 500);
         }
     }
 

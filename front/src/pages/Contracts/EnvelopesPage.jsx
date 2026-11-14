@@ -200,6 +200,7 @@ export default function EnvelopesPage({ apiUrl, token }) {
                         Nuevo Sobre
                     </button>
                     <select
+                        aria-label="Filtrar por estado"
                         value={statusFilter}
                         onChange={e => setStatusFilter(e.target.value)}
                         className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700"
@@ -212,6 +213,7 @@ export default function EnvelopesPage({ apiUrl, token }) {
                     </select>
                     <input
                         type="search"
+                        aria-label="Buscar sobres"
                         value={search}
                         onChange={e => setSearch(e.target.value)}
                         placeholder="Buscar..."

@@ -1,3 +1,4 @@
+import ConfirmModal from '../../components/ConfirmModal';
 import React, { useEffect, useState } from 'react';
 import { useToast } from '../../components/ToastProvider';
 import Modal from '../../components/Modal';
@@ -55,8 +56,12 @@ export default function VendorsPage({ apiUrl }) {
     setModalOpen(true);
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('¿Estás seguro de eliminar este proveedor?')) return;
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const handleDelete = (id) => setPendingDelete(id);
+  const confirmDelete = async () => {
+    const id = pendingDelete;
+    setPendingDelete(null);
+    if (!id) return;
     try {
       await apiFetch(apiUrl, `/api/procurement/vendors/${id}`, {
         token,
@@ -109,6 +114,14 @@ export default function VendorsPage({ apiUrl }) {
 
   return (
     <div className="space-y-6">
+      <ConfirmModal
+        open={!!pendingDelete}
+        title="Eliminar proveedor"
+        message="¿Seguro que deseas eliminar este proveedor? Esta acción no se puede deshacer."
+        confirmText="Eliminar"
+        onConfirm={confirmDelete}
+        onClose={() => setPendingDelete(null)}
+      />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Proveedores</h1>

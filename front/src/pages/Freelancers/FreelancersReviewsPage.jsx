@@ -72,9 +72,9 @@ export default function FreelancersReviewsPage({ apiUrl, token }) {
 
   function renderStars(rating) {
     return (
-      <div className="flex text-amber-400 text-sm">
+      <div className="flex text-amber-400 text-sm" role="img" aria-label={`${Number(rating) || 0} de 5 estrellas`}>
         {[...Array(5)].map((_, i) => (
-          <i key={i} className={`bi ${i < rating ? 'bi-star-fill' : 'bi-star'} mr-0.5`}></i>
+          <i key={i} aria-hidden="true" className={`bi ${i < rating ? 'bi-star-fill' : 'bi-star'} mr-0.5`}></i>
         ))}
       </div>
     );
@@ -98,6 +98,7 @@ export default function FreelancersReviewsPage({ apiUrl, token }) {
             <input
               type="text"
               className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-brand/20 focus:border-brand transition-all"
+              aria-label="Buscar freelancer"
               placeholder="Buscar freelancer..."
               value={search}
               onChange={e => { setSearch(e.target.value); setPage(1); }}
@@ -106,6 +107,7 @@ export default function FreelancersReviewsPage({ apiUrl, token }) {
           
           <select
             className="w-full border-slate-300 rounded-lg text-sm px-3 py-2 focus:ring-brand focus:border-brand"
+            aria-label="Filtrar por calificación"
             value={ratingFilter}
             onChange={e => { setRatingFilter(e.target.value); setPage(1); }}
           >
@@ -119,6 +121,7 @@ export default function FreelancersReviewsPage({ apiUrl, token }) {
 
           <select
             className="w-full border-slate-300 rounded-lg text-sm px-3 py-2 focus:ring-brand focus:border-brand"
+            aria-label="Filtrar por estado"
             value={statusFilter}
             onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
           >
@@ -130,6 +133,7 @@ export default function FreelancersReviewsPage({ apiUrl, token }) {
 
           <select
             className="w-full border-slate-300 rounded-lg text-sm px-3 py-2 focus:ring-brand focus:border-brand"
+            aria-label="Filtrar por fecha"
             value={range}
             onChange={e => { setRange(e.target.value); setPage(1); }}
           >
@@ -229,7 +233,7 @@ export default function FreelancersReviewsPage({ apiUrl, token }) {
                     <td className="px-6 py-4">
                       <div className="relative group/tooltip">
                         <p className="line-clamp-2 text-slate-600 text-sm">
-                          "{r.comment}"
+                          {r.comment?.trim() ? `"${r.comment}"` : <span className="italic text-slate-400">Sin comentario</span>}
                         </p>
                         {r.comment?.length > 100 && (
                           <div className="absolute left-0 bottom-full mb-2 hidden group-hover/tooltip:block w-64 bg-slate-800 text-white text-xs p-3 rounded shadow-lg z-10">
@@ -327,7 +331,7 @@ export default function FreelancersReviewsPage({ apiUrl, token }) {
                     <span className="text-xs font-medium text-slate-900">{r.reviewer_name}</span>
                     {renderStars(r.rating)}
                   </div>
-                  <p className="text-slate-600 italic">"{r.comment}"</p>
+                  <p className="text-slate-600 italic">{r.comment?.trim() ? `"${r.comment}"` : 'Sin comentario'}</p>
                 </div>
 
                 <div className="flex items-center justify-between pt-2">

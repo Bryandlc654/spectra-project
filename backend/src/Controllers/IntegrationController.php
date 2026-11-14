@@ -168,7 +168,7 @@ class IntegrationController
             ]);
         }
 
-        AuditLogger::log('Conectar Integración', "Integración conectada: $provider", Auth::userId(), $companyId, 'integration', $exists ?: $id);
+        (new AuditLogger())->log('Conectar Integración', 'integration', $exists ?: $id, [], $companyId, "Integración conectada: $provider");
 
         Response::json(['message' => "Conectado a $provider exitosamente"]);
     }
@@ -186,7 +186,7 @@ class IntegrationController
         $stmt = $this->pdo->prepare("UPDATE tenant_integrations SET status = 'disconnected' WHERE company_id = :c AND provider = :p");
         $stmt->execute([':c' => $companyId, ':p' => $provider]);
 
-        AuditLogger::log('Desconectar Integración', "Integración desconectada: $provider", Auth::userId(), $companyId, 'integration', null);
+        (new AuditLogger())->log('Desconectar Integración', 'integration', null, [], $companyId, "Integración desconectada: $provider");
 
         Response::json(['message' => "Desconectado de $provider"]);
     }
@@ -207,7 +207,7 @@ class IntegrationController
         $stmt = $this->pdo->prepare("UPDATE tenant_integrations SET last_sync_at = NOW() WHERE company_id = :c AND provider = :p");
         $stmt->execute([':c' => $companyId, ':p' => $provider]);
 
-        AuditLogger::log('Sincronizar Integración', "Sincronización manual: $provider", Auth::userId(), $companyId, 'integration', null);
+        (new AuditLogger())->log('Sincronizar Integración', 'integration', null, [], $companyId, "Sincronización manual: $provider");
 
         Response::json(['message' => "Sincronización con $provider completada"]);
     }

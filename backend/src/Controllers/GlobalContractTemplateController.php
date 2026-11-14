@@ -143,11 +143,7 @@ class GlobalContractTemplateController
 
     private function sanitizeBody(string $body): string
     {
-        $body = HtmlSanitizer::stripCss($body);
-        $body = str_ireplace(['<div>', '</div>'], ['<p>', '</p>'], $body);
-        $allowed = '<p><br><b><strong><i><em><u><s><strike><ul><ol><li><h1><h2><h3><h4><blockquote><hr>';
-        $body = strip_tags($body, $allowed);
-        return trim($body);
+        return HtmlSanitizer::formatOnly($body);
     }
 
     private function renderBodyPdf(string $body): string
@@ -220,7 +216,7 @@ class GlobalContractTemplateController
             ':docusign_template_id' => $data['docusign_template_id'] ?? null
         ]);
 
-        AuditLogger::log('Crear Plantilla Global', "Plantilla global creada: {$data['title']}", Auth::userId(), null, 'contract_template', $id);
+        (new AuditLogger())->log('Crear Plantilla Global', 'contract_template', $id, [], null, "Plantilla global creada: {$data['title']}");
 
         Response::json(['message' => 'Plantilla creada', 'id' => $id], 201);
     }
@@ -281,7 +277,7 @@ class GlobalContractTemplateController
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
 
-        AuditLogger::log('Actualizar Plantilla Global', "Plantilla global actualizada: {$current['title']}", Auth::userId(), null, 'contract_template', $id);
+        (new AuditLogger())->log('Actualizar Plantilla Global', 'contract_template', $id, [], null, "Plantilla global actualizada: {$current['title']}");
 
         Response::json(['message' => 'Plantilla actualizada']);
     }
@@ -306,7 +302,7 @@ class GlobalContractTemplateController
         $stmt = $this->pdo->prepare("DELETE FROM contract_templates WHERE id = :id");
         $stmt->execute([':id' => $id]);
 
-        AuditLogger::log('Eliminar Plantilla Global', "Plantilla global eliminada: {$current['title']}", Auth::userId(), null, 'contract_template', $id);
+        (new AuditLogger())->log('Eliminar Plantilla Global', 'contract_template', $id, [], null, "Plantilla global eliminada: {$current['title']}");
 
         Response::json(['message' => 'Plantilla eliminada']);
     }
@@ -402,6 +398,10 @@ class GlobalContractTemplateController
                     $upd->execute([':body' => $san, ':id' => $r['id']]);
                     $updated++;
                 }
+            }
+            try {
+                (new \App\Support\AuditLogger())->log('contract_templates.sanitize_all', 'contract_template', null, ['total' => $total, 'updated' => $updated]);
+            } catch (\Throwable $e) {
             }
             Response::json(['message' => 'Plantillas saneadas', 'total' => $total, 'actualizadas' => $updated]);
         } catch (\Throwable $e) {

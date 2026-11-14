@@ -1,3 +1,4 @@
+import ConfirmModal from '../../components/ConfirmModal';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useToast } from '../../components/ToastProvider';
 import Modal from '../../components/Modal';
@@ -133,9 +134,12 @@ export default function SalaryAdvancesPage({ apiUrl, token, user }) {
     }
   };
 
-  const handleApprove = (advance) => {
-    if (!window.confirm(`¿Aprobar el adelanto de ${advance.user_name || advance.user_email || 'este usuario'} por ${formatMoney(advance.amount)}?`)) return;
-    updateStatus(advance, 'approved');
+  const [approveTarget, setApproveTarget] = useState(null);
+  const handleApprove = (advance) => setApproveTarget(advance);
+  const confirmApprove = () => {
+    const advance = approveTarget;
+    setApproveTarget(null);
+    if (advance) updateStatus(advance, 'approved');
   };
 
   const handleReject = () => {
@@ -157,6 +161,15 @@ export default function SalaryAdvancesPage({ apiUrl, token, user }) {
 
   return (
     <div className="space-y-6">
+      <ConfirmModal
+        open={!!approveTarget}
+        title="Aprobar adelanto"
+        message={`¿Aprobar el adelanto de ${approveTarget?.user_name || approveTarget?.user_email || 'este usuario'} por ${approveTarget ? formatMoney(approveTarget.amount) : ''}?`}
+        confirmText="Aprobar"
+        danger={false}
+        onConfirm={confirmApprove}
+        onClose={() => setApproveTarget(null)}
+      />
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Adelantos de sueldo</h1>

@@ -501,14 +501,7 @@ class SignatureController
 
     private function sanitizeBody(string $body): string
     {
-        $body = HtmlSanitizer::stripCss($body);
-        $body = str_ireplace(['<div>', '</div>'], ['<p>', '</p>'], $body);
-        $allowed = '<p><br><b><strong><i><em><u><s><strike><ul><ol><li><h1><h2><h3><h4><blockquote><hr>';
-        $body = strip_tags($body, $allowed);
-        // strip_tags conserva los atributos (<p onclick=...>, <b onmouseover=...>):
-        // ninguna etiqueta permitida los necesita, así que se eliminan todos.
-        $body = preg_replace('/<(\/?)([a-z][a-z0-9]*)\b[^>]*?(\/?)>/i', '<$1$2$3>', $body) ?? '';
-        return trim($body);
+        return HtmlSanitizer::formatOnly($body);
     }
 
     private function renderBodyPdf(string $body): string

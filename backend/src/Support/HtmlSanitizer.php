@@ -4,6 +4,21 @@ namespace App\Support;
 
 class HtmlSanitizer
 {
+    /**
+     * Deja solo etiquetas de formato (párrafos, negritas, listas, títulos...) y
+     * elimina TODOS sus atributos. strip_tags() con lista blanca conserva
+     * atributos como onclick= u onmouseover=, lo que permitía XSS almacenado.
+     */
+    public static function formatOnly(string $body): string
+    {
+        $body = self::stripCss($body);
+        $body = str_ireplace(['<div>', '</div>'], ['<p>', '</p>'], $body);
+        $allowed = '<p><br><b><strong><i><em><u><s><strike><ul><ol><li><h1><h2><h3><h4><blockquote><hr>';
+        $body = strip_tags($body, $allowed);
+        $body = preg_replace('/<(\/?)([a-z][a-z0-9]*)\b[^>]*?(\/?)>/i', '<$1$2$3>', $body) ?? '';
+        return trim($body);
+    }
+
     public static function stripCss(string $body): string
     {
         if ($body === '' || (strpos($body, '{') === false && stripos($body, '<style') === false && stripos($body, '<script') === false)) {

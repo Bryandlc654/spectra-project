@@ -1,3 +1,4 @@
+import ConfirmModal from '../../components/ConfirmModal';
 import React, { useEffect, useState } from 'react';
 import { useToast } from '../../components/ToastProvider';
 import Modal from '../../components/Modal';
@@ -108,9 +109,15 @@ export default function RequisitionsPage({ apiUrl }) {
       setModalOpen(true);
   };
 
-  const handleDelete = async (req, e) => {
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const handleDelete = (req, e) => {
       e.stopPropagation();
-      if (!window.confirm('¿Estás seguro de eliminar esta requisición?')) return;
+      setPendingDelete(req);
+  };
+  const confirmDelete = async () => {
+      const req = pendingDelete;
+      setPendingDelete(null);
+      if (!req) return;
       try {
           await apiFetch(apiUrl, `/api/procurement/requisitions/${req.id}`, {
               token,
@@ -201,6 +208,14 @@ export default function RequisitionsPage({ apiUrl }) {
 
   return (
     <div className="space-y-6">
+      <ConfirmModal
+        open={!!pendingDelete}
+        title="Eliminar requisición"
+        message="¿Seguro que deseas eliminar este requisición? Esta acción no se puede deshacer."
+        confirmText="Eliminar"
+        onConfirm={confirmDelete}
+        onClose={() => setPendingDelete(null)}
+      />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Requisiciones</h1>
