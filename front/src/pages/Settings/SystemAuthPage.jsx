@@ -78,7 +78,7 @@ export default function SystemAuthPage({ apiUrl, token }) {
           
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">URL Base de la API</label>
-            <input 
+            <input aria-label="URL Base de la API" 
               type="url" 
               value={formData.system_api_url || ''}
               onChange={e => setFormData(p => ({ ...p, system_api_url: e.target.value }))}
@@ -118,7 +118,7 @@ export default function SystemAuthPage({ apiUrl, token }) {
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Client ID</label>
-              <input 
+              <input aria-label="Google Client ID" 
                 type="text" 
                 value={formData.google_client_id || ''}
                 onChange={e => setFormData(p => ({ ...p, google_client_id: e.target.value }))}
@@ -129,7 +129,7 @@ export default function SystemAuthPage({ apiUrl, token }) {
             
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Client Secret</label>
-              <input 
+              <input aria-label="Google Client Secret" 
                 type="password" 
                 value={formData.google_client_secret || ''}
                 onChange={e => setFormData(p => ({ ...p, google_client_secret: e.target.value }))}
@@ -166,7 +166,7 @@ export default function SystemAuthPage({ apiUrl, token }) {
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Client ID (Application ID)</label>
-              <input 
+              <input aria-label="Microsoft Client ID (Application ID)" 
                 type="text" 
                 value={formData.microsoft_client_id || ''}
                 onChange={e => setFormData(p => ({ ...p, microsoft_client_id: e.target.value }))}
@@ -177,7 +177,7 @@ export default function SystemAuthPage({ apiUrl, token }) {
             
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Client Secret</label>
-              <input 
+              <input aria-label="Microsoft Client Secret" 
                 type="password" 
                 value={formData.microsoft_client_secret || ''}
                 onChange={e => setFormData(p => ({ ...p, microsoft_client_secret: e.target.value }))}

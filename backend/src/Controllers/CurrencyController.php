@@ -22,6 +22,12 @@ final class CurrencyController
         try {
             // /api/currencies/{id}
             $id = $segments[2] ?? null;
+            // Catálogo global: solo el staff de plataforma puede modificarlo
+            // (antes cualquier usuario autenticado, incluso un freelancer, podía).
+            if ($method !== 'GET' && !in_array((string)(\App\Support\Auth::user()['platform_role'] ?? ''), ['super_admin', 'admin'], true)) {
+                Response::error('Acceso denegado', 403);
+                return;
+            }
 
             if ($id === null || $id === '') {
                 if ($method === 'GET') { $this->index(); return; }

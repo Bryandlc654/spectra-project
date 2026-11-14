@@ -140,7 +140,7 @@ export default function CountriesPage({ apiUrl, token }) {
         <div className="p-4 border-b border-slate-100 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="relative w-full md:max-w-sm">
             <i className="bi bi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
-            <input
+            <input aria-label="Buscar por nombre o ISO2"
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Buscar por nombre o ISO2…"
@@ -257,7 +257,7 @@ export default function CountriesPage({ apiUrl, token }) {
         <form onSubmit={submit} className="space-y-4">
           <div>
             <label className="text-sm font-semibold text-slate-700">ISO2</label>
-            <input
+            <input aria-label="ISO2"
               value={iso2}
               onChange={(e) => setIso2(e.target.value)}
               placeholder="PE"
@@ -269,7 +269,7 @@ export default function CountriesPage({ apiUrl, token }) {
 
           <div>
             <label className="text-sm font-semibold text-slate-700">Nombre</label>
-            <input
+            <input aria-label="Nombre"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Perú"

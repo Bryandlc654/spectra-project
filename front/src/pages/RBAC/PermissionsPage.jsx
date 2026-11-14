@@ -441,7 +441,7 @@ export default function PermissionsPage() {
             <label className="text-xs font-semibold text-slate-600 block mb-1.5">Buscar Permiso / Módulo</label>
             <div className="relative">
                 <i className="bi bi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
-                <input 
+                <input aria-label="Buscar Permiso / Módulo" 
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Ej: finanzas, legal, usuarios..."

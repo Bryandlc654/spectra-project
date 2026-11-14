@@ -78,6 +78,12 @@ class ComplianceController
 
     private function handleRequirements(string $method, ?string $id): void
     {
+        // Los requisitos de compliance los define el staff (antes cualquier usuario
+        // autenticado podía crearlos o borrarlos).
+        if ($method !== 'GET' && !in_array((string)(Auth::user()['platform_role'] ?? ''), ['super_admin', 'admin', 'legal'], true)) {
+            Response::error('Acceso denegado', 403);
+            return;
+        }
         switch ($method) {
             case 'GET':
                 if ($id) {

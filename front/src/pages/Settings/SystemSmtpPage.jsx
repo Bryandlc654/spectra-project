@@ -88,7 +88,7 @@ export default function SystemSmtpPage({ apiUrl, token }) {
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Host SMTP</label>
-            <input 
+            <input aria-label="Host SMTP" 
               type="text" 
               value={formData.smtp_host || ''}
               onChange={e => setFormData(p => ({ ...p, smtp_host: e.target.value }))}
@@ -99,7 +99,7 @@ export default function SystemSmtpPage({ apiUrl, token }) {
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Puerto</label>
-            <input 
+            <input aria-label="Puerto" 
               type="number" 
               value={formData.smtp_port || ''}
               onChange={e => setFormData(p => ({ ...p, smtp_port: e.target.value }))}
@@ -110,7 +110,7 @@ export default function SystemSmtpPage({ apiUrl, token }) {
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Cifrado</label>
-            <select
+            <select aria-label="Cifrado"
               value={formData.smtp_encryption || 'tls'}
               onChange={e => setFormData(p => ({ ...p, smtp_encryption: e.target.value }))}
               className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 outline-none focus:bg-white focus:ring-2 focus:ring-brand/20 focus:border-brand transition-all"
@@ -125,7 +125,7 @@ export default function SystemSmtpPage({ apiUrl, token }) {
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Usuario SMTP</label>
-            <input 
+            <input aria-label="Usuario SMTP" 
               type="text" 
               value={formData.smtp_user || ''}
               onChange={e => setFormData(p => ({ ...p, smtp_user: e.target.value }))}
@@ -136,7 +136,7 @@ export default function SystemSmtpPage({ apiUrl, token }) {
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Contraseña SMTP</label>
-            <input 
+            <input aria-label="Contraseña SMTP" 
               type="password" 
               value={formData.smtp_pass || ''}
               onChange={e => setFormData(p => ({ ...p, smtp_pass: e.target.value }))}
@@ -149,7 +149,7 @@ export default function SystemSmtpPage({ apiUrl, token }) {
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Email del Remitente</label>
-            <input 
+            <input aria-label="Email del Remitente" 
               type="email" 
               value={formData.smtp_from_email || ''}
               onChange={e => setFormData(p => ({ ...p, smtp_from_email: e.target.value }))}
@@ -160,7 +160,7 @@ export default function SystemSmtpPage({ apiUrl, token }) {
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Nombre del Remitente</label>
-            <input 
+            <input aria-label="Nombre del Remitente" 
               type="text" 
               value={formData.smtp_from_name || ''}
               onChange={e => setFormData(p => ({ ...p, smtp_from_name: e.target.value }))}
@@ -199,7 +199,7 @@ export default function SystemSmtpPage({ apiUrl, token }) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="md:col-span-2">
             <label className="block text-sm font-medium text-slate-700 mb-1">Para (email)</label>
-            <input
+            <input aria-label="Para (email)"
               type="email"
               value={testTo}
               onChange={e => setTestTo(e.target.value)}
@@ -222,7 +222,7 @@ export default function SystemSmtpPage({ apiUrl, token }) {
             <>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Host SMTP</label>
-                <input
+                <input aria-label="Host SMTP"
                   type="text"
                   value={testOverrides.smtp_host}
                   onChange={e => setTestOverrides(p => ({ ...p, smtp_host: e.target.value }))}
@@ -232,7 +232,7 @@ export default function SystemSmtpPage({ apiUrl, token }) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Puerto</label>
-                <input
+                <input aria-label="Puerto"
                   type="number"
                   value={testOverrides.smtp_port}
                   onChange={e => setTestOverrides(p => ({ ...p, smtp_port: e.target.value }))}
@@ -242,7 +242,7 @@ export default function SystemSmtpPage({ apiUrl, token }) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Cifrado</label>
-                <select
+                <select aria-label="Cifrado"
                   value={testOverrides.smtp_encryption}
                   onChange={e => setTestOverrides(p => ({ ...p, smtp_encryption: e.target.value }))}
                   className="w-full rounded-xl border border-slate-200 px-4 py-2.5 outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand"
@@ -254,7 +254,7 @@ export default function SystemSmtpPage({ apiUrl, token }) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Usuario SMTP</label>
-                <input
+                <input aria-label="Usuario SMTP"
                   type="text"
                   value={testOverrides.smtp_user}
                   onChange={e => setTestOverrides(p => ({ ...p, smtp_user: e.target.value }))}
@@ -264,7 +264,7 @@ export default function SystemSmtpPage({ apiUrl, token }) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Contraseña SMTP</label>
-                <input
+                <input aria-label="Contraseña SMTP"
                   type="password"
                   value={testOverrides.smtp_pass}
                   onChange={e => setTestOverrides(p => ({ ...p, smtp_pass: e.target.value }))}
@@ -274,7 +274,7 @@ export default function SystemSmtpPage({ apiUrl, token }) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Email Remitente</label>
-                <input
+                <input aria-label="Email Remitente"
                   type="email"
                   value={testOverrides.smtp_from_email}
                   onChange={e => setTestOverrides(p => ({ ...p, smtp_from_email: e.target.value }))}
@@ -284,7 +284,7 @@ export default function SystemSmtpPage({ apiUrl, token }) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Nombre Remitente</label>
-                <input
+                <input aria-label="Nombre Remitente"
                   type="text"
                   value={testOverrides.smtp_from_name}
                   onChange={e => setTestOverrides(p => ({ ...p, smtp_from_name: e.target.value }))}

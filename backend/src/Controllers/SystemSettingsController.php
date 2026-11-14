@@ -31,8 +31,25 @@ class SystemSettingsController
         ");
     }
 
+    /**
+     * La configuración global (SMTP, OAuth, URL de la API) solo la gestiona el
+     * staff de plataforma. Antes cualquier usuario autenticado (incluso un
+     * freelancer) podía leerla y modificarla: p. ej. apuntar el SMTP o la URL de
+     * OAuth a un servidor propio y capturar enlaces de restablecimiento o logins.
+     */
+    private function requireSettingsAdmin(): bool
+    {
+        $role = (string)(\App\Support\Auth::user()['platform_role'] ?? '');
+        if (!in_array($role, ['super_admin', 'admin'], true)) {
+            Response::error('Acceso denegado', 403);
+            return false;
+        }
+        return true;
+    }
+
     public function handle(string $method): void
     {
+        if (!$this->requireSettingsAdmin()) return;
         switch ($method) {
             case 'GET':
                 $this->index();
@@ -49,6 +66,7 @@ class SystemSettingsController
     // Public to be called directly from router for /api/system-settings/test-smtp
     public function testSmtp(): void
     {
+        if (!$this->requireSettingsAdmin()) return;
         $payload = json_decode(file_get_contents('php://input'), true) ?: [];
         $to = trim((string)($payload['to'] ?? ''));
         if ($to === '') {
@@ -131,11 +149,21 @@ class SystemSettingsController
         $upd = $this->pdo->prepare("UPDATE system_settings SET setting_value = :val, updated_at = NOW() WHERE setting_key = :key");
         $ins = $this->pdo->prepare("INSERT INTO system_settings (setting_key, setting_value, created_at, updated_at) VALUES (:key, :val, NOW(), NOW())");
 
+        if (array_key_exists('system_api_url', $payload) && $payload['system_api_url'] !== '' && $payload['system_api_url'] !== null) {
+            $url = (string)$payload['system_api_url'];
+            if (!filter_var($url, FILTER_VALIDATE_URL) || stripos($url, 'https://') !== 0) {
+                Response::error('La URL de la API debe ser una URL https válida', 422);
+                return;
+            }
+        }
+
+        $changed = [];
         foreach ($payload as $key => $val) {
             if (!in_array($key, $allowedKeys)) continue;
             
             // If value is masked, skip update
             if ($val === '********') continue;
+            $changed[] = $key;
 
             $upd->execute([':val' => $val, ':key' => $key]);
             if ($upd->rowCount() === 0) {
@@ -146,6 +174,12 @@ class SystemSettingsController
                     $upd->execute([':val' => $val, ':key' => $key]);
                 }
             }
+        }
+
+        try {
+            // Solo los nombres de las claves: nunca los valores (contienen secretos)
+            (new \App\Support\AuditLogger())->log('system_settings.updated', 'system_settings', null, ['keys' => $changed]);
+        } catch (\Throwable $e) {
         }
 
         Response::json(['message' => 'Settings updated']);

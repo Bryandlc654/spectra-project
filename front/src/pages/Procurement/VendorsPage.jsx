@@ -1,300 +1,489 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ConfirmModal from '../../components/ConfirmModal';
-import React, { useEffect, useState } from 'react';
-import { useToast } from '../../components/ToastProvider';
 import Modal from '../../components/Modal';
-import { apiFetch } from '../../lib/api';
-import { useAuth } from '../../context/AuthContext'; // Import useAuth hook
+import { useToast } from '../../components/ToastProvider';
+import { useAuth } from '../../context/AuthContext';
+import { createApi, downloadFile } from '../../lib/api';
+
+// Spectra revisa y aprueba; las empresas envían sus proveedores.
+const REVIEWER_ROLES = ['super_admin', 'admin', 'finance'];
+
+const STATUS = {
+  pending: { label: 'Pendiente de revisión', cls: 'bg-amber-50 text-amber-800 border-amber-200' },
+  approved: { label: 'Aprobado', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  rejected: { label: 'Rechazado', cls: 'bg-red-50 text-red-700 border-red-200' },
+};
+
+const EMPTY_FORM = { name: '', tax_id: '', category: '', contact_name: '', email: '', phone: '', country_iso2: '', website: '', address: '' };
+
+const FIELDS = [
+  { key: 'name', label: 'Razón social', required: true, col: 2 },
+  { key: 'tax_id', label: 'RUC / Tax ID' },
+  { key: 'category', label: 'Categoría', placeholder: 'Ej. Tecnología, Limpieza…' },
+  { key: 'contact_name', label: 'Persona de contacto' },
+  { key: 'email', label: 'Email', type: 'email' },
+  { key: 'phone', label: 'Teléfono' },
+  { key: 'website', label: 'Sitio web', placeholder: 'www.empresa.com' },
+  { key: 'address', label: 'Dirección', col: 2 },
+];
+
+function StatusBadge({ status }) {
+  const s = STATUS[status] || { label: status || '—', cls: 'bg-slate-50 text-slate-600 border-slate-200' };
+  return <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${s.cls}`}>{s.label}</span>;
+}
 
 export default function VendorsPage({ apiUrl }) {
-  const { token, user } = useAuth(); // Import user from AuthContext
+  const { token, user } = useAuth();
   const toast = useToast();
-  
-  const [vendors, setVendors] = useState([]);
+  const api = useMemo(() => createApi({ baseUrl: apiUrl, token }), [apiUrl, token]);
+  const role = user?.platform_role || user?.role || '';
+  const isReviewer = REVIEWER_ROLES.includes(role);
+
+  const tabs = isReviewer
+    ? [{ id: 'review', label: 'Por revisar' }, { id: 'catalog', label: 'Catálogo aprobado' }, { id: 'all', label: 'Todos' }]
+    : [{ id: 'catalog', label: 'Catálogo aprobado' }, { id: 'mine', label: 'Mis proveedores' }];
+
+  const [tab, setTab] = useState(tabs[0].id);
+  const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [q, setQ] = useState('');
+  const [debouncedQ, setDebouncedQ] = useState('');
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
+  const [countries, setCountries] = useState([]);
 
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [formData, setFormData] = useState({
-    name: '',
-    tax_id: '',
-    contact_name: '',
-    email: '',
-    phone: '',
-    address: ''
-  });
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
+  const [reviewTarget, setReviewTarget] = useState(null); // { vendor, decision }
+  const [reviewReason, setReviewReason] = useState('');
+  const [reviewing, setReviewing] = useState(false);
+
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const fileRef = useRef(null);
+  const loadSeq = useRef(0);
+
   useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      setLoading(true);
-      setErr('');
-      try {
-        const res = await apiFetch(apiUrl, '/api/procurement/vendors', { token });
-        if (!cancelled) setVendors(res.data || []);
-      } catch (e) {
-        if (!cancelled) setErr(e?.message || 'No se pudieron cargar los proveedores');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    load();
-    return () => { cancelled = true; };
-  }, [apiUrl, token]);
+    const id = setTimeout(() => setDebouncedQ(q.trim()), 350);
+    return () => clearTimeout(id);
+  }, [q]);
 
-  const handleEdit = (vendor) => {
-    setEditingId(vendor.id);
-    setFormData({
-      name: vendor.name,
-      tax_id: vendor.tax_id || '',
-      contact_name: vendor.contact_name || '',
-      email: vendor.email || '',
-      phone: vendor.phone || '',
-      address: vendor.address || ''
-    });
-    setModalOpen(true);
-  };
+  useEffect(() => { setPage(1); }, [tab, debouncedQ]);
 
-  const [pendingDelete, setPendingDelete] = useState(null);
-  const handleDelete = (id) => setPendingDelete(id);
-  const confirmDelete = async () => {
-    const id = pendingDelete;
-    setPendingDelete(null);
-    if (!id) return;
+  useEffect(() => {
+    api.get('/api/countries?per_page=200')
+      .then((res) => setCountries(Array.isArray(res?.data) ? res.data : []))
+      .catch(() => {});
+  }, [api]);
+
+  const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
+    setLoading(true);
+    setErr('');
     try {
-      await apiFetch(apiUrl, `/api/procurement/vendors/${id}`, {
-        token,
-        method: 'DELETE'
-      });
-      toast.success('Proveedor eliminado');
-      setVendors(prev => prev.filter(v => v.id !== id));
+      const params = new URLSearchParams({ scope: tab, page: String(page), limit: '25' });
+      if (debouncedQ) params.set('q', debouncedQ);
+      const res = await api.get(`/api/procurement/vendors?${params.toString()}`);
+      if (seq !== loadSeq.current) return;
+      setRows(Array.isArray(res?.data) ? res.data : []);
+      setTotal(res?.pagination?.total ?? 0);
+      setTotalPages(res?.pagination?.total_pages ?? 1);
     } catch (e) {
-      toast.error(e?.message || 'Error al eliminar');
+      if (seq !== loadSeq.current) return;
+      setErr(e.message || 'Error cargando proveedores');
+      setRows([]);
+    } finally {
+      if (seq === loadSeq.current) setLoading(false);
     }
-  };
+  }, [api, tab, page, debouncedQ]);
 
-  const handleSave = async (e) => {
+  useEffect(() => { load(); }, [load, reloadKey]);
+
+  const reload = () => setReloadKey((k) => k + 1);
+  const countryName = (iso) => countries.find((c) => c.iso2 === iso)?.name || iso || '—';
+
+  function openCreate() {
+    setEditing(null);
+    setForm(EMPTY_FORM);
+    setFormOpen(true);
+  }
+
+  function openEdit(v) {
+    setEditing(v);
+    setForm({ ...EMPTY_FORM, ...Object.fromEntries(Object.keys(EMPTY_FORM).map((k) => [k, v[k] ?? ''])) });
+    setFormOpen(true);
+  }
+
+  async function saveForm(e) {
     e.preventDefault();
+    if (!form.name.trim()) { toast.error('La razón social es obligatoria'); return; }
     setSaving(true);
     try {
-      // Include company_id from user context
-      const payload = {
-          ...formData,
-          company_id: user?.company_id
-      };
-      
-      if (editingId) {
-        await apiFetch(apiUrl, `/api/procurement/vendors/${editingId}`, {
-            token,
-            method: 'PUT',
-            body: payload
-        });
-        toast.success('Proveedor actualizado');
-      } else {
-        await apiFetch(apiUrl, '/api/procurement/vendors', {
-            token,
-            method: 'POST',
-            body: payload
-        });
-        toast.success('Proveedor creado');
-      }
-
-      setModalOpen(false);
-      setEditingId(null);
-      
-      const res = await apiFetch(apiUrl, '/api/procurement/vendors', { token });
-      setVendors(res.data || []);
-    } catch (e) {
-      toast.error(e?.message || 'Error al guardar');
+      const res = editing
+        ? await api.put(`/api/procurement/vendors/${editing.id}`, form)
+        : await api.post('/api/procurement/vendors', form);
+      toast.success(res?.message || 'Proveedor guardado');
+      setFormOpen(false);
+      if (!isReviewer && !editing) setTab('mine');
+      reload();
+    } catch (e2) {
+      toast.error(e2.message || 'No se pudo guardar el proveedor');
     } finally {
       setSaving(false);
     }
-  };
+  }
+
+  async function confirmReview() {
+    if (!reviewTarget) return;
+    if (reviewTarget.decision === 'reject' && !reviewReason.trim()) { toast.error('Indica el motivo del rechazo'); return; }
+    setReviewing(true);
+    try {
+      const res = await api.post(`/api/procurement/vendors/${reviewTarget.vendor.id}/review`, {
+        decision: reviewTarget.decision,
+        reason: reviewReason.trim(),
+      });
+      toast.success(res?.message || 'Revisión guardada');
+      setReviewTarget(null);
+      reload();
+    } catch (e) {
+      toast.error(e.message || 'No se pudo guardar la revisión');
+    } finally {
+      setReviewing(false);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/api/procurement/vendors/${deleteTarget.id}`);
+      toast.success('Proveedor eliminado');
+      setDeleteTarget(null);
+      reload();
+    } catch (e) {
+      toast.error(e.message || 'No se pudo eliminar');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function downloadTemplate() {
+    try {
+      await downloadFile(apiUrl, '/api/procurement/vendors/template', 'plantilla_proveedores_spectra.xlsx');
+    } catch (e) {
+      toast.error(e.message || 'No se pudo descargar la plantilla');
+    }
+  }
+
+  async function runImport() {
+    if (!importFile) { toast.error('Selecciona el archivo Excel'); return; }
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', importFile);
+      const res = await api.post('/api/procurement/vendors/import', fd);
+      setImportResult(res);
+      toast.success(res?.message || 'Importación completada');
+      if (!isReviewer) setTab('mine');
+      reload();
+    } catch (e) {
+      const data = e.data || {};
+      if (Array.isArray(data.errors)) setImportResult({ created: data.created || 0, errors: data.errors, message: data.message });
+      toast.error(data.message || e.message || 'No se pudo importar el archivo');
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  // Las empresas pueden editar sus propios proveedores (si estaba aprobado, vuelve a revisión)
+  const canEdit = (v) => isReviewer || tab === 'mine';
+  const canDelete = (v) => isReviewer || (tab === 'mine' && v.approval_status !== 'approved');
+  const showOwnerCols = isReviewer && tab !== 'catalog';
+  const showStatus = tab !== 'catalog';
 
   return (
     <div className="space-y-6">
-      <ConfirmModal
-        open={!!pendingDelete}
-        title="Eliminar proveedor"
-        message="¿Seguro que deseas eliminar este proveedor? Esta acción no se puede deshacer."
-        confirmText="Eliminar"
-        onConfirm={confirmDelete}
-        onClose={() => setPendingDelete(null)}
-      />
-      <div className="flex items-center justify-between">
+      {/* Cabecera */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Proveedores</h1>
-          <p className="text-sm text-slate-500">Gestión de proveedores y acreedores</p>
+          <p className="mt-1 text-sm text-slate-500">
+            {isReviewer
+              ? 'Revisa los proveedores enviados por las empresas. Los aprobados aparecen en el catálogo de todas las empresas.'
+              : 'Registra a tus proveedores: Spectra los revisa y, una vez aprobados, quedan disponibles en el catálogo para todas las empresas.'}
+          </p>
         </div>
-        <button
-          onClick={() => {
-              setEditingId(null);
-              setFormData({ name: '', tax_id: '', contact_name: '', email: '', phone: '', address: '' });
-              setModalOpen(true);
-          }}
-          className="rounded-xl bg-brand px-4 py-2 text-sm font-bold text-white hover:bg-brand/90"
-        >
-          <i className="bi bi-plus-lg mr-2" />
-          Nuevo Proveedor
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={downloadTemplate} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+            <i className="bi bi-file-earmark-spreadsheet" aria-hidden="true" /> Descargar plantilla Excel
+          </button>
+          <button type="button" onClick={() => { setImportFile(null); setImportResult(null); setImportOpen(true); }} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+            <i className="bi bi-upload" aria-hidden="true" /> Importar Excel
+          </button>
+          <button type="button" onClick={openCreate} className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark">
+            <i className="bi bi-plus-lg" aria-hidden="true" /> Nuevo proveedor
+          </button>
+        </div>
       </div>
 
-      {loading && <div className="text-center py-12 text-slate-500">Cargando...</div>}
-      
-      {err && (
-        <div className="rounded-xl bg-red-50 p-4 text-sm text-red-900 border border-red-200">
-            {err}
-        </div>
-      )}
-
-      {!loading && !err && vendors.length === 0 && (
-          <div className="text-center py-12 bg-slate-50 rounded-2xl border border-slate-200">
-              <i className="bi bi-truck text-4xl text-slate-300 mb-3 block" />
-              <p className="text-slate-500">No hay proveedores registrados</p>
+      {/* Pestañas + búsqueda */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div role="tablist" aria-label="Vistas de proveedores" className="flex flex-wrap gap-2">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.id}
+                onClick={() => setTab(t.id)}
+                className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${tab === t.id ? 'bg-brand text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
-      )}
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            aria-label="Buscar proveedores"
+            placeholder="Buscar por nombre, RUC, categoría o email…"
+            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-brand focus:bg-white md:w-80"
+          />
+        </div>
 
-      {vendors.length > 0 && (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        {err && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{err}</div>}
+
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
               <tr>
-                <th className="px-4 py-3 text-left">Nombre</th>
-                <th className="px-4 py-3 text-left">Tax ID / RUT</th>
-                <th className="px-4 py-3 text-left">Contacto</th>
-                <th className="px-4 py-3 text-left">Email</th>
-                <th className="px-4 py-3 text-right">Estado</th>
-                <th className="px-4 py-3 text-right">Acciones</th>
+                <th className="px-3 py-3 font-semibold">Proveedor</th>
+                <th className="px-3 py-3 font-semibold">Categoría</th>
+                <th className="px-3 py-3 font-semibold">Contacto</th>
+                <th className="px-3 py-3 font-semibold">País</th>
+                {showOwnerCols && <th className="px-3 py-3 font-semibold">Enviado por</th>}
+                {showStatus && <th className="px-3 py-3 font-semibold">Estado</th>}
+                <th className="px-3 py-3 text-right font-semibold">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {vendors.map(v => (
-                <tr key={v.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 font-medium text-slate-900">
-                      {v.name}
+              {loading && (
+                <tr><td colSpan={7} className="px-3 py-10 text-center text-slate-500" role="status">Cargando…</td></tr>
+              )}
+              {!loading && rows.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-3 py-10 text-center text-slate-500">
+                    {tab === 'review' ? 'No hay proveedores pendientes de revisión.'
+                      : tab === 'mine' ? 'Aún no has registrado proveedores. Usa "Nuevo proveedor" o importa la plantilla Excel.'
+                      : 'No hay proveedores en esta vista.'}
                   </td>
-                  <td className="px-4 py-3 text-slate-600">
-                      {v.tax_id || '—'}
+                </tr>
+              )}
+              {!loading && rows.map((v) => (
+                <tr key={v.id} className="align-top hover:bg-slate-50/70">
+                  <td className="px-3 py-3">
+                    <div className="font-semibold text-slate-900">{v.name}</div>
+                    <div className="text-xs text-slate-500">{v.tax_id ? `RUC ${v.tax_id}` : 'Sin RUC'}</div>
+                    {v.website && <a href={v.website} target="_blank" rel="noopener noreferrer" className="text-xs text-brand hover:underline">{v.website.replace(/^https?:\/\//, '')}</a>}
                   </td>
-                  <td className="px-4 py-3 text-slate-600">
-                      {v.contact_name || '—'}
+                  <td className="px-3 py-3 text-slate-700">{v.category || '—'}</td>
+                  <td className="px-3 py-3 text-slate-700">
+                    <div>{v.contact_name || '—'}</div>
+                    <div className="text-xs text-slate-500">{[v.email, v.phone].filter(Boolean).join(' · ')}</div>
                   </td>
-                  <td className="px-4 py-3 text-slate-600">
-                      {v.email || '—'}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                      <span className={`px-2 py-1 rounded-full text-xs font-semibold ${v.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                          {v.status}
-                      </span>
-                  </td>
-                  <td className="px-4 py-3 text-right space-x-2">
-                    <button 
-                        onClick={() => handleEdit(v)}
-                        className="text-slate-400 hover:text-brand transition-colors"
-                        title="Editar"
-                    >
-                        <i className="bi bi-pencil" />
-                    </button>
-                    <button 
-                        onClick={() => handleDelete(v.id)}
-                        className="text-slate-400 hover:text-red-500 transition-colors"
-                        title="Eliminar"
-                    >
-                        <i className="bi bi-trash" />
-                    </button>
+                  <td className="px-3 py-3 text-slate-700">{countryName(v.country_iso2)}</td>
+                  {showOwnerCols && (
+                    <td className="px-3 py-3 text-slate-700">
+                      <div>{v.company_name || '—'}</div>
+                      <div className="text-xs text-slate-500">{v.submitted_by_name || ''}{v.created_at ? ` · ${new Date(v.created_at).toLocaleDateString()}` : ''}</div>
+                    </td>
+                  )}
+                  {showStatus && (
+                    <td className="px-3 py-3">
+                      <StatusBadge status={v.approval_status} />
+                      {v.approval_status === 'rejected' && v.rejection_reason && (
+                        <div className="mt-1 max-w-[220px] text-xs text-red-700">Motivo: {v.rejection_reason}</div>
+                      )}
+                    </td>
+                  )}
+                  <td className="px-3 py-3">
+                    <div className="flex flex-wrap justify-end gap-1.5">
+                      {isReviewer && v.approval_status === 'pending' && (
+                        <>
+                          <button type="button" onClick={() => { setReviewReason(''); setReviewTarget({ vendor: v, decision: 'approve' }); }} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700">Aprobar</button>
+                          <button type="button" onClick={() => { setReviewReason(''); setReviewTarget({ vendor: v, decision: 'reject' }); }} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50">Rechazar</button>
+                        </>
+                      )}
+                      {(isReviewer || tab === 'mine') && canEdit(v) && (
+                        <button type="button" onClick={() => openEdit(v)} aria-label={`Editar ${v.name}`} title="Editar" className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50"><i className="bi bi-pencil" aria-hidden="true" /></button>
+                      )}
+                      {(isReviewer || tab === 'mine') && canDelete(v) && (
+                        <button type="button" onClick={() => setDeleteTarget(v)} aria-label={`Eliminar ${v.name}`} title="Eliminar" className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-red-600 hover:bg-red-50"><i className="bi bi-trash" aria-hidden="true" /></button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      )}
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editingId ? "Editar Proveedor" : "Nuevo Proveedor"}>
-        <form onSubmit={handleSave} className="space-y-4">
-            <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Nombre Comercial <span className="text-red-500">*</span></label>
-                <input 
-                    type="text" 
-                    required
-                    className="w-full rounded-xl border-slate-200 focus:border-brand focus:ring-brand"
-                    value={formData.name}
-                    onChange={e => setFormData({...formData, name: e.target.value})}
-                    placeholder="Ej. Acme Corp"
+        <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4 text-xs text-slate-500">
+          <span>{loading ? 'Cargando…' : `${total} proveedor(es)`}</span>
+          <div className="flex items-center gap-2">
+            <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="rounded-lg border border-slate-200 px-3 py-1.5 disabled:opacity-40">Anterior</button>
+            <span>Página {page} de {totalPages}</span>
+            <button type="button" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)} className="rounded-lg border border-slate-200 px-3 py-1.5 disabled:opacity-40">Siguiente</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Alta / edición */}
+      <Modal open={formOpen} onClose={() => !saving && setFormOpen(false)} title={editing ? 'Editar proveedor' : 'Nuevo proveedor'} size="lg">
+        <form onSubmit={saveForm} className="space-y-4">
+          {!isReviewer && (
+            <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              {editing && editing.approval_status === 'approved'
+                ? 'Este proveedor ya está aprobado: al guardar cambios volverá a revisión de Spectra.'
+                : 'El proveedor quedará pendiente hasta que Spectra lo revise y apruebe.'}
+            </p>
+          )}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {FIELDS.map((f) => (
+              <div key={f.key} className={f.col === 2 ? 'md:col-span-2' : ''}>
+                <label htmlFor={`vendor-${f.key}`} className="mb-1 block text-sm font-semibold text-slate-700">
+                  {f.label} {f.required && <span className="text-red-500">*</span>}
+                </label>
+                <input
+                  id={`vendor-${f.key}`}
+                  type={f.type || 'text'}
+                  value={form[f.key]}
+                  required={!!f.required}
+                  placeholder={f.placeholder || ''}
+                  onChange={(e) => setForm((p) => ({ ...p, [f.key]: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/15"
                 />
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-                <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Tax ID / RUT</label>
-                    <input 
-                        type="text" 
-                        className="w-full rounded-xl border-slate-200 focus:border-brand focus:ring-brand"
-                        value={formData.tax_id}
-                        onChange={e => setFormData({...formData, tax_id: e.target.value})}
-                    />
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Persona de Contacto</label>
-                    <input 
-                        type="text" 
-                        className="w-full rounded-xl border-slate-200 focus:border-brand focus:ring-brand"
-                        value={formData.contact_name}
-                        onChange={e => setFormData({...formData, contact_name: e.target.value})}
-                    />
-                </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-                <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
-                    <input 
-                        type="email" 
-                        className="w-full rounded-xl border-slate-200 focus:border-brand focus:ring-brand"
-                        value={formData.email}
-                        onChange={e => setFormData({...formData, email: e.target.value})}
-                    />
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Teléfono</label>
-                    <input 
-                        type="text" 
-                        className="w-full rounded-xl border-slate-200 focus:border-brand focus:ring-brand"
-                        value={formData.phone}
-                        onChange={e => setFormData({...formData, phone: e.target.value})}
-                    />
-                </div>
-            </div>
-
+              </div>
+            ))}
             <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Dirección</label>
-                <textarea 
-                    className="w-full rounded-xl border-slate-200 focus:border-brand focus:ring-brand"
-                    rows="2"
-                    value={formData.address}
-                    onChange={e => setFormData({...formData, address: e.target.value})}
-                />
+              <label htmlFor="vendor-country" className="mb-1 block text-sm font-semibold text-slate-700">País</label>
+              <select
+                id="vendor-country"
+                value={form.country_iso2}
+                onChange={(e) => setForm((p) => ({ ...p, country_iso2: e.target.value }))}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-brand"
+              >
+                <option value="">Seleccionar…</option>
+                {countries.map((c) => <option key={c.iso2} value={c.iso2}>{c.name}</option>)}
+              </select>
             </div>
-
-            <div className="pt-4 flex justify-end gap-2">
-                <button 
-                    type="button" 
-                    onClick={() => setModalOpen(false)}
-                    className="px-4 py-2 text-slate-700 font-semibold hover:bg-slate-100 rounded-lg"
-                >
-                    Cancelar
-                </button>
-                <button 
-                    type="submit" 
-                    disabled={saving}
-                    className="px-4 py-2 bg-brand text-white font-bold rounded-lg hover:bg-brand/90 disabled:opacity-50"
-                >
-                    {saving ? 'Guardando...' : (editingId ? 'Guardar Cambios' : 'Crear Proveedor')}
-                </button>
-            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={() => setFormOpen(false)} disabled={saving} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancelar</button>
+            <button type="submit" disabled={saving} className="rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-60">
+              {saving ? 'Guardando…' : editing ? 'Guardar cambios' : (isReviewer ? 'Crear y aprobar' : 'Enviar a revisión')}
+            </button>
+          </div>
         </form>
       </Modal>
+
+      {/* Importación Excel */}
+      <Modal open={importOpen} onClose={() => !importing && setImportOpen(false)} title="Importar proveedores desde Excel" size="lg">
+        <div className="space-y-4 text-sm">
+          <ol className="list-decimal space-y-1 pl-5 text-slate-600">
+            <li>Descarga la <button type="button" onClick={downloadTemplate} className="font-semibold text-brand hover:underline">plantilla Excel</button> y complétala (una fila por proveedor).</li>
+            <li>La columna “Razón social” es obligatoria. El país va con su código ISO2 (por ejemplo PE).</li>
+            <li>Sube el archivo (.xlsx o .csv, máximo 500 filas y 2 MB).</li>
+          </ol>
+          <div>
+            <label htmlFor="vendor-import-file" className="mb-1 block font-semibold text-slate-700">Archivo</label>
+            <input
+              id="vendor-import-file"
+              ref={fileRef}
+              type="file"
+              accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+              onChange={(e) => { setImportFile(e.target.files?.[0] || null); setImportResult(null); }}
+              className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-full file:border-0 file:bg-brand/10 file:px-4 file:py-2 file:font-semibold file:text-brand hover:file:bg-brand/20"
+            />
+          </div>
+
+          {importResult && (
+            <div className="rounded-xl border border-slate-200 p-3" role="status" aria-live="polite">
+              <div className="font-semibold text-slate-800">
+                {importResult.created || 0} proveedor(es) importado(s){importResult.errors?.length ? ` · ${importResult.errors.length} fila(s) con observaciones` : ''}
+              </div>
+              {importResult.errors?.length > 0 && (
+                <div className="mt-2 max-h-56 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="text-left text-slate-500"><tr><th className="py-1 pr-2">Fila</th><th className="py-1 pr-2">Proveedor</th><th className="py-1">Observación</th></tr></thead>
+                    <tbody>
+                      {importResult.errors.map((er, i) => (
+                        <tr key={i} className="border-t border-slate-100">
+                          <td className="py-1 pr-2 text-slate-500">{er.row}</td>
+                          <td className="py-1 pr-2 text-slate-700">{er.name || '—'}</td>
+                          <td className="py-1 text-red-700">{er.message}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setImportOpen(false)} disabled={importing} className="rounded-xl border border-slate-200 px-4 py-2.5 font-semibold text-slate-700 hover:bg-slate-50">Cerrar</button>
+            <button type="button" onClick={runImport} disabled={importing || !importFile} className="rounded-xl bg-brand px-5 py-2.5 font-semibold text-white hover:bg-brand-dark disabled:opacity-60">
+              {importing ? 'Importando…' : 'Importar'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Revisión */}
+      <ConfirmModal
+        open={!!reviewTarget}
+        title={reviewTarget?.decision === 'approve' ? 'Aprobar proveedor' : 'Rechazar proveedor'}
+        message={reviewTarget?.decision === 'approve'
+          ? `${reviewTarget?.vendor?.name} pasará al catálogo y será visible para todas las empresas.`
+          : `Se notificará a ${reviewTarget?.vendor?.company_name || 'la empresa'} el motivo del rechazo.`}
+        confirmText={reviewTarget?.decision === 'approve' ? 'Aprobar' : 'Rechazar'}
+        danger={reviewTarget?.decision !== 'approve'}
+        loading={reviewing}
+        onConfirm={confirmReview}
+        onClose={() => !reviewing && setReviewTarget(null)}
+      >
+        {reviewTarget?.decision === 'reject' && (
+          <div className="mt-3">
+            <label htmlFor="vendor-reject-reason" className="mb-1 block text-sm font-medium text-slate-700">Motivo del rechazo <span className="text-red-500">*</span></label>
+            <textarea id="vendor-reject-reason" rows={3} value={reviewReason} onChange={(e) => setReviewReason(e.target.value)} className="w-full rounded-xl border border-slate-300 p-2.5 text-sm" placeholder="Ej. RUC no coincide con la razón social" />
+          </div>
+        )}
+      </ConfirmModal>
+
+      {/* Eliminación */}
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="Eliminar proveedor"
+        message={`¿Eliminar a ${deleteTarget?.name || 'este proveedor'}? Esta acción no se puede deshacer.`}
+        confirmText="Eliminar"
+        loading={deleting}
+        onConfirm={confirmDelete}
+        onClose={() => !deleting && setDeleteTarget(null)}
+      />
     </div>
   );
 }

@@ -754,7 +754,8 @@ if ($table === 'procurement') {
     if ($sub === 'vendors') {
         // Remap: api/procurement/vendors/[id] -> api/vendors/[id]
         $newSegments = ['api', 'vendors'];
-        if (isset($segments[3])) $newSegments[] = $segments[3];
+        // Se reenvían todos los segmentos (p. ej. /vendors/{id}/review)
+        for ($i = 3; $i < count($segments); $i++) $newSegments[] = $segments[$i];
         
         $vendorController->handle($newSegments, $_SERVER['REQUEST_METHOD']);
         exit;

@@ -38,7 +38,8 @@ export default function TaxFormsPage({ apiUrl, token }) {
         setLoading(true);
         try {
             const data = await api.get('/api/tax-forms/me');
-            if (data) {
+            // La API devuelve el formulario o { form: null } si aún no hay ninguno
+            if (data && data.id) {
                 setCurrentForm(data);
                 setView('submitted');
             } else {

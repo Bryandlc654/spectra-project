@@ -127,9 +127,12 @@ class TaxFormController
         $stmt->execute([$userId]);
         $form = $stmt->fetch(PDO::FETCH_ASSOC);
         
-        if ($form) {
-            $form['data'] = json_decode($form['data'], true);
+        // Sin formulario: antes se pasaba false a Response::json(array) -> TypeError -> 500
+        if (!$form) {
+            Response::json(['form' => null]);
+            return;
         }
+        $form['data'] = json_decode((string)$form['data'], true);
 
         Response::json($form);
     }

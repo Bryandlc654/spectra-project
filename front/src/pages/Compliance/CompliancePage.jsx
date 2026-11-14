@@ -114,7 +114,7 @@ const CompliancePage = ({ apiUrl, token, user }) => {
     switch (status) {
       case 'verified': 
         return { 
-          label: 'Verified', 
+          label: 'Verificado', 
           icon: <CheckCircle className="w-5 h-5 text-emerald-500" />, 
           bg: 'bg-emerald-50', 
           border: 'border-emerald-200',
@@ -122,7 +122,7 @@ const CompliancePage = ({ apiUrl, token, user }) => {
         };
       case 'rejected': 
         return { 
-          label: 'Rejected', 
+          label: 'Rechazado', 
           icon: <XCircle className="w-5 h-5 text-red-500" />, 
           bg: 'bg-red-50', 
           border: 'border-red-200',
@@ -130,7 +130,7 @@ const CompliancePage = ({ apiUrl, token, user }) => {
         };
       case 'pending': 
         return { 
-          label: 'Pending Review', 
+          label: 'En revisión', 
           icon: <Clock className="w-5 h-5 text-amber-500" />, 
           bg: 'bg-amber-50', 
           border: 'border-amber-200',
@@ -138,7 +138,7 @@ const CompliancePage = ({ apiUrl, token, user }) => {
         };
       default: 
         return { 
-          label: 'Missing', 
+          label: 'Faltante', 
           icon: <AlertCircle className="w-5 h-5 text-slate-400" />, 
           bg: 'bg-slate-50', 
           border: 'border-slate-200',
@@ -179,10 +179,10 @@ const CompliancePage = ({ apiUrl, token, user }) => {
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <Shield className="w-8 h-8 text-indigo-600" />
-            Compliance & Requirements
+            Cumplimiento y requisitos
           </h1>
           <p className="text-slate-500 mt-1">
-            Manage your legal documents and ensure compliance with local regulations.
+            Gestiona tus documentos legales y cumple con la normativa local.
           </p>
         </div>
         <div className="flex gap-2">
@@ -192,7 +192,7 @@ const CompliancePage = ({ apiUrl, token, user }) => {
               className="inline-flex items-center px-4 py-2 bg-indigo-600 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
             >
               <CheckCircle className="w-4 h-4 mr-2" />
-              Admin Review
+              Revisión (admin)
             </Link>
           )}
           <Link 
@@ -200,7 +200,7 @@ const CompliancePage = ({ apiUrl, token, user }) => {
             className="inline-flex items-center px-4 py-2 bg-white border border-slate-300 rounded-lg shadow-sm text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
           >
             <AlertTriangle className="w-4 h-4 mr-2 text-amber-500" />
-            View Alerts
+            Ver alertas
           </Link>
         </div>
       </div>
@@ -213,7 +213,7 @@ const CompliancePage = ({ apiUrl, token, user }) => {
           </div>
           <div>
             <p className="text-2xl font-bold text-slate-900">{stats.verified}</p>
-            <p className="text-xs font-medium text-slate-500 uppercase">Verified</p>
+            <p className="text-xs font-medium text-slate-500 uppercase">Verificados</p>
           </div>
         </div>
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
@@ -222,7 +222,7 @@ const CompliancePage = ({ apiUrl, token, user }) => {
           </div>
           <div>
             <p className="text-2xl font-bold text-slate-900">{stats.pending}</p>
-            <p className="text-xs font-medium text-slate-500 uppercase">Pending</p>
+            <p className="text-xs font-medium text-slate-500 uppercase">Pendientes</p>
           </div>
         </div>
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
@@ -231,7 +231,7 @@ const CompliancePage = ({ apiUrl, token, user }) => {
           </div>
           <div>
             <p className="text-2xl font-bold text-slate-900">{stats.rejected}</p>
-            <p className="text-xs font-medium text-slate-500 uppercase">Action Needed</p>
+            <p className="text-xs font-medium text-slate-500 uppercase">Requieren acción</p>
           </div>
         </div>
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
@@ -240,7 +240,7 @@ const CompliancePage = ({ apiUrl, token, user }) => {
           </div>
           <div>
             <p className="text-2xl font-bold text-slate-900">{stats.missing}</p>
-            <p className="text-xs font-medium text-slate-500 uppercase">Missing</p>
+            <p className="text-xs font-medium text-slate-500 uppercase">Faltantes</p>
           </div>
         </div>
       </div>
@@ -278,7 +278,7 @@ const CompliancePage = ({ apiUrl, token, user }) => {
                         <h3 className="font-semibold text-slate-900">{req.document_type}</h3>
                         {req.is_mandatory && (
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 uppercase tracking-wide border border-slate-200">
-                            Mandatory
+                            Obligatorio
                           </span>
                         )}
                       </div>
@@ -341,7 +341,7 @@ const CompliancePage = ({ apiUrl, token, user }) => {
                           <label className="flex flex-col items-center justify-center w-full h-10 px-4 border-2 border-slate-300 border-dashed rounded-lg cursor-pointer hover:bg-slate-50 hover:border-indigo-400 transition-colors group/upload">
                             <div className="flex items-center gap-2 text-slate-500 group-hover/upload:text-indigo-600">
                               <Upload className="w-4 h-4" />
-                              <span className="text-sm font-medium">Select Document</span>
+                              <span className="text-sm font-medium">Seleccionar documento</span>
                             </div>
                             <input 
                               type="file" 

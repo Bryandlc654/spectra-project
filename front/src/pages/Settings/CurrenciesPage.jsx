@@ -144,7 +144,7 @@ export default function CurrenciesPage({ apiUrl, token }) {
         <div className="p-4 border-b border-slate-100 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="relative w-full md:max-w-sm">
             <i className="bi bi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
-            <input
+            <input aria-label="Buscar por code, nombre o símbolo"
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Buscar por code, nombre o símbolo…"
@@ -255,7 +255,7 @@ export default function CurrenciesPage({ apiUrl, token }) {
         <form onSubmit={submit} className="space-y-4">
           <div>
             <label className="text-sm font-semibold text-slate-700">Code</label>
-            <input
+            <input aria-label="Code"
               value={code}
               onChange={(e) => setCode(e.target.value)}
               placeholder="PEN"
@@ -266,7 +266,7 @@ export default function CurrenciesPage({ apiUrl, token }) {
 
           <div>
             <label className="text-sm font-semibold text-slate-700">Nombre</label>
-            <input
+            <input aria-label="Nombre"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Sol peruano"
@@ -277,7 +277,7 @@ export default function CurrenciesPage({ apiUrl, token }) {
 
           <div>
             <label className="text-sm font-semibold text-slate-700">Símbolo</label>
-            <input
+            <input aria-label="Símbolo"
               value={symbol}
               onChange={(e) => setSymbol(e.target.value)}
               placeholder="S/"

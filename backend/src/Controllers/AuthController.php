@@ -347,7 +347,8 @@ class AuthController
                     'roles' => $tenantRoles,
                     'company_id' => $companyId ?: null,
                     'country_id' => $user['country_id'] ?? null,
-                    'nationality' => $user['nationality'] ?? null
+                    'nationality' => $user['nationality'] ?? null,
+                    'created_at' => $user['created_at'] ?? null
                 ],
             ], 200);
 

@@ -128,7 +128,7 @@ export default function AuditLogsPage({ apiUrl, token }) {
         {/* Filters */}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
           <form onSubmit={handleFilter} className="flex gap-2">
-              <input 
+              <input aria-label="Filtrar por User ID" 
                   value={userId}
                   onChange={e => setUserId(e.target.value)}
                   placeholder="Filtrar por User ID..."
