@@ -59,3 +59,11 @@ backend/storage/*.sqlite
 backend/storage/*.sqlite-journal
 backend/storage/*.sqlite-wal
 backend/storage/*.sqlite-shm
+# Dumps y backups (nunca versionar datos reales). Las migraciones en backend/updates/ siguen permitidas.
+*.sql
+!backend/updates/*.sql
+*.zip
+*.bak
+
+# Scripts de diagnóstico que no deben ir al servidor
+backend/dev/import_db.php

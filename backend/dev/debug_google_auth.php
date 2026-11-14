@@ -1,7 +1,7 @@
 <?php
-require 'vendor/autoload.php';
-require 'src/Database.php';
-$config = require 'config/config.php';
+require __DIR__ . '/../vendor/autoload.php';
+require __DIR__ . '/../src/Database.php';
+$config = require __DIR__ . '/../config/config.php';
 
 use App\Database;
 

@@ -70,7 +70,9 @@ class Auth
     {
         $token = self::bearerToken();
         if (!$token) {
-            self::log('Auth failed: No bearer token found in headers: ' . json_encode($_SERVER));
+            // No volcar $_SERVER: contiene variables de entorno (secretos de BD, SMTP, etc.)
+            self::log('Auth failed: No bearer token. ' . ($_SERVER['REQUEST_METHOD'] ?? '-') . ' '
+                . ($_SERVER['REQUEST_URI'] ?? '-') . ' from ' . ($_SERVER['REMOTE_ADDR'] ?? '-'));
             Response::error('No autenticado', 401);
             exit;
         }
@@ -91,7 +93,7 @@ class Auth
             }
             if (isset($claims['exp']) && time() >= (int)$claims['exp']) {
                 self::log('Auth failed: Token expired. Exp: ' . $claims['exp'] . ', Now: ' . time());
-                Response::error('Token expirado. Exp: ' . $claims['exp'] . ', Now: ' . time(), 401);
+                Response::error('Token expirado', 401);
                 exit;
             }
 

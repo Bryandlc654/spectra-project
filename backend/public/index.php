@@ -83,8 +83,10 @@ set_error_handler(function ($severity, $message, $file, $line) {
 // =====================================================
 $GLOBALS['debug_start'] = microtime(true);
 function debug_log($msg) {
+    // Solo en modo debug y fuera del docroot público (antes escribía en public/ en cada petición).
+    if (!filter_var(getenv('APP_DEBUG') ?: ($_ENV['APP_DEBUG'] ?? false), FILTER_VALIDATE_BOOLEAN)) return;
     $time = microtime(true) - $GLOBALS['debug_start'];
-    file_put_contents(__DIR__ . '/debug_timings.log', sprintf("[%.4f] %s\n", $time, $msg), FILE_APPEND);
+    @file_put_contents(__DIR__ . '/../storage/logs/debug_timings.log', sprintf("[%.4f] %s\n", $time, $msg), FILE_APPEND);
 }
 debug_log("Request started: " . ($_SERVER['REQUEST_URI'] ?? 'unknown'));
 
@@ -270,8 +272,8 @@ $segments = array_values(array_filter(explode('/', $path), fn($s) => $s !== ''))
 
 $apiIndex = array_search('api', $segments, true);
 
-// Debug rápido de routing (temporal): /public/_debug_router
-if (($segments[0] ?? '') === '_debug_router') {
+// Debug rápido de routing: /public/_debug_router (solo con APP_DEBUG=true)
+if ($appDebug && ($segments[0] ?? '') === '_debug_router') {
     Response::json([
         'file' => __FILE__,
         'request_uri' => $_SERVER['REQUEST_URI'] ?? null,
@@ -286,11 +288,6 @@ if ($apiIndex === false) {
     Response::json([
         'message' => 'API básica en funcionamiento',
         'hint' => 'No se detectó el segmento "api" en la URL',
-        'debug' => [
-            'file' => __FILE__,
-            'parsed_path' => $path,
-            'segments' => $segments,
-        ],
     ], 200);
     exit;
 }

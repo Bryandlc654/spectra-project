@@ -1,6 +1,6 @@
 <?php
-require_once __DIR__ . '/vendor/autoload.php';
-$config = require __DIR__ . '/config/config.php';
+require_once __DIR__ . '/../vendor/autoload.php';
+$config = require __DIR__ . '/../config/config.php';
 
 try {
     $pdo = new PDO(
@@ -10,8 +10,13 @@ try {
         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
     );
 
-    echo "Wallets Columns:\n";
-    $stmt = $pdo->query("DESCRIBE wallets");
+    echo "Companies Columns:\n";
+    $stmt = $pdo->query("DESCRIBE companies");
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $col) {
+        echo $col['Field'] . " ";
+    }
+    echo "\n\nUsers Columns:\n";
+    $stmt = $pdo->query("DESCRIBE users");
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $col) {
         echo $col['Field'] . " ";
     }

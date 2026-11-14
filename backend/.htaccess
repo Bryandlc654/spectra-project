@@ -1,0 +1,15 @@
+# Defensa en profundidad: el docroot debería ser backend/public/.
+# Si el servidor apunta a backend/, se bloquea todo lo que no esté en public/
+# (.env, config/, storage/, vendor/, dev/, scripts, logs, zips...).
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(?!public/) - [F,L]
+</IfModule>
+<IfModule !mod_rewrite.c>
+    Require all denied
+</IfModule>
+
+# Nunca servir dotfiles (.env, .git...) ni logs/dumps
+<FilesMatch "(^\.|\.(log|sql|zip|env|bak)$)">
+    Require all denied
+</FilesMatch>
