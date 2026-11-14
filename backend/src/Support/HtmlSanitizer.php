@@ -25,6 +25,29 @@ class HtmlSanitizer
             return $body;
         }
 
+        // Proteger las variables de plantilla ({{employee_name}}, etc.): las reglas
+        // de abajo eliminan cualquier bloque {...} y las dejaban como "{}".
+        $vars = [];
+        $body = preg_replace_callback('/\{\{\s*([A-Za-z0-9_.]+)\s*\}\}/', static function (array $m) use (&$vars): string {
+            $vars[] = '{{' . $m[1] . '}}';
+            return "\x01TPLVAR" . (count($vars) - 1) . "\x02";
+        }, $body) ?? $body;
+
+        $body = self::stripCssBlocks($body);
+
+        if ($vars) {
+            $body = preg_replace_callback('/\x01TPLVAR(\d+)\x02/', static fn(array $m): string => $vars[(int)$m[1]] ?? '', $body) ?? $body;
+        }
+
+        return $body;
+    }
+
+    private static function stripCssBlocks(string $body): string
+    {
+        if (strpos($body, '{') === false && stripos($body, '<style') === false && stripos($body, '<script') === false) {
+            return trim($body);
+        }
+
         $body = preg_replace('#<(style|script)\b[^>]*>.*?</\1>#is', '', $body) ?? $body;
         $body = preg_replace('#/\*.*?\*/#s', '', $body) ?? $body;
         $body = preg_replace('#@[a-zA-Z-]+[^{;]*\{[^{}]*\}#s', '', $body) ?? $body;

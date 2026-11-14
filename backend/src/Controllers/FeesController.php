@@ -87,9 +87,11 @@ class FeesController
 
                 // Active contracts overlapping the billing period
                 $stmtContracts = $this->pdo->prepare("
-                    SELECT c.id, c.title, c.freelancer_id, u.full_name AS freelancer_name
+                    SELECT c.id, c.title, c.freelancer_id, u.full_name AS freelancer_name,
+                           COALESCE(NULLIF(TRIM(c.area), ''), fp.area) AS area
                     FROM contracts c
                     LEFT JOIN users u ON u.id = c.freelancer_id
+                    LEFT JOIN freelancer_profiles fp ON fp.user_id = c.freelancer_id
                     WHERE c.company_id = :cid
                       AND c.status = 'active'
                       AND (c.start_date IS NULL OR c.start_date <= :pend)
@@ -120,7 +122,8 @@ class FeesController
                             $this->pdo,
                             (string)$company['id'],
                             (string)($contract['title'] ?? ''),
-                            $activeFreelancers
+                            $activeFreelancers,
+                            isset($contract['area']) ? (string)$contract['area'] : null
                         );
 
                         if (!$rule) {

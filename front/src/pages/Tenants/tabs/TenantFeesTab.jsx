@@ -15,6 +15,7 @@ export default function TenantFeesTab({ companyId, api }) {
   const [form, setForm] = useState({
     type: 'contract_fee',
     position: '',
+    area: '',
     min_collaborators: 0,
     max_collaborators: '',
     priority: 0,
@@ -123,6 +124,7 @@ export default function TenantFeesTab({ companyId, api }) {
         company_id: companyId,
         type: String(form.type || '').trim(),
         position: form.type === 'contract_fee' ? String(form.position || '').trim() : null,
+        area: form.type === 'contract_fee' ? (String(form.area || '').trim() || null) : null,
         min_collaborators: form.type === 'contract_fee' ? Number(form.min_collaborators || 0) : 0,
         max_collaborators: form.type === 'contract_fee' && form.max_collaborators !== '' ? Number(form.max_collaborators) : null,
         priority: form.type === 'contract_fee' ? Number(form.priority || 0) : 0,
@@ -140,6 +142,7 @@ export default function TenantFeesTab({ companyId, api }) {
       setForm({
         type: 'contract_fee',
         position: '',
+        area: '',
         min_collaborators: 0,
         max_collaborators: '',
         priority: 0,
@@ -161,6 +164,7 @@ export default function TenantFeesTab({ companyId, api }) {
     setForm({
       type: rule.type || 'contract_fee',
       position: rule.position || '',
+      area: rule.area || '',
       min_collaborators: rule.min_collaborators ?? 0,
       max_collaborators: rule.max_collaborators ?? '',
       priority: rule.priority ?? 0,
@@ -175,6 +179,7 @@ export default function TenantFeesTab({ companyId, api }) {
     setForm({
       type: 'contract_fee',
       position: '',
+      area: '',
       min_collaborators: 0,
       max_collaborators: '',
       priority: 0,
@@ -288,6 +293,17 @@ export default function TenantFeesTab({ companyId, api }) {
               />
             </div>
             <div>
+              <label className="text-xs font-semibold text-slate-600">{t('tenants.operations.fees.area')}</label>
+              <input
+                type="text"
+                value={form.area || ''}
+                onChange={(e) => setForm((p) => ({ ...p, area: e.target.value }))}
+                placeholder={t('tenants.common.allAreas')}
+                maxLength={150}
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand"
+              />
+            </div>
+            <div>
               <label className="text-xs font-semibold text-slate-600">{t('tenants.operations.fees.minCollaborators')}</label>
               <input
                 type="number"
@@ -373,6 +389,7 @@ export default function TenantFeesTab({ companyId, api }) {
             <tr className="text-left text-xs uppercase tracking-widest text-slate-500">
               <th className="px-4 py-3">{t('tenants.common.type')}</th>
               <th className="px-4 py-3">{t('tenants.operations.fees.position')}</th>
+              <th className="px-4 py-3">{t('tenants.operations.fees.area')}</th>
               <th className="px-4 py-3">{t('tenants.operations.fees.collaboratorRange')}</th>
               <th className="px-4 py-3">{t('tenants.operations.fees.value')}</th>
               <th className="px-4 py-3">{t('tenants.common.currency')}</th>
@@ -388,6 +405,7 @@ export default function TenantFeesTab({ companyId, api }) {
                 <tr key={r.id} className="hover:bg-slate-50/60">
                   <td className="px-4 py-3 font-semibold">{getFeeTypeLabel(r.type)}</td>
                   <td className="px-4 py-3">{r.position || t('tenants.common.all')}</td>
+                  <td className="px-4 py-3">{r.type === 'contract_fee' ? (r.area || t('tenants.common.allAreas')) : '—'}</td>
                   <td className="px-4 py-3">
                     {r.type === 'contract_fee'
                       ? `${r.min_collaborators ?? 0} - ${r.max_collaborators ?? '∞'}`
@@ -453,7 +471,7 @@ export default function TenantFeesTab({ companyId, api }) {
 
             {!rules.length ? (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-slate-500">
+                <td colSpan={8} className="px-4 py-10 text-center text-slate-500">
                   {t('tenants.operations.fees.noRules')}
                 </td>
               </tr>

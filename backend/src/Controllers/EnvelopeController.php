@@ -687,6 +687,7 @@ class EnvelopeController
                 '{{employee_nationality}}' => $contract['user_nationality'] ?? 'N/A',
                 '{{job_title}}' => $contract['title'] ?? 'Contractor',
                 '{{start_date}}' => $contract['start_date'] ?? date('Y-m-d'),
+                '{{end_date}}' => !empty($contract['end_date']) ? $contract['end_date'] : 'indeterminado',
                 '{{salary}}' => $contract['rate'] ?? '0',
                 '{{currency}}' => $contract['currency_code'] ?? 'USD',
                 '{{position}}' => $contract['title'] ?? 'Contractor',

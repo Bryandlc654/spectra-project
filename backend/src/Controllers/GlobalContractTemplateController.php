@@ -28,10 +28,13 @@ class GlobalContractTemplateController
             return;
         }
 
-        // Optional: Check if user is platform admin or has permission
-        // if ($user['platform_role'] !== 'admin') { ... } 
-        // For now, allowing any authenticated user to read, maybe restricted write?
-        // Let's assume admins only for write.
+        // Lectura: cualquier usuario autenticado (las empresas usan las plantillas
+        // de Spectra al crear contratos). Escritura: solo personal de Spectra.
+        $canManage = in_array($user['platform_role'] ?? '', ['super_admin', 'admin', 'legal', 'finance'], true);
+        if ($method !== 'GET' && !$canManage) {
+            Response::error('Solo Spectra puede administrar las plantillas globales', 403);
+            return;
+        }
 
         switch ($method) {
             case 'GET':
@@ -343,6 +346,10 @@ class GlobalContractTemplateController
             '{{functions}}' => "- Desarrollo de software\n- Mantenimiento de sistemas\n- Reporte de bugs",
             '{{work_modality}}' => 'Remoto',
             '{{start_date}}' => date('d/m/Y'),
+            '{{end_date}}' => date('d/m/Y', strtotime('+3 months')),
+            '{{day}}' => date('d'),
+            '{{month}}' => date('m'),
+            '{{year}}' => date('Y'),
             '{{salary}}' => '5,000.00',
             '{{currency}}' => 'PEN',
             '{{notice_period}}' => '30'

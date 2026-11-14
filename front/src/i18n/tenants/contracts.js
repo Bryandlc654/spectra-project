@@ -140,7 +140,7 @@ export const contracts = {
     },
     templates: {
       title: 'Plantillas de Contratos',
-      subtitle: 'Gestiona las plantillas base para generar contratos.',
+      subtitle: 'Plantillas privadas de la empresa: solo tu empresa puede verlas y usarlas. Las plantillas oficiales de Spectra aparecen al crear un contrato.',
       loadError: 'No se pudieron cargar las plantillas',
       apiNotInitialized: 'API no inicializada.',
       searchPlaceholder: 'Buscar...',
@@ -314,7 +314,7 @@ export const contracts = {
     },
     templates: {
       title: 'Contract Templates',
-      subtitle: 'Manage the base templates used to generate contracts.',
+      subtitle: 'Private company templates: only your company can see and use them. Spectra official templates are available when creating a contract.',
       loadError: 'Templates could not be loaded',
       apiNotInitialized: 'API not initialized.',
       searchPlaceholder: 'Search...',

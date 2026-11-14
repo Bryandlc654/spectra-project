@@ -18,6 +18,7 @@ class CompanyFeeRulesController
         $this->pdo = $database->pdo();
         $this->audit = new AuditLogger($this->pdo);
         $this->ensureExtensions();
+        \App\Support\FeeRuleResolver::ensureAreaColumns($this->pdo);
     }
 
     private function ensureExtensions(): void
@@ -174,9 +175,9 @@ class CompanyFeeRulesController
         $now = date('Y-m-d H:i:s');
 
         $sql = "INSERT INTO company_fee_rules 
-                (id, company_id, type, position, min_collaborators, max_collaborators, priority, value, currency_id, active, created_at, updated_at)
+                (id, company_id, type, position, area, min_collaborators, max_collaborators, priority, value, currency_id, active, created_at, updated_at)
                 VALUES 
-                (:id, :company_id, :type, :position, :min_collaborators, :max_collaborators, :priority, :value, :currency_id, :active, :created_at, :updated_at)";
+                (:id, :company_id, :type, :position, :area, :min_collaborators, :max_collaborators, :priority, :value, :currency_id, :active, :created_at, :updated_at)";
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([
@@ -184,6 +185,7 @@ class CompanyFeeRulesController
             ':company_id' => $data['company_id'],
             ':type' => $data['type'],
             ':position' => !empty($data['position']) ? trim((string)$data['position']) : null,
+            ':area' => !empty($data['area']) ? trim((string)$data['area']) : null,
             ':min_collaborators' => (int)($data['min_collaborators'] ?? 0),
             ':max_collaborators' => (isset($data['max_collaborators']) && $data['max_collaborators'] !== '') ? (int)$data['max_collaborators'] : null,
             ':priority' => (int)($data['priority'] ?? 0),
@@ -198,6 +200,7 @@ class CompanyFeeRulesController
             'company_id' => $data['company_id'],
             'type' => $data['type'],
             'position' => $data['position'] ?? null,
+            'area' => $data['area'] ?? null,
             'min_collaborators' => $data['min_collaborators'] ?? 0,
             'max_collaborators' => $data['max_collaborators'] ?? null,
             'value' => $data['value'],
@@ -237,6 +240,10 @@ class CompanyFeeRulesController
         if (array_key_exists('position', $data)) {
             $fields[] = "position = :position";
             $params[':position'] = !empty($data['position']) ? trim((string)$data['position']) : null;
+        }
+        if (array_key_exists('area', $data)) {
+            $fields[] = "area = :area";
+            $params[':area'] = !empty($data['area']) ? trim((string)$data['area']) : null;
         }
         if (array_key_exists('min_collaborators', $data)) {
             $fields[] = "min_collaborators = :min_collaborators";
@@ -322,6 +329,11 @@ class CompanyFeeRulesController
         $validTypes = ['platform_fee', 'per_freelancer_fee', 'payroll_fee', 'invoice_fee', 'contract_fee'];
         if (!in_array((string)$data['type'], $validTypes, true)) {
             Response::error('type inválido', 422);
+            exit;
+        }
+
+        if (isset($data['area']) && mb_strlen(trim((string)$data['area'])) > 150) {
+            Response::error('area no puede superar 150 caracteres', 422);
             exit;
         }
 

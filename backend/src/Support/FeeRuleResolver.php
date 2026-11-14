@@ -8,6 +8,7 @@ class FeeRuleResolver
 {
     public static function ensureSchema(PDO $pdo): void
     {
+        self::ensureAreaColumns($pdo);
         if (Cache::get('company_fee_rules_extensions_v1') !== null) return;
 
         try {
@@ -47,6 +48,34 @@ class FeeRuleResolver
             Cache::set('company_fee_rules_extensions_v1', time(), 86400 * 365);
         } catch (\Throwable $e) {
             error_log('[FeeRuleResolver] Schema migration failed: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Tarifa por área: columna `area` en las reglas y en los contratos.
+     * Si el contrato no tiene área, se usa la del perfil del freelancer.
+     */
+    public static function ensureAreaColumns(PDO $pdo): void
+    {
+        if (Cache::get('company_fee_rules_area_v1') !== null) return;
+        try {
+            $targets = [
+                'company_fee_rules' => "ALTER TABLE company_fee_rules ADD COLUMN area VARCHAR(150) NULL AFTER position",
+                'contracts' => "ALTER TABLE contracts ADD COLUMN area VARCHAR(150) NULL AFTER title",
+            ];
+            foreach ($targets as $table => $sql) {
+                try {
+                    $stmt = $pdo->query("SHOW COLUMNS FROM `{$table}` LIKE 'area'");
+                    if (!$stmt->fetch(PDO::FETCH_ASSOC)) {
+                        $pdo->exec($sql);
+                    }
+                } catch (\Throwable $e) {
+                    // La tabla puede no existir todavía en una BD nueva
+                }
+            }
+            Cache::set('company_fee_rules_area_v1', time(), 86400 * 365);
+        } catch (\Throwable $e) {
+            error_log('[FeeRuleResolver] Area migration failed: ' . $e->getMessage());
         }
     }
 
@@ -92,7 +121,7 @@ class FeeRuleResolver
         }
     }
 
-    public static function resolveContractFee(PDO $pdo, string $companyId, string $position, ?int $collaboratorCount = null): ?array
+    public static function resolveContractFee(PDO $pdo, string $companyId, string $position, ?int $collaboratorCount = null, ?string $area = null): ?array
     {
         if ($collaboratorCount === null) {
             $collaboratorCount = self::activeCollaboratorCount($pdo, $companyId);
@@ -129,12 +158,18 @@ class FeeRuleResolver
         if (!$rules) return null;
 
         $positionNorm = self::normalize($position);
+        $areaNorm = self::normalize((string)($area ?? ''));
         $matches = [];
 
         foreach ($rules as $rule) {
             $rulePosition = trim((string)($rule['position'] ?? ''));
             $rulePositionNorm = self::normalize($rulePosition);
             if ($rulePositionNorm !== '' && $rulePositionNorm !== $positionNorm) {
+                continue;
+            }
+            // Una regla con área solo aplica a contratos de esa área
+            $ruleAreaNorm = self::normalize((string)($rule['area'] ?? ''));
+            if ($ruleAreaNorm !== '' && $ruleAreaNorm !== $areaNorm) {
                 continue;
             }
 
@@ -145,6 +180,7 @@ class FeeRuleResolver
             $matches[] = [
                 'rule' => $rule,
                 'exact_position' => $rulePositionNorm !== '' ? 1 : 0,
+                'exact_area' => $ruleAreaNorm !== '' ? 1 : 0,
                 'range_width' => $width,
                 'priority' => (int)($rule['priority'] ?? 0),
             ];
@@ -152,9 +188,13 @@ class FeeRuleResolver
 
         if (!$matches) return null;
 
+        // Más específica primero: puesto > área > rango más estrecho > prioridad
         usort($matches, function (array $a, array $b): int {
             if ($a['exact_position'] !== $b['exact_position']) {
                 return $b['exact_position'] <=> $a['exact_position'];
+            }
+            if ($a['exact_area'] !== $b['exact_area']) {
+                return $b['exact_area'] <=> $a['exact_area'];
             }
             if ($a['range_width'] !== $b['range_width']) {
                 return $a['range_width'] <=> $b['range_width'];

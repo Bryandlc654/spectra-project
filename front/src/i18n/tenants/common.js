@@ -67,6 +67,7 @@ export const common = {
     notAvailable: '—',
     noLimit: 'Sin límite',
     allPositions: 'Todos los puestos',
+    allAreas: 'Todas las áreas',
   },
   en: {
     loading: 'Loading...',
@@ -136,5 +137,6 @@ export const common = {
     notAvailable: '—',
     noLimit: 'No limit',
     allPositions: 'All positions',
+    allAreas: 'All areas',
   },
 };

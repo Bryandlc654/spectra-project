@@ -3714,6 +3714,11 @@ final class TenantController
         $notice = (int)($data['notice_period'] ?? 0);
         $country = trim((string)($data['country'] ?? ''));
         $templateId = trim((string)($data['template_id'] ?? ''));
+        $area = trim((string)($data['area'] ?? ''));
+        if (mb_strlen($area) > 150) {
+            Response::error('El área no puede superar 150 caracteres', 422);
+            return;
+        }
         
         if ($title === '' || $startDate === '' || $currencyId <= 0) {
             Response::error('Faltan campos requeridos (title, start_date, currency_id)', 422);
@@ -3725,16 +3730,31 @@ final class TenantController
              return;
         }
 
+        // Solo plantillas de Spectra (globales) o privadas de esta misma empresa
+        if ($templateId !== '' && !$this->templateUsableByCompany($templateId, $companyId)) {
+            Response::error('La plantilla seleccionada no está disponible para esta empresa', 422);
+            return;
+        }
+
+        // Si no se indica área, se toma la del perfil del freelancer
+        if ($area === '' && !empty($freelancerId)) {
+            try {
+                $stA = $this->pdo->prepare("SELECT area FROM freelancer_profiles WHERE user_id = :uid LIMIT 1");
+                $stA->execute([':uid' => $freelancerId]);
+                $area = trim((string)($stA->fetchColumn() ?: ''));
+            } catch (\Throwable $e) {}
+        }
+
         $id = $this->uuid();
         
         $stmt = $this->pdo->prepare("
             INSERT INTO contracts (
-                id, company_id, freelancer_id, template_id, title, type, status, 
+                id, company_id, freelancer_id, template_id, title, area, type, status, 
                 start_date, end_date, currency_id, rate, 
                 scope_of_work, special_clause, notice_period, country,
                 created_at
             ) VALUES (
-                :id, :cid, :fid, :tpl, :title, :type, 'draft',
+                :id, :cid, :fid, :tpl, :title, :area, :type, 'draft',
                 :start, :end, :cur, :rate,
                 :scope, :special, :notice, :country,
                 NOW()
@@ -3748,6 +3768,7 @@ final class TenantController
                 ':fid' => $freelancerId,
                 ':tpl' => $templateId ?: null,
                 ':title' => $title,
+                ':area' => $area !== '' ? $area : null,
                 ':type' => $type,
                 ':start' => $startDate,
                 ':end' => $endDate ?: null,
@@ -3865,6 +3886,11 @@ final class TenantController
         $params = [':id' => $contractId];
         
         if (isset($data['title'])) { $fields[] = 'title = :title'; $params[':title'] = $data['title']; }
+        if (array_key_exists('area', $data)) {
+            $areaUpd = trim((string)($data['area'] ?? ''));
+            if (mb_strlen($areaUpd) > 150) { Response::error('El área no puede superar 150 caracteres', 422); return; }
+            $fields[] = 'area = :area'; $params[':area'] = $areaUpd !== '' ? $areaUpd : null;
+        }
         if (isset($data['rate'])) { $fields[] = 'rate = :rate'; $params[':rate'] = (float)$data['rate']; }
         if (isset($data['start_date'])) { $fields[] = 'start_date = :start'; $params[':start'] = $data['start_date']; }
         if (isset($data['end_date'])) { $fields[] = 'end_date = :end'; $params[':end'] = $data['end_date'] ?: null; }
@@ -4154,6 +4180,9 @@ final class TenantController
         // Legal Review Columns
         try { $this->pdo->exec("ALTER TABLE contracts ADD COLUMN legal_reviewer_id CHAR(36) NULL"); } catch (\Throwable $e) {}
         try { $this->pdo->exec("ALTER TABLE contracts ADD COLUMN legal_status ENUM('not_required', 'pending_review', 'in_review', 'approved', 'rejected', 'changes_requested') DEFAULT 'not_required'"); } catch (\Throwable $e) {}
+
+        // Área del contrato (tarifas por área)
+        \App\Support\FeeRuleResolver::ensureAreaColumns($this->pdo);
     }
 
     private function ensureContractLegalObservationsTable(): void
@@ -4276,7 +4305,55 @@ final class TenantController
     private function contractTemplatesIndex(string $companyId): void
     {
         $this->ensureContractTemplatesTable();
+        if (!empty($_GET['include_global'])) {
+            $this->contractTemplatesAvailable($companyId);
+            return;
+        }
         $this->pagedCompanyIndex($companyId, 'contract_templates', ['status', 'type', 'country_id']);
+    }
+
+    /**
+     * Plantillas que la empresa puede usar al crear un contrato:
+     * las de Spectra (company_id NULL, solo lectura) + las privadas de la empresa.
+     * Las privadas nunca se exponen a otras empresas.
+     */
+    private function contractTemplatesAvailable(string $companyId): void
+    {
+        $where = ['(company_id IS NULL OR company_id = :cid)'];
+        $params = [':cid' => $companyId];
+        $status = trim((string)($_GET['status'] ?? 'active'));
+        if ($status !== '') {
+            $where[] = 'status = :status';
+            $params[':status'] = $status;
+        }
+        if (!empty($_GET['type'])) {
+            $where[] = 'type = :type';
+            $params[':type'] = (string)$_GET['type'];
+        }
+        $sql = "SELECT id, company_id, type, country_id, language_code, title, status, created_at,
+                       CASE WHEN company_id IS NULL THEN 'global' ELSE 'company' END AS scope
+                FROM contract_templates
+                WHERE " . implode(' AND ', $where) . "
+                ORDER BY (company_id IS NULL) DESC, title ASC
+                LIMIT 500";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        Response::json(['data' => $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []]);
+    }
+
+    private function templateUsableByCompany(string $templateId, string $companyId): bool
+    {
+        try {
+            $stmt = $this->pdo->prepare("
+                SELECT 1 FROM contract_templates
+                WHERE id = :id AND (company_id IS NULL OR company_id = :cid) AND status = 'active'
+                LIMIT 1
+            ");
+            $stmt->execute([':id' => $templateId, ':cid' => $companyId]);
+            return (bool)$stmt->fetchColumn();
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 
     private function contractTemplatesStore(string $companyId): void

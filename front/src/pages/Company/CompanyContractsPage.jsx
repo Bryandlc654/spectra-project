@@ -186,7 +186,8 @@ function CompanyContractsList({ companyId, api, countries }) {
         rate: '',
         start_date: '',
         end_date: '',
-        scope_of_work: '' // Will be populated from template if selected
+        area: '',
+        scope_of_work: ''
     });
 
     // Freelancer Search for Create Form
@@ -217,7 +218,8 @@ function CompanyContractsList({ companyId, api, countries }) {
 
     async function loadTemplates() {
         try {
-            const res = await api.get(`/api/tenants/${companyId}/contract-templates?status=active`);
+            // Plantillas de Spectra (globales) + plantillas privadas de la empresa
+            const res = await api.get(`/api/tenants/${companyId}/contract-templates?status=active&include_global=1`);
             setTemplates(Array.isArray(res) ? res : (res.data || []));
         } catch (e) {
             console.error('Error loading templates', e);
@@ -267,6 +269,7 @@ function CompanyContractsList({ companyId, api, countries }) {
                 rate: '',
                 start_date: '',
                 end_date: '',
+                area: '',
                 scope_of_work: ''
             });
             setCreateStep(1);
@@ -284,8 +287,7 @@ function CompanyContractsList({ companyId, api, countries }) {
             ...prev,
             template_id: tplId,
             title: tpl ? tpl.title : prev.title,
-            type: tpl ? tpl.type : prev.type,
-            scope_of_work: tpl ? tpl.body : prev.scope_of_work
+            type: tpl ? tpl.type : prev.type
         }));
     };
 
@@ -504,11 +506,22 @@ function CompanyContractsList({ companyId, api, countries }) {
                                 onChange={handleTemplateSelect}
                             >
                                 <option value="">-- Sin plantilla --</option>
-                                {templates.map(t => (
-                                    <option key={t.id} value={t.id}>{t.title} ({t.country_id})</option>
-                                ))}
+                                {templates.some(t => t.scope === 'global') && (
+                                    <optgroup label="Plantillas de Spectra">
+                                        {templates.filter(t => t.scope === 'global').map(t => (
+                                            <option key={t.id} value={t.id}>{t.title}</option>
+                                        ))}
+                                    </optgroup>
+                                )}
+                                {templates.some(t => t.scope !== 'global') && (
+                                    <optgroup label="Mis plantillas (privadas)">
+                                        {templates.filter(t => t.scope !== 'global').map(t => (
+                                            <option key={t.id} value={t.id}>{t.title}</option>
+                                        ))}
+                                    </optgroup>
+                                )}
                             </select>
-                            <p className="mt-1 text-xs text-slate-500">Seleccionar una plantilla autocompletará el título y tipo.</p>
+                            <p className="mt-1 text-xs text-slate-500">Seleccionar una plantilla autocompletará el título y tipo. Tus plantillas privadas solo las ve tu empresa.</p>
                         </div>
                         
                         <div className="grid grid-cols-2 gap-4">
@@ -533,6 +546,28 @@ function CompanyContractsList({ companyId, api, countries }) {
                                     <option value="retainer">Retainer</option>
                                 </select>
                             </div>
+                        </div>
+
+                        <div>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">Área</label>
+                            <input
+                                className="w-full rounded-xl border-slate-200"
+                                placeholder="Ej. Tecnología, Finanzas, Operaciones"
+                                maxLength={150}
+                                value={formData.area}
+                                onChange={e => setFormData({...formData, area: e.target.value})}
+                            />
+                            <p className="mt-1 text-xs text-slate-500">Se usa para aplicar la tarifa por área. Si lo dejas vacío se toma el área del perfil del freelancer.</p>
+                        </div>
+
+                        <div>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">Funciones / alcance del servicio</label>
+                            <textarea
+                                className="min-h-[80px] w-full rounded-xl border-slate-200"
+                                placeholder="Detalle de las labores que realizará"
+                                value={formData.scope_of_work}
+                                onChange={e => setFormData({...formData, scope_of_work: e.target.value})}
+                            />
                         </div>
 
                         <div>

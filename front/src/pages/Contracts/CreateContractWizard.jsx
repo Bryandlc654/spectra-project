@@ -25,7 +25,8 @@ export default function CreateContractWizard({ apiUrl, token, companyId }) {
         special_clause: '',
         country: '', // For EOR
         freelancer_id: null, // TODO: Implement freelancer selection
-        template_id: ''
+        template_id: '',
+        area: ''
     });
 
     const handlePreviewPdf = async (tplId) => {
@@ -77,14 +78,17 @@ export default function CreateContractWizard({ apiUrl, token, companyId }) {
     useEffect(() => {
         const fetchTemplates = async () => {
             try {
-                const res = await api.get('/api/global-contract-templates?status=active');
+                // Con empresa: plantillas de Spectra + privadas de la empresa
+                const res = companyId
+                    ? await api.get(`/api/tenants/${companyId}/contract-templates?status=active&include_global=1`)
+                    : await api.get('/api/global-contract-templates?status=active&per_page=100');
                 setTemplates(res.data || []);
             } catch (e) {
                 console.error('Error loading templates', e);
             }
         };
         fetchTemplates();
-    }, [api]);
+    }, [api, companyId]);
 
     useEffect(() => {
         const fetchCountries = async () => {
@@ -267,6 +271,7 @@ export default function CreateContractWizard({ apiUrl, token, companyId }) {
                             } else if (countryIso || lang) {
                                 suffix = ` (${countryIso || lang})`;
                             }
+                            if (t.scope === 'company') suffix += ' · Privada';
                             return (
                                 <option key={t.id} value={t.id}>
                                     {t.title}
@@ -277,7 +282,7 @@ export default function CreateContractWizard({ apiUrl, token, companyId }) {
                     </select>
                         );
                     })()}
-                    {formData.template_id && (
+                    {formData.template_id && templates.find(t => t.id === formData.template_id)?.scope !== 'company' && (
                         <button
                             type="button"
                             onClick={() => handlePreviewPdf(formData.template_id)}
@@ -321,6 +326,18 @@ export default function CreateContractWizard({ apiUrl, token, companyId }) {
                     value={formData.title}
                     onChange={e => setFormData({...formData, title: e.target.value})}
                 />
+            </div>
+            <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Área</label>
+                <input
+                    type="text"
+                    className="w-full rounded-lg border-slate-300"
+                    placeholder="Ej. Tecnología, Finanzas, Operaciones"
+                    maxLength={150}
+                    value={formData.area}
+                    onChange={e => setFormData({...formData, area: e.target.value})}
+                />
+                <p className="text-xs text-slate-500 mt-1">Define la tarifa por área. Si lo dejas vacío se usa el área del perfil del freelancer.</p>
             </div>
             <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Alcance del Trabajo (Scope)</label>
