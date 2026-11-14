@@ -233,14 +233,23 @@ class AuthController
                 return;
             }
 
+            // La contraseña se valida ANTES de revelar el estado de la cuenta:
+            // así no se puede averiguar qué emails están desactivados sin conocerla.
+            if (!password_verify($password, (string)$user['password_hash'])) {
+                $this->registerFailedAttempt($email, $_SERVER['REMOTE_ADDR'] ?? '');
+                Response::error('Credenciales inválidas', 401);
+                return;
+            }
+
             if (($user['status'] ?? '') !== 'active') {
                 Response::error('La cuenta no está activa', 403);
                 return;
             }
 
-            if (!password_verify($password, (string)$user['password_hash'])) {
-                $this->registerFailedAttempt($email, $_SERVER['REMOTE_ADDR'] ?? '');
-                Response::error('Credenciales inválidas', 401);
+            // Usuarios de empresa: si todas sus empresas están suspendidas, se rechaza
+            // ya en el login (antes entraban y luego todo fallaba con 403).
+            if ($this->allCompaniesSuspended($user)) {
+                Response::error('La empresa está suspendida. Contacte soporte.', 403);
                 return;
             }
 
@@ -526,7 +535,9 @@ class AuthController
             }
 
             // Verify token
-            $stmt = $this->pdo->prepare("SELECT created_at FROM password_resets WHERE email LIKE :email AND token = :token LIMIT 1");
+            // La antigüedad se calcula en MySQL (created_at y NOW() en el mismo reloj):
+            // compararla con la hora de PHP fallaba si sus zonas horarias diferían.
+            $stmt = $this->pdo->prepare("SELECT created_at, TIMESTAMPDIFF(MINUTE, created_at, NOW()) AS age_minutes FROM password_resets WHERE email = :email AND token = :token LIMIT 1");
             $stmt->execute([':email' => $email, ':token' => $token]);
             $reset = $stmt->fetch(\PDO::FETCH_ASSOC);
 
@@ -536,12 +547,9 @@ class AuthController
             }
 
             // Check expiration (60 minutes)
-            $createdAt = new \DateTime($reset['created_at']);
-            $now = new \DateTime();
-            $interval = $now->diff($createdAt);
-            $minutes = ($interval->days * 24 * 60) + ($interval->h * 60) + $interval->i;
+            $minutes = (int)($reset['age_minutes'] ?? PHP_INT_MAX);
 
-            if ($minutes > 60) {
+            if ($minutes > 60 || $minutes < 0) {
                 Response::error('El enlace ha expirado. Solicita uno nuevo.', 400);
                 return;
             }
@@ -1096,6 +1104,32 @@ class AuthController
             $stmt->execute([':id' => $userId]);
         } catch (Throwable $e) {
             // Ignore if column doesn't exist
+        }
+    }
+
+    /**
+     * true si el usuario es de nivel empresa y TODAS sus empresas activas están
+     * suspendidas. Staff interno y freelancers no se ven afectados.
+     */
+    private function allCompaniesSuspended(array $user): bool
+    {
+        $role = (string)($user['platform_role'] ?? '');
+        if (!in_array($role, ['company_admin', 'user', '', 'none'], true)) return false;
+        try {
+            $stmt = $this->pdo->prepare("
+                SELECT
+                    SUM(CASE WHEN c.status = 'suspended' THEN 1 ELSE 0 END) AS suspended,
+                    COUNT(*) AS total
+                FROM company_users cu
+                JOIN companies c ON c.id = cu.company_id AND c.deleted_at IS NULL
+                WHERE cu.user_id = :uid AND cu.deleted_at IS NULL
+            ");
+            $stmt->execute([':uid' => (string)$user['id']]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+            $total = (int)($row['total'] ?? 0);
+            return $total > 0 && (int)($row['suspended'] ?? 0) === $total;
+        } catch (Throwable $e) {
+            return false;
         }
     }
 

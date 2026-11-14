@@ -300,6 +300,25 @@ final class TenantController
                 return;
             }
 
+            // Rutas que usa el frontend (TenantApprovalsTab):
+            //   GET  approvals/policies | POST approvals/policies/{id}/toggle | POST approvals/simulate
+            if ($sub === 'approvals') {
+                $what = $segments[4] ?? null;
+                $policyId = $segments[5] ?? null;
+                $action = $segments[6] ?? null;
+                if ($what === 'policies' && $policyId === null && $method === 'GET') { $this->approvalsList($tenantId); return; }
+                if ($what === 'policies' && $policyId !== null && $action === 'toggle' && in_array($method, ['POST', 'PUT'], true)) {
+                    $this->approvalsToggle($tenantId, $policyId);
+                    return;
+                }
+                if ($what === 'simulate' && $method === 'POST') { $this->approvalsSimulate($tenantId); return; }
+                Response::error('Método no permitido', 405);
+                return;
+            }
+
+            // Tickets de soporte de la empresa (TenantSupportTab)
+            if ($sub === 'tickets' && $method === 'GET') { $this->ticketsIndex($tenantId); return; }
+
             // Approval Policies
             if ($sub === 'approval-policies') {
                  if ($subId === null) {
@@ -1219,10 +1238,9 @@ final class TenantController
 
             $this->pdo->commit();
 
+            // La contraseña generada NUNCA se devuelve al cliente: el admin nuevo
+            // recibe por correo un enlace para configurar la suya.
             $respData = ['id' => $companyId];
-            if ($generatedPassword !== null) {
-                $respData['owner_password'] = $generatedPassword;
-            }
 
             Response::json([
                 'message' => 'Empresa creada y configurada exitosamente',
@@ -1428,10 +1446,50 @@ final class TenantController
         $stmtName->execute([':id' => $id]);
         $companyName = $stmtName->fetchColumn() ?: 'Desconocida';
 
-        $stmt = $this->pdo->prepare("UPDATE companies SET deleted_at = NOW() WHERE id = :id");
-        $stmt->execute([':id' => $id]);
+        // Borrado lógico de la empresa + baja de sus miembros. Antes solo se marcaba
+        // la empresa y sus admins seguían activos (cuentas huérfanas con acceso).
+        $this->pdo->beginTransaction();
+        try {
+            $stmt = $this->pdo->prepare("UPDATE companies SET deleted_at = NOW() WHERE id = :id");
+            $stmt->execute([':id' => $id]);
 
-        $this->audit('tenant.deleted', 'company', $id, ['legal_name' => $companyName]);
+            $stmt = $this->pdo->prepare("SELECT DISTINCT user_id FROM company_users WHERE company_id = :id AND deleted_at IS NULL");
+            $stmt->execute([':id' => $id]);
+            $memberIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+            $this->pdo->prepare("UPDATE company_users SET status = 'disabled', deleted_at = NOW() WHERE company_id = :id AND deleted_at IS NULL")
+                ->execute([':id' => $id]);
+
+            // Desactivar solo cuentas de nivel empresa que ya no pertenecen a ninguna
+            // otra empresa activa. Staff interno y freelancers no se tocan.
+            $disabled = [];
+            $orphan = $this->pdo->prepare("
+                SELECT u.id FROM users u
+                WHERE u.id = :uid
+                  AND (u.platform_role IS NULL OR u.platform_role IN ('company_admin', 'user', '', 'none'))
+                  AND NOT EXISTS (
+                      SELECT 1 FROM company_users cu
+                      JOIN companies c ON c.id = cu.company_id AND c.deleted_at IS NULL
+                      WHERE cu.user_id = u.id AND cu.deleted_at IS NULL
+                  )
+            ");
+            $disableUser = $this->pdo->prepare("UPDATE users SET status = 'disabled' WHERE id = :uid");
+            $revoke = $this->pdo->prepare("UPDATE user_sessions SET is_active = 0 WHERE user_id = :uid");
+            foreach ($memberIds as $uid) {
+                $orphan->execute([':uid' => $uid]);
+                if ($orphan->fetchColumn()) {
+                    $disableUser->execute([':uid' => $uid]);
+                    $revoke->execute([':uid' => $uid]);
+                    $disabled[] = $uid;
+                }
+            }
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) $this->pdo->rollBack();
+            throw $e;
+        }
+
+        $this->audit('tenant.deleted', 'company', $id, ['legal_name' => $companyName, 'disabled_users' => $disabled]);
 
         Response::json(['message' => 'Tenant eliminado']);
     }
@@ -2125,6 +2183,27 @@ final class TenantController
     /* =========================
        APPROVALS
        ========================= */
+
+    private function ticketsIndex(string $companyId): void
+    {
+        if (!$this->fetchCompany($companyId)) {
+            Response::error('Empresa no encontrada', 404);
+            return;
+        }
+        if (!$this->tableExists('support_tickets')) {
+            Response::json(['data' => []]);
+            return;
+        }
+        $stmt = $this->pdo->prepare("
+            SELECT t.id, t.subject, t.subject AS title, t.status, t.priority, t.category, t.created_at, t.updated_at
+            FROM support_tickets t
+            WHERE t.company_id = :cid
+            ORDER BY t.created_at DESC
+            LIMIT 200
+        ");
+        $stmt->execute([':cid' => $companyId]);
+        Response::json(['data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
+    }
 
     private function approvalsList(string $companyId): void
     {

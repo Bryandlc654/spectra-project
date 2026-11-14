@@ -20,6 +20,11 @@ fi
 mkdir -p storage/cache storage/logs public/uploads/compliance
 chmod -R 775 storage public/uploads 2>/dev/null || true
 
+# Esquema: aplica el DDL de los controladores y los updates/*.sql una sola vez
+# por despliegue y marca el esquema como migrado. Sin este paso, cada petición
+# HTTP vuelve a ejecutar ~150 sentencias DDL en los constructores.
+php scripts/migrate.php --force
+
 # ---------------- Frontend (opcional) ----------------
 if [ -d ../front ] && command -v npm >/dev/null 2>&1; then
   cd ../front
