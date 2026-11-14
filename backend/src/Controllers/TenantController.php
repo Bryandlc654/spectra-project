@@ -3702,7 +3702,7 @@ final class TenantController
         
         $title = trim((string)($data['title'] ?? ''));
         $type = trim((string)($data['type'] ?? 'fixed')); 
-        $freelancerId = $data['freelancer_id'] ?? null;
+        $freelancerId = !empty($data['freelancer_id']) ? (string)$data['freelancer_id'] : null;
         $currencyId = (int)($data['currency_id'] ?? 0);
         $rate = (float)($data['rate'] ?? 0);
         $startDate = trim((string)($data['start_date'] ?? ''));
@@ -3745,18 +3745,33 @@ final class TenantController
             } catch (\Throwable $e) {}
         }
 
+        // country_id (FK a countries): país indicado (ISO2) o, si no, el de la empresa
+        $countryId = null;
+        try {
+            if ($country !== '') {
+                $stC = $this->pdo->prepare("SELECT id FROM countries WHERE iso2 = :iso LIMIT 1");
+                $stC->execute([':iso' => strtoupper($country)]);
+                $countryId = $stC->fetchColumn() ?: null;
+            }
+            if ($countryId === null) {
+                $stC = $this->pdo->prepare("SELECT country_id FROM companies WHERE id = :id LIMIT 1");
+                $stC->execute([':id' => $companyId]);
+                $countryId = $stC->fetchColumn() ?: null;
+            }
+        } catch (\Throwable $e) {}
+
         $id = $this->uuid();
         
         $stmt = $this->pdo->prepare("
             INSERT INTO contracts (
                 id, company_id, freelancer_id, template_id, title, area, type, status, 
                 start_date, end_date, currency_id, rate, 
-                scope_of_work, special_clause, notice_period, country,
+                scope_of_work, special_clause, notice_period, country, country_id,
                 created_at
             ) VALUES (
                 :id, :cid, :fid, :tpl, :title, :area, :type, 'draft',
                 :start, :end, :cur, :rate,
-                :scope, :special, :notice, :country,
+                :scope, :special, :notice, :country, :country_id,
                 NOW()
             )
         ");
@@ -3777,7 +3792,8 @@ final class TenantController
                 ':scope' => $scope,
                 ':special' => $special,
                 ':notice' => $notice,
-                ':country' => $country ?: null
+                ':country' => $country ?: null,
+                ':country_id' => $countryId !== null ? (int)$countryId : null,
             ]);
             
             $this->audit('tenant.contract.created', 'contract', $id, ['company_id' => $companyId]);
