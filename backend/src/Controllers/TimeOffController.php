@@ -106,7 +106,7 @@ class TimeOffController
         if ($method === 'GET') {
             if ($id) {
                 // Show policy
-                $stmt = $this->pdo->prepare("SELECT * FROM time_off_policies WHERE id LIKE :id");
+                $stmt = $this->pdo->prepare("SELECT * FROM time_off_policies WHERE id = :id");
                 $stmt->execute([':id' => $id]);
                 $policy = $stmt->fetch(PDO::FETCH_ASSOC);
                 $policy ? Response::json($policy) : Response::error('Política no encontrada', 404);
@@ -125,7 +125,7 @@ class TimeOffController
                 // Data query
                 $stmt = $this->pdo->prepare("
                     SELECT * FROM time_off_policies 
-                    WHERE company_id LIKE :cid 
+                    WHERE company_id = :cid 
                     ORDER BY name ASC 
                     LIMIT :limit OFFSET :offset
                 ");
@@ -136,7 +136,7 @@ class TimeOffController
                 $policies = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
                 // Count query
-                $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM time_off_policies WHERE company_id LIKE :cid");
+                $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM time_off_policies WHERE company_id = :cid");
                 $countStmt->execute([':cid' => $companyId]);
                 $total = (int)$countStmt->fetchColumn();
 
@@ -168,7 +168,7 @@ class TimeOffController
             $this->pdo->prepare("
                 UPDATE time_off_policies 
                 SET name = :name, type = :type, days_per_year = :days, carry_over_days = :carry 
-                WHERE id LIKE :id
+                WHERE id = :id
             ")->execute([
                 ':name' => $data['name'],
                 ':type' => $data['type'],
@@ -178,7 +178,7 @@ class TimeOffController
             ]);
             Response::json(['message' => 'Política actualizada']);
         } elseif ($method === 'DELETE' && $id) {
-            $this->pdo->prepare("DELETE FROM time_off_policies WHERE id LIKE :id")->execute([':id' => $id]);
+            $this->pdo->prepare("DELETE FROM time_off_policies WHERE id = :id")->execute([':id' => $id]);
             Response::json(['message' => 'Política eliminada']);
         }
     }
@@ -201,7 +201,7 @@ class TimeOffController
                     FROM time_off_requests r 
                     JOIN users u ON r.user_id = u.id 
                     JOIN time_off_policies p ON r.policy_id = p.id
-                    WHERE u.manager_id LIKE :mid 
+                    WHERE u.manager_id = :mid 
                     ORDER BY r.created_at DESC
                     LIMIT :limit OFFSET :offset
                  ";
@@ -217,7 +217,7 @@ class TimeOffController
                     SELECT COUNT(*) 
                     FROM time_off_requests r 
                     JOIN users u ON r.user_id = u.id 
-                    WHERE u.manager_id LIKE :mid
+                    WHERE u.manager_id = :mid
                  ";
                  $countStmt = $this->pdo->prepare($countSql);
                  $countStmt->execute([':mid' => $managerId]);
@@ -238,7 +238,7 @@ class TimeOffController
                     SELECT r.*, p.name as policy_name 
                     FROM time_off_requests r
                     JOIN time_off_policies p ON r.policy_id = p.id
-                    WHERE r.user_id LIKE :uid 
+                    WHERE r.user_id = :uid 
                     ORDER BY r.created_at DESC
                     LIMIT :limit OFFSET :offset
                  ";
@@ -250,7 +250,7 @@ class TimeOffController
                  $data = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
                  // Count
-                 $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM time_off_requests WHERE user_id LIKE :uid");
+                 $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM time_off_requests WHERE user_id = :uid");
                  $countStmt->execute([':uid' => $userId]);
                  $total = (int)$countStmt->fetchColumn();
 
@@ -297,14 +297,14 @@ class TimeOffController
                 $stmt = $this->pdo->prepare("
                     UPDATE time_off_requests 
                     SET status = :status, approver_id = :aid, updated_at = NOW() 
-                    WHERE id LIKE :id
+                    WHERE id = :id
                 ");
                 $stmt->execute([':status' => $status, ':aid' => $approverId, ':id' => $id]);
 
                 // If approved, update balance
                 if ($status === 'approved') {
                     // Get request details
-                    $stmt = $this->pdo->prepare("SELECT user_id, policy_id, days_requested FROM time_off_requests WHERE id LIKE :id");
+                    $stmt = $this->pdo->prepare("SELECT user_id, policy_id, days_requested FROM time_off_requests WHERE id = :id");
                     $stmt->execute([':id' => $id]);
                     $req = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -314,11 +314,12 @@ class TimeOffController
                         $upd = $this->pdo->prepare("
                             UPDATE time_off_balances 
                             SET used_days = used_days + :days, 
-                                remaining_days = remaining_days - :days 
-                            WHERE user_id LIKE :uid AND policy_id LIKE :pid AND year = :year
+                                remaining_days = remaining_days - :days_rem 
+                            WHERE user_id = :uid AND policy_id = :pid AND year = :year
                         ");
                         $upd->execute([
                             ':days' => $req['days_requested'], 
+                            ':days_rem' => $req['days_requested'], 
                             ':uid' => $req['user_id'], 
                             ':pid' => $req['policy_id'],
                             ':year' => $year
@@ -348,7 +349,7 @@ class TimeOffController
                     SELECT b.*, p.name as policy_name 
                     FROM time_off_balances b
                     JOIN time_off_policies p ON b.policy_id = p.id
-                    WHERE b.user_id LIKE :uid
+                    WHERE b.user_id = :uid
                     LIMIT :limit OFFSET :offset
                  ");
                  $stmt->bindValue(':uid', $userId);
@@ -357,7 +358,7 @@ class TimeOffController
                  $stmt->execute();
                  $data = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-                 $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM time_off_balances WHERE user_id LIKE :uid");
+                 $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM time_off_balances WHERE user_id = :uid");
                  $countStmt->execute([':uid' => $userId]);
                  $total = (int)$countStmt->fetchColumn();
 

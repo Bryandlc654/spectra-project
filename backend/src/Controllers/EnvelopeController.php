@@ -5,6 +5,7 @@ namespace App\Controllers;
 use App\Database;
 use App\Support\Response;
 use App\Support\Auth;
+use App\Support\HtmlSanitizer;
 use PDO;
 
 class EnvelopeController
@@ -159,8 +160,8 @@ class EnvelopeController
 
         // Search by envelope_id or contract title (via template) or company name
         if ($q !== '') {
-            $where[] = '(e.envelope_id LIKE :q OR ct.title LIKE :q OR comp.legal_name LIKE :q)';
-            $params[':q'] = "%$q%";
+            $where[] = '(e.envelope_id LIKE :q_1 OR ct.title LIKE :q_2 OR comp.legal_name LIKE :q_3)';
+            $params[':q_1'] = $params[':q_2'] = $params[':q_3'] = "%$q%";
         }
 
         $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
@@ -231,7 +232,7 @@ class EnvelopeController
             LEFT JOIN contracts c ON e.contract_id = c.id
             LEFT JOIN contract_templates ct ON c.template_id = ct.id
             LEFT JOIN companies comp ON c.company_id = comp.id
-            WHERE e.id LIKE :id
+            WHERE e.id = :id
             LIMIT 1
         ");
         $stmt->execute([':id' => $id]);
@@ -260,7 +261,7 @@ class EnvelopeController
 
         // Spectra Sign: el estado se calcula de la firma guardada (sin API externa)
         if (!empty($item['signed_at']) && $item['status'] !== 'completed') {
-            $this->pdo->prepare("UPDATE docusign_envelopes SET status = 'completed', last_event_at = NOW() WHERE id LIKE :id")
+            $this->pdo->prepare("UPDATE docusign_envelopes SET status = 'completed', last_event_at = NOW() WHERE id = :id")
                  ->execute([':id' => $id]);
             $status = 'completed';
         } else {
@@ -307,7 +308,7 @@ class EnvelopeController
         }
 
         // Mark as signed
-        $this->pdo->prepare("UPDATE docusign_envelopes SET status = 'completed', last_event_at = NOW() WHERE id LIKE :id")
+        $this->pdo->prepare("UPDATE docusign_envelopes SET status = 'completed', last_event_at = NOW() WHERE id = :id")
              ->execute([':id' => $id]);
 
         // Trigger hooks
@@ -325,7 +326,7 @@ class EnvelopeController
     private function handleContractSigned(string $contractId): void
     {
         // 1. Update Contract Status to 'active'
-        $stmt = $this->pdo->prepare("UPDATE contracts SET status = 'active' WHERE id LIKE :id");
+        $stmt = $this->pdo->prepare("UPDATE contracts SET status = 'active' WHERE id = :id");
         $stmt->execute([':id' => $contractId]);
 
         // 2. Complete Onboarding Task
@@ -360,7 +361,7 @@ class EnvelopeController
         $stmt = $this->pdo->prepare("
             UPDATE contract_amendments 
             SET status = 'signed', signed_at = NOW(), effective_date = IFNULL(effective_date, NOW())
-            WHERE id LIKE :id
+            WHERE id = :id
         ");
         $stmt->execute([':id' => $amendmentId]);
 
@@ -413,7 +414,7 @@ class EnvelopeController
             JOIN contracts c ON ca.contract_id = c.id
             LEFT JOIN users u ON c.freelancer_id = u.id 
             LEFT JOIN companies comp ON c.company_id = comp.id
-            WHERE ca.id LIKE :id
+            WHERE ca.id = :id
             LIMIT 1
         ");
         $stmt->execute([':id' => $amendmentId]);
@@ -476,7 +477,7 @@ class EnvelopeController
             ]);
             
             // Update Amendment status
-            $this->pdo->prepare("UPDATE contract_amendments SET status = 'sent', envelope_id = :eid WHERE id LIKE :id")
+            $this->pdo->prepare("UPDATE contract_amendments SET status = 'sent', envelope_id = :eid WHERE id = :id")
                  ->execute([':eid' => $envelopeId, ':id' => $amendmentId]);
 
             Response::json([
@@ -532,7 +533,7 @@ class EnvelopeController
             ]);
 
             // Update contract status to pending
-            $stmt = $this->pdo->prepare("UPDATE contracts SET status = 'pending' WHERE id LIKE :id");
+            $stmt = $this->pdo->prepare("UPDATE contracts SET status = 'pending' WHERE id = :id");
             $stmt->execute([':id' => $contractId]);
 
             Response::json([
@@ -564,7 +565,7 @@ class EnvelopeController
         }
 
         // Update status to voided
-        $stmt = $this->pdo->prepare("UPDATE docusign_envelopes SET status = 'voided', last_event_at = NOW() WHERE id LIKE :id");
+        $stmt = $this->pdo->prepare("UPDATE docusign_envelopes SET status = 'voided', last_event_at = NOW() WHERE id = :id");
         $stmt->execute([':id' => $id]);
 
         Response::json(['message' => 'Envelope voided successfully']);
@@ -727,6 +728,7 @@ class EnvelopeController
 
     private function plainText(string $html): string
     {
+        $html = HtmlSanitizer::stripCss($html);
         $html = str_ireplace(['<div>', '</div>'], ["\n", ''], $html);
         $html = preg_replace('/<br\s*\/?>/i', "\n", $html);
         $html = str_ireplace(

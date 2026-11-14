@@ -129,6 +129,10 @@ class AuthController
             }
         }
 
+        // Índices para listar/filtrar sesiones sin filesort
+        try { $this->pdo->exec("CREATE INDEX idx_user_sessions_active_activity ON user_sessions (is_active, last_activity)"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("CREATE INDEX idx_user_sessions_last_activity ON user_sessions (last_activity)"); } catch (\Throwable $e) {}
+
         // Ensure manager_id column exists in users table (for Org Chart)
         try {
             $this->pdo->exec("ALTER TABLE users ADD COLUMN manager_id VARCHAR(36) NULL");
@@ -221,7 +225,7 @@ class AuthController
 
             $stmt = $this->pdo->prepare(
                 'SELECT * FROM users
-                 WHERE email LIKE :email
+                 WHERE email = :email
                  LIMIT 1'
             );
             $stmt->execute([':email' => $email]);
@@ -288,7 +292,7 @@ class AuthController
                 FROM company_users cu
                 JOIN user_roles ur ON cu.id = ur.company_user_id
                 JOIN roles r ON ur.role_id = r.id
-                WHERE cu.user_id LIKE :uid AND cu.status LIKE 'active'
+                WHERE cu.user_id = :uid AND cu.status LIKE 'active'
             ");
             $stmtRoles->execute([':uid' => $user['id']]);
             $tenantRoles = $stmtRoles->fetchAll(PDO::FETCH_COLUMN);
@@ -358,6 +362,14 @@ class AuthController
     public function registerAdmin(): void
     {
         try {
+            // El registro público está deshabilitado. Solo se permite el bootstrap
+            // inicial cuando todavía no existe ningún usuario en la plataforma.
+            $userCount = (int)$this->pdo->query('SELECT COUNT(*) FROM users')->fetchColumn();
+            if ($userCount > 0) {
+                Response::error('El registro público está deshabilitado', 403);
+                return;
+            }
+
             $payload = $this->readPayload();
             if (empty($payload)) {
                 Response::error('Body vacío o inválido', 400);
@@ -446,7 +458,7 @@ class AuthController
                 return;
             }
 
-            $stmt = $this->pdo->prepare("SELECT id, full_name, email, status FROM users WHERE email LIKE :email LIMIT 1");
+            $stmt = $this->pdo->prepare("SELECT id, full_name, email, status FROM users WHERE email = :email LIMIT 1");
             $stmt->execute([':email' => $email]);
             $user = $stmt->fetch(\PDO::FETCH_ASSOC);
 
@@ -462,7 +474,7 @@ class AuthController
 
             $token = bin2hex(random_bytes(32));
 
-            $del = $this->pdo->prepare("DELETE FROM password_resets WHERE email LIKE :email");
+            $del = $this->pdo->prepare("DELETE FROM password_resets WHERE email = :email");
             $del->execute([':email' => $email]);
 
             $ins = $this->pdo->prepare("INSERT INTO password_resets (email, token, created_at) VALUES (:email, :token, NOW())");
@@ -556,11 +568,11 @@ class AuthController
 
             // Update password
             $passwordHash = password_hash($password, PASSWORD_BCRYPT);
-            $upd = $this->pdo->prepare("UPDATE users SET password_hash = :hash WHERE email LIKE :email");
+            $upd = $this->pdo->prepare("UPDATE users SET password_hash = :hash WHERE email = :email");
             $upd->execute([':hash' => $passwordHash, ':email' => $email]);
 
             // Delete used token
-            $del = $this->pdo->prepare("DELETE FROM password_resets WHERE email LIKE :email");
+            $del = $this->pdo->prepare("DELETE FROM password_resets WHERE email = :email");
             $del->execute([':email' => $email]);
 
             $this->audit->log(
@@ -933,7 +945,7 @@ class AuthController
     private function finishSocialLogin(string $email, string $state, string $provider, string $providerId, string $fullName): void
     {
         // 1. Check if user exists
-        $stmt = $this->pdo->prepare("SELECT id, full_name, email, status, platform_role FROM users WHERE email LIKE :email LIMIT 1");
+        $stmt = $this->pdo->prepare("SELECT id, full_name, email, status, platform_role FROM users WHERE email = :email LIMIT 1");
         $stmt->execute([':email' => $email]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -1008,7 +1020,7 @@ class AuthController
             FROM company_users cu
             JOIN user_roles ur ON cu.id = ur.company_user_id
             JOIN roles r ON ur.role_id = r.id
-            WHERE cu.user_id LIKE :uid AND cu.status LIKE 'active'
+            WHERE cu.user_id = :uid AND cu.status LIKE 'active'
         ");
         $stmtRoles->execute([':uid' => $user['id']]);
         $tenantRoles = $stmtRoles->fetchAll(PDO::FETCH_COLUMN);
@@ -1078,7 +1090,7 @@ class AuthController
 
     private function emailExists(string $email): bool
     {
-        $stmt = $this->pdo->prepare('SELECT id FROM users WHERE email LIKE :email LIMIT 1');
+        $stmt = $this->pdo->prepare('SELECT id FROM users WHERE email = :email LIMIT 1');
         $stmt->execute([':email' => $email]);
         return (bool)$stmt->fetch();
     }
@@ -1100,7 +1112,7 @@ class AuthController
         try {
             // Check if column exists first? Or just try/catch
             // We assume column exists if migration ran. If not, ignore.
-            $stmt = $this->pdo->prepare("UPDATE users SET last_login_at = NOW() WHERE id LIKE :id");
+            $stmt = $this->pdo->prepare("UPDATE users SET last_login_at = NOW() WHERE id = :id");
             $stmt->execute([':id' => $userId]);
         } catch (Throwable $e) {
             // Ignore if column doesn't exist
@@ -1154,11 +1166,31 @@ class AuthController
                 ':rth' => $refreshHash,
                 ':rex' => $refreshExpiresAt
             ]);
+
+            // Limpieza periódica acotada al usuario: revocadas > 30 días o cualquier sesión > 180 días.
+            $this->pruneUserSessions($userId);
         } catch (Throwable $e) {
             error_log('Session record failed: ' . $e->getMessage());
             // Auth exige sesión registrada: sin ella el token no serviría, así que
             // es mejor que el login falle de forma visible.
             throw $e;
+        }
+    }
+
+    private function pruneUserSessions(string $userId): void
+    {
+        try {
+            $stmt = $this->pdo->prepare("
+                DELETE FROM user_sessions
+                WHERE user_id = :uid
+                  AND (
+                    (is_active = 0 AND last_activity < DATE_SUB(NOW(), INTERVAL 30 DAY))
+                    OR last_activity < DATE_SUB(NOW(), INTERVAL 180 DAY)
+                  )
+            ");
+            $stmt->execute([':uid' => $userId]);
+        } catch (Throwable $e) {
+            // La limpieza no debe afectar el login.
         }
     }
 

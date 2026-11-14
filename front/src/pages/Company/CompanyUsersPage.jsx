@@ -303,32 +303,32 @@ export default function CompanyUsersPage({ apiUrl, token }) {
         title="Invitar Nuevo Usuario"
         size="md"
       >
-        <form onSubmit={handleInvite} className="space-y-4">
+        <form onSubmit={handleInvite} className="space-y-4 p-2">
           <div>
-            <label className="block text-sm font-medium text-slate-700">Nombre Completo</label>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">Nombre Completo</label>
             <input
               type="text"
               required
-              className="mt-1 block w-full rounded-xl border-slate-200 shadow-sm focus:border-brand focus:ring-brand sm:text-sm"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-brand focus:ring-4 focus:ring-brand/15 transition-all text-sm"
               value={inviteForm.full_name}
               onChange={e => setInviteForm({ ...inviteForm, full_name: e.target.value })}
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700">Email Corporativo</label>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">Email Corporativo</label>
             <input
               type="email"
               required
-              className="mt-1 block w-full rounded-xl border-slate-200 shadow-sm focus:border-brand focus:ring-brand sm:text-sm"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-brand focus:ring-4 focus:ring-brand/15 transition-all text-sm"
               value={inviteForm.email}
               onChange={e => setInviteForm({ ...inviteForm, email: e.target.value })}
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700">Rol Interno</label>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">Rol Interno</label>
             <select
               required
-              className="mt-1 block w-full rounded-xl border-slate-200 shadow-sm focus:border-brand focus:ring-brand sm:text-sm"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-brand focus:ring-4 focus:ring-brand/15 transition-all text-sm bg-white"
               value={inviteForm.role}
               onChange={e => setInviteForm({ ...inviteForm, role: e.target.value })}
             >
@@ -337,7 +337,7 @@ export default function CompanyUsersPage({ apiUrl, token }) {
                 <option key={role.key} value={role.key}>{role.label}</option>
               ))}
             </select>
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="mt-1.5 text-xs text-slate-500">
               Asigna permisos específicos para el gobierno corporativo.
             </p>
           </div>
@@ -345,14 +345,14 @@ export default function CompanyUsersPage({ apiUrl, token }) {
             <button
               type="button"
               onClick={() => setShowInviteModal(false)}
-              className="rounded-xl px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={inviting}
-              className="rounded-xl bg-brand px-4 py-2 text-sm font-bold text-white hover:bg-brand/90 disabled:opacity-70"
+              className="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand/90 disabled:opacity-50 transition-all shadow-sm"
             >
               {inviting ? 'Enviando...' : 'Enviar Invitación'}
             </button>
@@ -364,14 +364,14 @@ export default function CompanyUsersPage({ apiUrl, token }) {
       <Modal
         open={!!editingUser}
         onClose={() => setEditingUser(null)}
-        title={`Editar Rol: ${editingUser?.full_name}`}
+        title={`Editar Rol: ${editingUser?.full_name || 'Usuario'}`}
         size="sm"
       >
-        <div className="space-y-4">
+        <div className="space-y-4 p-2">
           <div>
-            <label className="block text-sm font-medium text-slate-700">Rol Interno</label>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">Rol Interno</label>
             <select
-              className="mt-1 block w-full rounded-xl border-slate-200 shadow-sm focus:border-brand focus:ring-brand sm:text-sm"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-brand focus:ring-4 focus:ring-brand/15 transition-all text-sm bg-white"
               value={selectedRole}
               onChange={e => setSelectedRole(e.target.value)}
             >
@@ -383,14 +383,14 @@ export default function CompanyUsersPage({ apiUrl, token }) {
           <div className="mt-6 flex justify-end gap-3">
             <button
               onClick={() => setEditingUser(null)}
-              className="rounded-xl px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all"
             >
               Cancelar
             </button>
             <button
               onClick={updateRole}
               disabled={updatingRole}
-              className="rounded-xl bg-brand px-4 py-2 text-sm font-bold text-white hover:bg-brand/90 disabled:opacity-70"
+              className="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand/90 disabled:opacity-50 transition-all shadow-sm"
             >
               {updatingRole ? 'Guardando...' : 'Guardar Cambios'}
             </button>

@@ -17,7 +17,7 @@ export default function FreelancersReviewsPage({ apiUrl, token }) {
   const [err, setErr] = useState('');
   const [ratingFilter, setRatingFilter] = useState('');
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('pending');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [range, setRange] = useState('all');
   const [actionLoadingId, setActionLoadingId] = useState(null);
 

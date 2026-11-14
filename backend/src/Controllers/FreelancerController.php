@@ -327,6 +327,10 @@ class FreelancerController
 
     private function show(string $id): void
     {
+        if (!$this->requireFreelancerAccess($id)) {
+            return;
+        }
+
         $stmt = $this->pdo->prepare("
             SELECT u.id, u.full_name, u.email, u.status, u.created_at, u.freelancer_code, u.national_id,
                    fp.years_experience, fp.area, fp.country, fp.city, fp.phone, fp.bio, fp.skills,
@@ -385,25 +389,11 @@ class FreelancerController
 
     private function update(string $id): void
     {
-        $data = $this->readPayload();
-        
-        $fullName = trim($data['full_name'] ?? '');
-        // We generally don't update email easily, but let's allow it if needed, checking unique
-        // For now, let's stick to profile fields + full_name
-        
-        $yearsExp = isset($data['years_experience']) ? (int)$data['years_experience'] : null;
-        $area = trim($data['area'] ?? '');
-        $country = trim($data['country'] ?? '');
-        $city = trim($data['city'] ?? '');
-        $phone = trim($data['phone'] ?? '');
-        $bio = trim($data['bio'] ?? '');
-        $skills = trim($data['skills'] ?? '');
-        $nationalId = trim($data['national_id'] ?? '');
-
-        if (empty($fullName)) {
-            Response::error('Nombre es obligatorio', 422);
+        if (!$this->requireFreelancerAccess($id)) {
             return;
         }
+
+        $data = $this->readPayload();
 
         // Check existence
         $stmt = $this->pdo->prepare("SELECT id FROM users WHERE id = :id AND (platform_role = 'freelancer' OR platform_role = 'freelance')");
@@ -413,25 +403,72 @@ class FreelancerController
             return;
         }
 
+        // Solo se escribe en `users` lo que venga explícitamente en el payload.
+        // Si `national_id` no se envía, no se toca: antes se sobreescribía con ''
+        // en cada guardado y se perdía el documento de identidad.
+        $userSets = [];
+        $userParams = [':id' => $id];
+
+        if (array_key_exists('full_name', $data)) {
+            $fullName = trim((string)$data['full_name']);
+            if ($fullName === '') {
+                Response::error('El nombre no puede estar vacío', 422);
+                return;
+            }
+            $userSets[] = 'full_name = :name';
+            $userParams[':name'] = $fullName;
+        }
+
+        if (array_key_exists('national_id', $data)) {
+            $userSets[] = 'national_id = :nid';
+            $userParams[':nid'] = trim((string)$data['national_id']);
+        }
+
+        $profileKeys = ['years_experience', 'area', 'country', 'city', 'phone', 'bio', 'skills'];
+        $profileSets = [];
+        $profileParams = [':id' => $id];
+        foreach ($profileKeys as $key) {
+            if (!array_key_exists($key, $data)) {
+                continue;
+            }
+            $profileSets[] = "{$key} = :{$key}";
+            $profileParams[':' . $key] = $key === 'years_experience'
+                ? ($data[$key] === '' ? null : (int)$data[$key])
+                : trim((string)$data[$key]);
+        }
+
+        if (empty($userSets) && empty($profileSets)) {
+            Response::json(['message' => 'Nada que actualizar']);
+            return;
+        }
+
+        $yearsExp = $profileParams[':years_experience'] ?? null;
+        $area = $profileParams[':area'] ?? '';
+        $country = $profileParams[':country'] ?? '';
+        $city = $profileParams[':city'] ?? '';
+        $phone = $profileParams[':phone'] ?? '';
+        $bio = $profileParams[':bio'] ?? '';
+        $skills = $profileParams[':skills'] ?? '';
+
         try {
             $this->pdo->beginTransaction();
 
-            $stmtU = $this->pdo->prepare("UPDATE users SET full_name = :name, national_id = :nid WHERE id = :id");
-            $stmtU->execute([':name' => $fullName, ':nid' => $nationalId, ':id' => $id]);
+            if (!empty($userSets)) {
+                $stmtU = $this->pdo->prepare("UPDATE users SET " . implode(', ', $userSets) . " WHERE id = :id");
+                $stmtU->execute($userParams);
+            }
 
             $stmtP = $this->pdo->prepare("SELECT user_id FROM freelancer_profiles WHERE user_id = :id");
             $stmtP->execute([':id' => $id]);
             if ($stmtP->fetch()) {
-                $stmtUpd = $this->pdo->prepare("
-                    UPDATE freelancer_profiles 
-                    SET years_experience = :exp, area = :area, country = :country, city = :city, phone = :phone, bio = :bio, skills = :skills
-                    WHERE user_id = :id
-                ");
-                $stmtUpd->execute([
-                    ':exp' => $yearsExp, ':area' => $area, ':country' => $country, 
-                    ':city' => $city, ':phone' => $phone, ':bio' => $bio, ':skills' => $skills,
-                    ':id' => $id
-                ]);
+                if (!empty($profileSets)) {
+                    $stmtUpd = $this->pdo->prepare("
+                        UPDATE freelancer_profiles
+                        SET " . implode(', ', $profileSets) . "
+                        WHERE user_id = :id
+                    ");
+                    $stmtUpd->execute($profileParams);
+                }
             } else {
                 // Check if freelancer_id column exists (Lazy fix for legacy schema where freelancer_id is PK)
                 $hasFreelancerId = false;
@@ -441,9 +478,16 @@ class FreelancerController
                 } catch (\Throwable $e) {}
 
                 if ($hasFreelancerId) {
+                    // OJO: la app usa EMULATE_PREPARES=false, asi que un
+                    // placeholder nombrado repetido (:id, :id) no es valido - PDO
+                    // lo convierte a posicional, el servidor ve dos huecos y
+                    // solo se enlaza uno -> SQLSTATE[HY093] Invalid parameter
+                    // number, que hacia fallar TODO el guardado del perfil de
+                    // cualquier freelancer sin fila previa en freelancer_profiles.
+                    // Por eso son dos placeholders distintos con el mismo valor.
                     $stmtIns = $this->pdo->prepare("
                         INSERT INTO freelancer_profiles (freelancer_id, user_id, years_experience, area, country, city, phone, bio, skills)
-                        VALUES (:id, :id, :exp, :area, :country, :city, :phone, :bio, :skills)
+                        VALUES (:fid, :uid, :exp, :area, :country, :city, :phone, :bio, :skills)
                     ");
                 } else {
                     $stmtIns = $this->pdo->prepare("
@@ -452,11 +496,17 @@ class FreelancerController
                     ");
                 }
                 
-                $stmtIns->execute([
-                    ':id' => $id,
-                    ':exp' => $yearsExp, ':area' => $area, ':country' => $country, 
+                $insParams = [
+                    ':exp' => $yearsExp, ':area' => $area, ':country' => $country,
                     ':city' => $city, ':phone' => $phone, ':bio' => $bio, ':skills' => $skills
-                ]);
+                ];
+                if ($hasFreelancerId) {
+                    $insParams[':fid'] = $id;
+                    $insParams[':uid'] = $id;
+                } else {
+                    $insParams[':id'] = $id;
+                }
+                $stmtIns->execute($insParams);
             }
 
             $this->pdo->commit();
@@ -471,6 +521,10 @@ class FreelancerController
 
     private function delete(string $id): void
     {
+        if (!$this->requireFreelancerManager()) {
+            return;
+        }
+
         $stmt = $this->pdo->prepare("SELECT id FROM users WHERE id = :id AND (platform_role = 'freelancer' OR platform_role = 'freelance')");
         $stmt->execute([':id' => $id]);
         if (!$stmt->fetch()) {
@@ -502,6 +556,10 @@ class FreelancerController
 
     private function export(): void
     {
+        if (!$this->requireFreelancerManager()) {
+            return;
+        }
+
         $sql = "SELECT u.full_name, u.email, u.status, u.freelancer_code, u.created_at,
                        fp.years_experience, fp.area, fp.country, fp.city, fp.phone, fp.bio, fp.skills
                 FROM users u
@@ -540,6 +598,10 @@ class FreelancerController
 
     private function import(): void
     {
+        if (!$this->requireFreelancerManager()) {
+            return;
+        }
+
         if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
             Response::error('Archivo CSV requerido', 400);
             return;
@@ -644,6 +706,10 @@ class FreelancerController
 
     private function index(): void
     {
+        if (!$this->requireFreelancerReader()) {
+            return;
+        }
+
         $page = max(1, (int)($_GET['page'] ?? 1));
         $perPage = max(1, min(100, (int)($_GET['per_page'] ?? 20)));
         $offset = ($page - 1) * $perPage;
@@ -703,6 +769,17 @@ class FreelancerController
         $stmt->execute($params);
         $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+        // El listado alimenta buscadores usados por varios roles de ops, así que
+        // el documento de identidad se enmascara para quien no gestiona freelancers.
+        if (!$this->canSeeNationalId()) {
+            foreach ($items as &$item) {
+                if (array_key_exists('national_id', $item)) {
+                    $item['national_id'] = null;
+                }
+            }
+            unset($item);
+        }
+
         Response::json([
             'data' => $items,
             'meta' => [
@@ -716,6 +793,10 @@ class FreelancerController
 
     private function listReviews(): void
     {
+        if (!$this->requireFreelancerManager()) {
+            return;
+        }
+
         $page = max(1, (int)($_GET['page'] ?? 1));
         $perPage = max(1, min(100, (int)($_GET['per_page'] ?? 20)));
         $offset = ($page - 1) * $perPage;
@@ -784,6 +865,10 @@ class FreelancerController
 
     private function updateReviewStatus(): void
     {
+        if (!$this->requireFreelancerManager()) {
+            return;
+        }
+
         $data = json_decode(file_get_contents('php://input'), true);
         $id = $data['id'] ?? null;
         $status = $data['status'] ?? null;
@@ -801,9 +886,11 @@ class FreelancerController
 
     private function blockFreelancer(string $userId): void
     {
-        $currentUser = Auth::user();
-        if ($currentUser && in_array($currentUser['platform_role'] ?? '', ['freelancer', 'freelance']) && ($currentUser['id'] ?? null) === $userId) {
-            Response::error('No puedes bloquear tu propio acceso', 403);
+        // Suspender una cuenta es una accion administrativa. Antes solo se
+        // impedia el autobloqueo, asi que cualquier usuario autenticado podia
+        // colgar a cualquier freelancer. platform_role es un unico valor, por
+        // lo que un manager nunca es a la vez el objetivo.
+        if (!$this->requireFreelancerManager()) {
             return;
         }
 
@@ -824,9 +911,10 @@ class FreelancerController
 
     private function unblockFreelancer(string $userId): void
     {
-        $currentUser = Auth::user();
-        if ($currentUser && in_array($currentUser['platform_role'] ?? '', ['freelancer', 'freelance']) && ($currentUser['id'] ?? null) === $userId) {
-            Response::error('No puedes cambiar tu propio estado', 403);
+        // Reactivar una cuenta suspendida es el caso mas grave: sin este guard
+        // cualquier autenticadoPodia devolver a la vida a un freelancer dado de
+        // baja, y por lo tanto recuperar su acceso.
+        if (!$this->requireFreelancerManager()) {
             return;
         }
 
@@ -847,6 +935,15 @@ class FreelancerController
 
     private function create(): void
     {
+        // Alta de cuentas de plataforma: es la operacion mas sensible del
+        // controlador porque escribe password_hash y platform_role. El gate de
+        // la UI (RoleRoute) no es una frontera de seguridad, asi que sin este
+        // guard cualquier JWT valido -incluido el de un freelancer o un user-
+        // podia registrarse como freelancer con una contraseña elegida por el.
+        if (!$this->requireFreelancerManager()) {
+            return;
+        }
+
         $data = $this->readPayload();
         $fullName = trim($data['full_name'] ?? '');
         $email = trim($data['email'] ?? '');
@@ -1128,7 +1225,7 @@ class FreelancerController
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
         ");
 
-        $del = $this->pdo->prepare("DELETE FROM password_resets WHERE email LIKE :email");
+        $del = $this->pdo->prepare("DELETE FROM password_resets WHERE email = :email");
         $del->execute([':email' => $email]);
 
         $ins = $this->pdo->prepare("INSERT INTO password_resets (email, token, created_at) VALUES (:email, :token, NOW())");
@@ -1165,6 +1262,84 @@ class FreelancerController
         } catch (\Throwable $e) {}
 
         return 'http://localhost:5173';
+    }
+
+    /**
+     * Roles de plataforma autorizados a gestionar el directorio de freelancers.
+     * Alineado con hasAccess() del frontend: super_admin/admin tienen acceso
+     * total, 'legal' accede a la sección 'freelancers' y company_admin la
+     * alcanza vía el mapeo 'freelancers' -> 'company_talent'.
+     */
+    private const FREELANCER_MANAGER_ROLES = ['super_admin', 'admin', 'legal', 'company_admin'];
+
+    /**
+     * Roles que además pueden consultar el directorio en modo lectura.
+     * Incluye a los ops que lo usan como buscador (DashboardHome cuenta
+     * freelancers y la suscripción de tenants busca talento), pero NO a los
+     * freelancers ni al rol 'user' genérico.
+     */
+    private const FREELANCER_READER_ROLES = ['super_admin', 'admin', 'legal', 'finance', 'security', 'support', 'company_admin'];
+
+    private function isFreelancerManager(): bool
+    {
+        $role = Auth::user()['platform_role'] ?? '';
+        return in_array($role, self::FREELANCER_MANAGER_ROLES, true);
+    }
+
+    private function isFreelancerReader(): bool
+    {
+        $role = Auth::user()['platform_role'] ?? '';
+        return in_array($role, self::FREELANCER_READER_ROLES, true);
+    }
+
+    /**
+     * El documento de identidad se enmascara en el listado para los roles que
+     * solo consultan el directorio como buscador. Los managers lo necesitan
+     * porque el formulario de edición lo precarga.
+     */
+    private function canSeeNationalId(): bool
+    {
+        return $this->isFreelancerManager();
+    }
+
+    /**
+     * El actor puede ver/editar este freelancer: su propio registro o bien
+     * pertenece a un rol con permisos de directorio.
+     */
+    private function canAccessFreelancer(string $targetId): bool
+    {
+        if ((string)Auth::userId() === (string)$targetId) {
+            return true;
+        }
+        return $this->isFreelancerManager();
+    }
+
+    private function requireFreelancerAccess(string $targetId): bool
+    {
+        if ($this->canAccessFreelancer($targetId)) {
+            return true;
+        }
+        Response::error('No tienes permiso para acceder a este freelancer', 403);
+        return false;
+    }
+
+    private function requireFreelancerReader(): bool
+    {
+        if ($this->isFreelancerReader()) {
+            return true;
+        }
+        Response::error('No tienes permiso para consultar el directorio de freelancers', 403);
+        return false;
+    }
+
+    /** Operaciones sobre el directorio completo (exportar, importar, borrar). */
+    private function requireFreelancerManager(): bool
+    {
+        if ($this->isFreelancerManager()) {
+            return true;
+        }
+        Response::error('No tienes permiso para gestionar freelancers', 403);
+        return false;
     }
 
     private function readPayload(): array
@@ -1244,6 +1419,10 @@ class FreelancerController
 
     private function listExperience(string $freelancerId): void
     {
+        if (!$this->requireFreelancerAccess($freelancerId)) {
+            return;
+        }
+
         $stmt = $this->pdo->prepare("SELECT * FROM freelancer_experience WHERE user_id = :id ORDER BY start_date DESC");
         $stmt->execute([':id' => $freelancerId]);
         $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -1252,6 +1431,10 @@ class FreelancerController
 
     private function createExperience(string $freelancerId): void
     {
+        if (!$this->requireFreelancerAccess($freelancerId)) {
+            return;
+        }
+
         $data = json_decode(file_get_contents('php://input'), true);
         $id = $this->generateUuid();
 
@@ -1276,6 +1459,10 @@ class FreelancerController
 
     private function updateExperience(string $freelancerId, string $expId): void
     {
+        if (!$this->requireFreelancerAccess($freelancerId)) {
+            return;
+        }
+
         $data = json_decode(file_get_contents('php://input'), true);
         
         // Verify ownership
@@ -1307,6 +1494,10 @@ class FreelancerController
 
     private function deleteExperience(string $freelancerId, string $expId): void
     {
+        if (!$this->requireFreelancerAccess($freelancerId)) {
+            return;
+        }
+
         // Verify ownership
         $stmtCheck = $this->pdo->prepare("SELECT id FROM freelancer_experience WHERE id = :id AND user_id = :uid");
         $stmtCheck->execute([':id' => $expId, ':uid' => $freelancerId]);
@@ -1325,6 +1516,10 @@ class FreelancerController
 
     private function listPortfolio(string $freelancerId): void
     {
+        if (!$this->requireFreelancerAccess($freelancerId)) {
+            return;
+        }
+
         $stmt = $this->pdo->prepare("SELECT * FROM freelancer_portfolio WHERE user_id = :id ORDER BY created_at DESC");
         $stmt->execute([':id' => $freelancerId]);
         $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -1333,6 +1528,10 @@ class FreelancerController
 
     private function createPortfolio(string $freelancerId): void
     {
+        if (!$this->requireFreelancerAccess($freelancerId)) {
+            return;
+        }
+
         $data = json_decode(file_get_contents('php://input'), true);
         $id = $this->generateUuid();
 
@@ -1355,6 +1554,10 @@ class FreelancerController
 
     private function updatePortfolio(string $freelancerId, string $portId): void
     {
+        if (!$this->requireFreelancerAccess($freelancerId)) {
+            return;
+        }
+
         $data = json_decode(file_get_contents('php://input'), true);
 
         // Verify ownership
@@ -1384,6 +1587,10 @@ class FreelancerController
 
     private function deletePortfolio(string $freelancerId, string $portId): void
     {
+        if (!$this->requireFreelancerAccess($freelancerId)) {
+            return;
+        }
+
         // Verify ownership
         $stmtCheck = $this->pdo->prepare("SELECT id FROM freelancer_portfolio WHERE id = :id AND user_id = :uid");
         $stmtCheck->execute([':id' => $portId, ':uid' => $freelancerId]);
@@ -1400,10 +1607,10 @@ class FreelancerController
 
     private function listProjects(string $userId): void
     {
-        // Security check: Ensure requesting user is the freelancer or admin
-        $currentUserId = Auth::userId();
-        if ($currentUserId !== $userId && !Auth::hasRole('admin')) {
-             // For now, allow but we should enforce strictly.
+        // Antes este chequeo era un no-op que llamaba a Auth::hasRole(),
+        // método que no existe -> Error fatal en cuanto los ids no coincidían.
+        if (!$this->requireFreelancerAccess($userId)) {
+            return;
         }
 
         // We need to find projects where this user is a member.
@@ -1411,6 +1618,9 @@ class FreelancerController
         // `project_members` uses `company_user_id`.
         // We need to join `company_users` to bridge `users.id` to `project_members.company_user_id`.
 
+        // `projects`, `company_users` y `companies` usan borrado logico, asi que
+        // se filtran los `deleted_at`. Sin esto, un proyecto eliminado seguia
+        // apareciendo en "Mis Proyectos" a los miembros que tenia.
         $stmt = $this->pdo->prepare("
             SELECT 
                 p.id, 
@@ -1427,6 +1637,9 @@ class FreelancerController
             JOIN company_users cu ON pm.company_user_id = cu.id
             JOIN companies c ON p.company_id = c.id
             WHERE cu.user_id = :uid
+              AND p.deleted_at IS NULL
+              AND cu.deleted_at IS NULL
+              AND c.deleted_at IS NULL
             ORDER BY p.start_date DESC
         ");
         
@@ -1438,12 +1651,19 @@ class FreelancerController
 
     private function showProject(string $userId, string $projectId): void
     {
+        if (!$this->requireFreelancerAccess($userId)) {
+            return;
+        }
+
         // Validate user membership
         $stmt = $this->pdo->prepare("
             SELECT count(*) 
             FROM project_members pm
             JOIN company_users cu ON pm.company_user_id = cu.id
+            JOIN projects p ON p.id = pm.project_id
             WHERE pm.project_id = :pid AND cu.user_id = :uid
+              AND p.deleted_at IS NULL
+              AND cu.deleted_at IS NULL
         ");
         $stmt->execute([':pid' => $projectId, ':uid' => $userId]);
         if ($stmt->fetchColumn() == 0) {
@@ -1462,6 +1682,9 @@ class FreelancerController
             JOIN company_users cu ON pm.company_user_id = cu.id
             JOIN companies c ON p.company_id = c.id
             WHERE p.id = :pid AND cu.user_id = :uid
+              AND p.deleted_at IS NULL
+              AND cu.deleted_at IS NULL
+              AND c.deleted_at IS NULL
         ");
         $stmt->execute([':pid' => $projectId, ':uid' => $userId]);
         $project = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -1473,7 +1696,9 @@ class FreelancerController
 
         // Get Milestones
         $stmt = $this->pdo->prepare("
-            SELECT * FROM project_milestones WHERE project_id = :pid ORDER BY due_date ASC
+            SELECT * FROM project_milestones
+            WHERE project_id = :pid AND deleted_at IS NULL
+            ORDER BY due_date ASC
         ");
         $stmt->execute([':pid' => $projectId]);
         $milestones = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -1502,12 +1727,16 @@ class FreelancerController
         $project['milestones'] = $milestones;
 
         // Get Responsible Parties (Project Owner/Manager)
+        // `cu.deleted_at` importa: un supervisor dado de baja seguia apareciendo
+        // en el detalle con su email, y desde ahi es contactable con un clic.
         $stmt = $this->pdo->prepare("
             SELECT u.full_name, u.email, pm.role_in_project
             FROM project_members pm
             JOIN company_users cu ON pm.company_user_id = cu.id
             JOIN users u ON cu.user_id = u.id
-            WHERE pm.project_id = :pid AND pm.role_in_project IN ('owner', 'manager')
+            WHERE pm.project_id = :pid
+              AND pm.role_in_project IN ('owner', 'manager')
+              AND cu.deleted_at IS NULL
         ");
         $stmt->execute([':pid' => $projectId]);
         $project['responsibles'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -1518,10 +1747,8 @@ class FreelancerController
     private function listContracts(string $userId): void
     {
         // Verify access
-        $currentUser = Auth::user();
-        if ($currentUser['id'] !== $userId && $currentUser['platform_role'] !== 'admin' && $currentUser['platform_role'] !== 'super_admin') {
-             Response::error('Forbidden', 403);
-             return;
+        if (!$this->requireFreelancerAccess($userId)) {
+            return;
         }
 
         // Check if contracts table exists first (sanity check)

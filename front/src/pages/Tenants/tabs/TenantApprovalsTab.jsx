@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import CriticalActionModal from '../../../components/CriticalActionModal';
 import { useToast } from '../../../components/ToastProvider';
+import { useI18n } from '../../../i18n/I18nContext';
 
 export default function TenantApprovalsTab({ api, companyId }) {
   const toast = useToast();
+  const { t, language } = useI18n();
+  const locale = language === 'en' ? 'en-US' : 'es-ES';
   const [policies, setPolicies] = useState([]);
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState([]);
@@ -65,12 +68,14 @@ export default function TenantApprovalsTab({ api, companyId }) {
         reason
       });
       
-      toast.success(`Política ${isActive ? 'desactivada' : 'activada'} correctamente`);
+      toast.success(t('tenants.legacy.approvals.toggleSuccess', {
+        state: isActive ? t('tenants.legacy.approvals.deactivated') : t('tenants.legacy.approvals.activated')
+      }));
       loadPolicies();
       loadLogs();
       setActionModal(prev => ({ ...prev, open: false }));
     } catch (e) {
-      toast.error(e.message || 'Error actualizando política');
+      toast.error(e.message || t('tenants.legacy.approvals.updateError'));
       setActionModal(prev => ({ ...prev, loading: false }));
     }
   }
@@ -89,13 +94,13 @@ export default function TenantApprovalsTab({ api, companyId }) {
       
       setSimulator(prev => ({ 
         ...prev, 
-        result: res.result || 'Aprobación automática (sin reglas coincidentes)', 
+        result: res.result || t('tenants.legacy.approvals.autoApproval'), 
         simulating: false 
       }));
     } catch (e) {
       setSimulator(prev => ({ 
         ...prev, 
-        error: e.message || 'Error en simulación', 
+        error: e.message || t('tenants.legacy.approvals.simulationError'), 
         simulating: false 
       }));
     }
@@ -107,40 +112,40 @@ export default function TenantApprovalsTab({ api, companyId }) {
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
           <div>
-            <h3 className="text-base font-semibold text-slate-900">Políticas de Aprobación</h3>
-            <p className="text-sm text-slate-500">Reglas configuradas para el control de gastos</p>
+            <h3 className="text-base font-semibold text-slate-900">{t('tenants.legacy.approvals.policiesTitle')}</h3>
+            <p className="text-sm text-slate-500">{t('tenants.legacy.approvals.policiesSubtitle')}</p>
           </div>
           <button className="text-sm font-semibold text-brand hover:text-brand/80 transition-colors">
-            + Nueva Política
+            {t('tenants.legacy.approvals.newPolicy')}
           </button>
         </div>
 
         {loading ? (
-          <div className="p-8 text-center text-slate-500">Cargando políticas...</div>
+          <div className="p-8 text-center text-slate-500">{t('tenants.legacy.approvals.loadingPolicies')}</div>
         ) : policies.length === 0 ? (
           <div className="p-8 text-center text-slate-500">
-            No hay políticas de aprobación configuradas.
+            {t('tenants.legacy.approvals.noPolicies')}
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
               <thead className="bg-slate-50 text-slate-500 font-medium uppercase tracking-wider text-xs">
                 <tr>
-                  <th className="px-6 py-3">Nombre</th>
-                  <th className="px-6 py-3">Reglas</th>
-                  <th className="px-6 py-3">Estado</th>
-                  <th className="px-6 py-3 text-right">Acciones</th>
+                  <th className="px-6 py-3">{t('tenants.common.name')}</th>
+                  <th className="px-6 py-3">{t('tenants.legacy.approvals.rules')}</th>
+                  <th className="px-6 py-3">{t('tenants.common.status')}</th>
+                  <th className="px-6 py-3 text-right">{t('tenants.common.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {policies.map(p => (
                   <tr key={p.id} className="hover:bg-slate-50/50 transition">
                     <td className="px-6 py-4 font-medium text-slate-900">{p.name}</td>
-                    <td className="px-6 py-4 text-slate-600">{p.rules_count || 0} reglas</td>
+                    <td className="px-6 py-4 text-slate-600">{t('tenants.legacy.approvals.rulesCount', { count: p.rules_count || 0 })}</td>
                     <td className="px-6 py-4">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${p.is_active ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
                         <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${p.is_active ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
-                        {p.is_active ? 'Activa' : 'Inactiva'}
+                        {p.is_active ? t('tenants.common.active') : t('tenants.common.inactive')}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right">
@@ -152,7 +157,7 @@ export default function TenantApprovalsTab({ api, companyId }) {
                             : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
                           }`}
                       >
-                        {p.is_active ? 'Desactivar' : 'Activar'}
+                        {p.is_active ? t('tenants.common.disable') : t('tenants.common.enable')}
                       </button>
                     </td>
                   </tr>
@@ -170,15 +175,15 @@ export default function TenantApprovalsTab({ api, companyId }) {
             <i className="bi bi-cpu text-xl"></i>
           </div>
           <div>
-            <h3 className="text-base font-bold text-slate-900">Simulador de Aprobación</h3>
-            <p className="text-sm text-slate-500">Prueba cómo se comportarán las reglas con diferentes montos</p>
+            <h3 className="text-base font-bold text-slate-900">{t('tenants.legacy.approvals.simulatorTitle')}</h3>
+            <p className="text-sm text-slate-500">{t('tenants.legacy.approvals.simulatorSubtitle')}</p>
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
           <form onSubmit={simulate} className="space-y-5 p-5 bg-slate-50 rounded-xl border border-slate-100">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Monto de Transacción</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">{t('tenants.legacy.approvals.transactionAmount')}</label>
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
@@ -211,12 +216,12 @@ export default function TenantApprovalsTab({ api, companyId }) {
                 {simulator.simulating ? (
                   <>
                     <i className="bi bi-arrow-repeat animate-spin"></i>
-                    Analizando...
+                    {t('tenants.legacy.approvals.analyzing')}
                   </>
                 ) : (
                   <>
                     <i className="bi bi-play-fill"></i>
-                    Simular Aprobación
+                    {t('tenants.legacy.approvals.simulate')}
                   </>
                 )}
             </button>
@@ -234,7 +239,7 @@ export default function TenantApprovalsTab({ api, companyId }) {
                     <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mb-4 mx-auto">
                         <i className="bi bi-check-lg text-3xl" />
                     </div>
-                    <h4 className="font-bold text-slate-900 text-lg mb-2">Resultado del Análisis</h4>
+                    <h4 className="font-bold text-slate-900 text-lg mb-2">{t('tenants.legacy.approvals.analysisResult')}</h4>
                     <div className="bg-slate-100 rounded-lg px-4 py-3 text-slate-700 font-mono text-sm inline-block">
                       {simulator.result}
                     </div>
@@ -242,8 +247,8 @@ export default function TenantApprovalsTab({ api, companyId }) {
             ) : (
                 <div className="text-slate-400">
                     <i className="bi bi-diagram-3 text-4xl mb-3 block opacity-50" />
-                    <p className="font-medium">Esperando datos...</p>
-                    <p className="text-sm mt-1">Ingresa un monto para ver qué política aplica</p>
+                    <p className="font-medium">{t('tenants.legacy.approvals.waitingData')}</p>
+                    <p className="text-sm mt-1">{t('tenants.legacy.approvals.waitingDataHint')}</p>
                 </div>
             )}
           </div>
@@ -253,35 +258,35 @@ export default function TenantApprovalsTab({ api, companyId }) {
       {/* Audit Logs */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-          <h3 className="text-base font-semibold text-slate-900">Historial de Cambios</h3>
-          <p className="text-sm text-slate-500">Registro de actividad relacionado con políticas de aprobación</p>
+          <h3 className="text-base font-semibold text-slate-900">{t('tenants.legacy.approvals.historyTitle')}</h3>
+          <p className="text-sm text-slate-500">{t('tenants.legacy.approvals.historySubtitle')}</p>
         </div>
         
         {logsLoading ? (
-          <div className="p-8 text-center text-slate-500">Cargando historial...</div>
+          <div className="p-8 text-center text-slate-500">{t('tenants.legacy.approvals.loadingHistory')}</div>
         ) : logs.length === 0 ? (
           <div className="p-8 text-center text-slate-500">
-            No hay registros de actividad recientes.
+            {t('tenants.legacy.approvals.noHistory')}
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
               <thead className="bg-slate-50 text-slate-500 font-medium uppercase tracking-wider text-xs">
                 <tr>
-                  <th className="px-6 py-3">Fecha</th>
-                  <th className="px-6 py-3">Usuario</th>
-                  <th className="px-6 py-3">Acción</th>
-                  <th className="px-6 py-3">Detalles</th>
+                  <th className="px-6 py-3">{t('tenants.common.date')}</th>
+                  <th className="px-6 py-3">{t('tenants.legacy.approvals.user')}</th>
+                  <th className="px-6 py-3">{t('tenants.legacy.approvals.action')}</th>
+                  <th className="px-6 py-3">{t('tenants.legacy.approvals.details')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {logs.map(log => (
                   <tr key={log.id} className="hover:bg-slate-50/50">
                     <td className="px-6 py-3 text-slate-600 whitespace-nowrap">
-                      {new Date(log.created_at).toLocaleString()}
+                      {new Date(log.created_at).toLocaleString(locale)}
                     </td>
                     <td className="px-6 py-3 font-medium text-slate-900">
-                      {log.actor_name || log.actor_email || 'Sistema'}
+                      {log.actor_name || log.actor_email || t('tenants.legacy.approvals.system')}
                     </td>
                     <td className="px-6 py-3">
                       <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 ring-1 ring-inset ring-slate-500/10">
@@ -305,14 +310,17 @@ export default function TenantApprovalsTab({ api, companyId }) {
 
       <CriticalActionModal
         open={actionModal.open}
-        title={actionModal.isActive ? 'Desactivar Política' : 'Activar Política'}
-        message={`Estás a punto de ${actionModal.isActive ? 'desactivar' : 'activar'} la política "${actionModal.policy?.name}". Esto afectará el flujo de aprobaciones de la empresa.`}
+        title={actionModal.isActive ? t('tenants.legacy.approvals.disablePolicyTitle') : t('tenants.legacy.approvals.enablePolicyTitle')}
+        message={t('tenants.legacy.approvals.toggleMessage', {
+          action: actionModal.isActive ? t('tenants.legacy.approvals.deactivate') : t('tenants.legacy.approvals.activate'),
+          name: actionModal.policy?.name
+        })}
         danger={actionModal.isActive} // Deactivating is considered dangerous/sensitive
         loading={actionModal.loading}
         requireReason={true}
         onClose={() => setActionModal(prev => ({ ...prev, open: false }))}
         onConfirm={handleToggle}
-        confirmText={actionModal.isActive ? 'Desactivar' : 'Activar'}
+        confirmText={actionModal.isActive ? t('tenants.common.disable') : t('tenants.common.enable')}
       />
     </div>
   );

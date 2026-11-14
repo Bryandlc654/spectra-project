@@ -1,10 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch, resolveApiUrl } from '../lib/api';
+import CountryCalculatorSwitch from '../components/CountryCalculatorSwitch';
+import MexicoNetSalaryCalculator from './MexicoNetSalaryCalculator';
+import ColombiaNetSalaryCalculator from './ColombiaNetSalaryCalculator';
 
 export default function FreelancerNetSalaryPage() {
   const { token } = useAuth();
   const apiUrl = resolveApiUrl();
+  const [country, setCountry] = useState('PE');
 
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -155,14 +159,25 @@ export default function FreelancerNetSalaryPage() {
   }, [benefits]);
   const deductionsTotal = useMemo(() => deductions.reduce((acc, d) => acc + Number(d.amount || 0), 0), [deductions]);
 
+  if (country === 'MX') {
+    return <MexicoNetSalaryCalculator onCountryChange={setCountry} />;
+  }
+
+  if (country === 'CO') {
+    return <ColombiaNetSalaryCalculator onCountryChange={setCountry} />;
+  }
+
   return (
     <div className="p-6">
       <div className="mx-auto w-full max-w-5xl space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Calculadora de Liquidación (Perú)</h1>
-          <div className="mt-1 text-sm text-slate-500">
-            Ingresa los datos básicos y obtén el total a pagar con el desglose de CTS, vacaciones, gratificación y bonificación.
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Calculadora de Liquidación (Perú)</h1>
+            <div className="mt-1 text-sm text-slate-500">
+              Ingresa los datos básicos y obtén el total a pagar con el desglose de CTS, vacaciones, gratificación y bonificación.
+            </div>
           </div>
+          <CountryCalculatorSwitch country={country} onChange={setCountry} />
         </div>
 
         {error && (

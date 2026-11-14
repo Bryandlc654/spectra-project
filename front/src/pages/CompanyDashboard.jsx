@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { apiFetch } from '../lib/api';
 import { hasAccess, PLATFORM_ROLES } from '../lib/platformRoles';
+import { useI18n } from '../i18n/I18nContext';
 
 export default function CompanyDashboard({ user, apiUrl, token }) {
+  const { t, language } = useI18n();
+  const locale = language === 'en' ? 'en-US' : 'es-ES';
   const [stats, setStats] = useState({
     active_users: 0,
     active_projects: 0,
@@ -47,14 +50,14 @@ export default function CompanyDashboard({ user, apiUrl, token }) {
   const companyInfo = company?.company || company || {};
 
   const statCards = [
-    { id: 'users', module: 'company_internal_users', label: 'Miembros', value: stats.active_users, icon: 'bi-people-fill', color: 'text-blue-600', bg: 'bg-blue-50', desc: 'Gestiona tu equipo' },
-    { id: 'freelancers', module: 'company_talent', label: 'Freelancers', value: stats.active_freelancers || 0, icon: 'bi-person-workspace', color: 'text-purple-600', bg: 'bg-purple-50', desc: 'Talento activo' },
-    { id: 'contracts', module: 'company_contracts', label: 'Contratos', value: stats.active_contracts || 0, icon: 'bi-file-earmark-text', color: 'text-pink-600', bg: 'bg-pink-50', desc: 'Vigentes' },
-    { id: 'projects', module: 'company_projects', label: 'Proyectos', value: stats.active_projects, icon: 'bi-briefcase-fill', color: 'text-teal-600', bg: 'bg-teal-50', desc: 'En curso' },
-    { id: 'vendors', module: 'company_procurement', label: 'Proveedores', value: stats.active_vendors, icon: 'bi-shop', color: 'text-cyan-600', bg: 'bg-cyan-50', desc: 'Activos actualmente' },
-    { id: 'requisitions', module: 'company_procurement', label: 'Solicitudes', value: stats.pending_requisitions, icon: 'bi-basket', color: 'text-red-600', bg: 'bg-red-50', desc: 'Pendientes de aprobación' },
-    { id: 'invoices', module: 'company_billing', label: 'Facturas', value: stats.unpaid_invoices || 0, icon: 'bi-receipt', color: 'text-emerald-600', bg: 'bg-emerald-50', desc: 'Por pagar/cobrar' },
-    { id: 'onboarding', module: 'company_onboarding', label: 'Onboarding', value: stats.pending_onboarding || 0, icon: 'bi-clipboard-check', color: 'text-orange-600', bg: 'bg-orange-50', desc: 'Pendientes' }
+    { id: 'users', module: 'company_internal_users', label: t('dashboard.company.members'), value: stats.active_users, icon: 'bi-people-fill', color: 'text-blue-600', bg: 'bg-blue-50', desc: t('dashboard.company.membersDesc') },
+    { id: 'freelancers', module: 'company_talent', label: t('dashboard.company.freelancers'), value: stats.active_freelancers || 0, icon: 'bi-person-workspace', color: 'text-purple-600', bg: 'bg-purple-50', desc: t('dashboard.company.freelancersDesc') },
+    { id: 'contracts', module: 'company_contracts', label: t('dashboard.company.contracts'), value: stats.active_contracts || 0, icon: 'bi-file-earmark-text', color: 'text-pink-600', bg: 'bg-pink-50', desc: t('dashboard.company.contractsDesc') },
+    { id: 'projects', module: 'company_projects', label: t('dashboard.company.projects'), value: stats.active_projects, icon: 'bi-briefcase-fill', color: 'text-teal-600', bg: 'bg-teal-50', desc: t('dashboard.company.projectsDesc') },
+    { id: 'vendors', module: 'company_procurement', label: t('dashboard.company.vendors'), value: stats.active_vendors, icon: 'bi-shop', color: 'text-cyan-600', bg: 'bg-cyan-50', desc: t('dashboard.company.vendorsDesc') },
+    { id: 'requisitions', module: 'company_procurement', label: t('dashboard.company.requisitions'), value: stats.pending_requisitions, icon: 'bi-basket', color: 'text-red-600', bg: 'bg-red-50', desc: t('dashboard.company.requisitionsDesc') },
+    { id: 'invoices', module: 'company_billing', label: t('dashboard.company.invoices'), value: stats.unpaid_invoices || 0, icon: 'bi-receipt', color: 'text-emerald-600', bg: 'bg-emerald-50', desc: t('dashboard.company.invoicesDesc') },
+    { id: 'onboarding', module: 'company_onboarding', label: t('dashboard.company.onboarding'), value: stats.pending_onboarding || 0, icon: 'bi-clipboard-check', color: 'text-orange-600', bg: 'bg-orange-50', desc: t('dashboard.company.onboardingDesc') }
   ];
 
   const availableStats = statCards.filter(stat => hasAccess(role, stat.module));
@@ -66,15 +69,15 @@ export default function CompanyDashboard({ user, apiUrl, token }) {
         <div className="grid gap-6 md:grid-cols-2 items-center">
             <div className="max-w-2xl">
             <h1 className="text-3xl font-bold">
-                Hola, {user?.full_name || 'Administrador'}
+                {t('dashboard.company.greeting', { name: user?.full_name || t('dashboard.company.defaultUser') })}
             </h1>
             <p className="mt-2 text-slate-300">
-                Bienvenido a tu panel de gestión empresarial.
+                {t('dashboard.company.welcome')}
             </p>
             </div>
             {companyInfo && companyInfo.name && (
                 <div className="md:text-right border-t md:border-t-0 md:border-l border-slate-700 pt-4 md:pt-0 md:pl-6">
-                    <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-1">Empresa Asignada</p>
+                    <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-1">{t('dashboard.company.assignedCompany')}</p>
                     <h2 className="text-2xl font-bold text-white">{companyInfo.name}</h2>
                     <p className="text-sm text-slate-300 mt-1">
                         {companyInfo.tax_id && <span className="mr-3">ID: {companyInfo.tax_id}</span>}
@@ -90,7 +93,7 @@ export default function CompanyDashboard({ user, apiUrl, token }) {
 
       {/* Stats Grid */}
       <div>
-        <h3 className="text-lg font-bold text-slate-900 mb-4">Resumen Operativo</h3>
+        <h3 className="text-lg font-bold text-slate-900 mb-4">{t('dashboard.company.operationalSummary')}</h3>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {availableStats.map((stat) => (
             <div key={stat.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -115,9 +118,9 @@ export default function CompanyDashboard({ user, apiUrl, token }) {
 
       {/* Recent Activity */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h3 className="text-lg font-bold text-slate-900 mb-4">Actividad Reciente</h3>
+        <h3 className="text-lg font-bold text-slate-900 mb-4">{t('dashboard.company.recentActivity')}</h3>
         {loading ? (
-          <div className="text-center py-8 text-slate-500">Cargando actividad...</div>
+          <div className="text-center py-8 text-slate-500">{t('dashboard.company.loadingActivity')}</div>
         ) : stats.recent_activity && stats.recent_activity.length > 0 ? (
           <div className="flow-root">
             <ul className="-mb-8">
@@ -140,7 +143,7 @@ export default function CompanyDashboard({ user, apiUrl, token }) {
                           </p>
                         </div>
                         <div className="whitespace-nowrap text-right text-sm text-slate-500">
-                          <time dateTime={activity.created_at}>{new Date(activity.created_at).toLocaleDateString()}</time>
+                          <time dateTime={activity.created_at}>{new Date(activity.created_at).toLocaleDateString(locale)}</time>
                         </div>
                       </div>
                     </div>
@@ -151,7 +154,7 @@ export default function CompanyDashboard({ user, apiUrl, token }) {
           </div>
         ) : (
           <div className="text-center py-8 text-slate-500">
-            No hay actividad reciente para mostrar.
+            {t('dashboard.company.noActivity')}
           </div>
         )}
       </div>

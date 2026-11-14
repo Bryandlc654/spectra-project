@@ -98,7 +98,7 @@ class CardController
         $limit = max(1, min(100, (int)($_GET['limit'] ?? 50)));
         $offset = ($page - 1) * $limit;
 
-        $stmt = $this->pdo->prepare("SELECT * FROM cards WHERE user_id LIKE :uid ORDER BY created_at DESC LIMIT :limit OFFSET :offset");
+        $stmt = $this->pdo->prepare("SELECT * FROM cards WHERE user_id = :uid ORDER BY created_at DESC LIMIT :limit OFFSET :offset");
         $stmt->bindValue(':uid', $userId);
         $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
@@ -124,7 +124,7 @@ class CardController
     private function show(string $id): void
     {
         $user = Auth::user();
-        $stmt = $this->pdo->prepare("SELECT * FROM cards WHERE id LIKE :id");
+        $stmt = $this->pdo->prepare("SELECT * FROM cards WHERE id = :id");
         $stmt->execute([':id' => $id]);
         $item = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -165,7 +165,7 @@ class CardController
 
         $stmt = $this->pdo->prepare("
             SELECT * FROM card_transactions 
-            WHERE card_id LIKE :cid 
+            WHERE card_id = :cid 
             ORDER BY transaction_date DESC 
             LIMIT :limit OFFSET :offset
         ");
@@ -225,7 +225,7 @@ class CardController
     {
         $user = Auth::user();
         // Check ownership
-        $check = $this->pdo->prepare("SELECT user_id FROM cards WHERE id LIKE :id");
+        $check = $this->pdo->prepare("SELECT user_id FROM cards WHERE id = :id");
         $check->execute([':id' => $id]);
         $card = $check->fetch(PDO::FETCH_ASSOC);
 
@@ -243,7 +243,7 @@ class CardController
         $status = $data['status'] ?? null;
 
         if ($status && in_array($status, ['active', 'frozen', 'cancelled'])) {
-            $stmt = $this->pdo->prepare("UPDATE cards SET status = :status WHERE id LIKE :id");
+            $stmt = $this->pdo->prepare("UPDATE cards SET status = :status WHERE id = :id");
             $stmt->execute([':status' => $status, ':id' => $id]);
             Response::json(['message' => 'Card status updated']);
         } else {

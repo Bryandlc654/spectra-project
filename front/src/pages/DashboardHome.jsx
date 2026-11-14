@@ -5,9 +5,12 @@ import { normalizePageResponse } from '../lib/pagination';
 import FreelancerDashboard from './FreelancerDashboard';
 import CompanyDashboard from './CompanyDashboard';
 import { PLATFORM_ROLES } from '../lib/platformRoles';
+import { useI18n } from '../i18n/I18nContext';
 
 export default function DashboardHome({ user, apiUrl, token }) {
   const api = useMemo(() => createApi({ baseUrl: apiUrl, token }), [apiUrl, token]);
+  const { t, language } = useI18n();
+  const locale = language === 'en' ? 'en-US' : 'es-ES';
 
   if (user?.role === 'freelancer' || user?.platform_role === 'freelancer' || user?.platform_role === 'freelance') {
       return <FreelancerDashboard user={user} apiUrl={apiUrl} token={token} />;
@@ -94,14 +97,14 @@ export default function DashboardHome({ user, apiUrl, token }) {
         setRecentActivity(auditItems || []);
       } catch (e) {
         console.error(e);
-        if (mounted) setErr('No se pudieron cargar algunas estadísticas.');
+        if (mounted) setErr(t('dashboard.home.loadError'));
       } finally {
         if (mounted) setLoading(false);
       }
     })();
 
     return () => { mounted = false; };
-  }, [api, token]);
+  }, [api, token, t]);
 
   return (
     <div className="space-y-6">
@@ -110,13 +113,13 @@ export default function DashboardHome({ user, apiUrl, token }) {
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="text-xs font-bold tracking-widest text-slate-500 uppercase">
-              Panel de Control
+              {t('dashboard.home.eyebrow')}
             </div>
             <h1 className="mt-1 text-2xl font-bold text-slate-900">
-              Hola, {user?.full_name || 'Usuario'} 👋
+              {t('dashboard.home.greeting', { name: user?.full_name || t('dashboard.home.defaultUser') })}
             </h1>
             <p className="mt-1 text-sm text-slate-600">
-              Bienvenido a Spectra ERP. Aquí tienes un resumen de la actividad reciente.
+              {t('dashboard.home.welcome')}
             </p>
           </div>
           <div className="flex gap-2">
@@ -125,7 +128,7 @@ export default function DashboardHome({ user, apiUrl, token }) {
               className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 shadow-sm shadow-brand-500/20 transition-all"
             >
               <i className="bi bi-plus-lg" />
-              Nuevo Tenant
+              {t('dashboard.home.newCompany')}
             </Link>
           </div>
         </div>
@@ -133,44 +136,44 @@ export default function DashboardHome({ user, apiUrl, token }) {
 
       {/* Resumen */}
       <div className="flex items-center justify-between mb-1">
-        <h2 className="text-xs font-bold tracking-widest text-slate-500 uppercase">Resumen</h2>
+        <h2 className="text-xs font-bold tracking-widest text-slate-500 uppercase">{t('dashboard.home.summary')}</h2>
       </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatsCard
-          label="Empresas (Tenants)"
+          label={t('dashboard.home.companies')}
           value={loading ? '...' : stats.tenants}
           icon="bi-building"
           color="blue"
           to="/dashboard/tenants"
         />
         <StatsCard
-          label="Usuarios Totales"
+          label={t('dashboard.home.totalUsers')}
           value={loading ? '...' : stats.users}
           icon="bi-people"
           color="indigo"
           to="/dashboard/users"
         />
         <StatsCard
-          label="Freelancers"
+          label={t('dashboard.home.freelancers')}
           value={loading ? '...' : stats.freelancers}
           icon="bi-people-fill"
           color="indigo"
           to="/dashboard/freelancers"
         />
         <StatsCard
-          label="Facturas"
+          label={t('dashboard.home.invoices')}
           value={loading ? '...' : stats.invoices}
           icon="bi-receipt"
           color="slate"
           to="/dashboard/finance/invoices"
-          subtext={stats.invoicesOverdue > 0 ? `${stats.invoicesOverdue} vencidas` : 'Sin vencidas'}
+          subtext={stats.invoicesOverdue > 0 ? t('dashboard.home.overdueCount', { count: stats.invoicesOverdue }) : t('dashboard.home.noOverdue')}
           highlight={stats.invoicesOverdue > 0}
         />
       </div>
 
       {/* Visualizaciones y actividad */}
       <div className="flex items-center justify-between mt-2">
-        <h2 className="text-xs font-bold tracking-widest text-slate-500 uppercase">Visión General</h2>
+        <h2 className="text-xs font-bold tracking-widest text-slate-500 uppercase">{t('dashboard.home.overview')}</h2>
       </div>
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         {/* Charts */}
@@ -178,26 +181,26 @@ export default function DashboardHome({ user, apiUrl, token }) {
           {/* Actividad últimos 7 días */}
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-700">Actividad últimos 7 días</h3>
-              <span className="text-xs text-slate-400">Eventos</span>
+              <h3 className="text-sm font-semibold text-slate-700">{t('dashboard.home.last7Days')}</h3>
+              <span className="text-xs text-slate-400">{t('dashboard.home.events')}</span>
             </div>
             <div className="mt-4">
-              <SevenDayActivityBars items={recentActivity} loading={loading} />
+              <SevenDayActivityBars items={recentActivity} loading={loading} locale={locale} />
             </div>
           </div>
           {/* Estado de facturas */}
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-700">Estado de facturas</h3>
-              <Link to="/dashboard/finance/invoices" className="text-xs text-brand hover:text-brand-700">Ver detalles</Link>
+              <h3 className="text-sm font-semibold text-slate-700">{t('dashboard.home.invoiceStatus')}</h3>
+              <Link to="/dashboard/finance/invoices" className="text-xs text-brand hover:text-brand-700">{t('dashboard.home.viewDetails')}</Link>
             </div>
             <div className="mt-4 flex items-center gap-6">
               <InvoiceDonut total={stats.invoices} overdue={stats.invoicesOverdue} loading={loading} />
               <div className="space-y-2">
-                <LegendItem color="stroke-amber-500" label="Vencidas" value={stats.invoicesOverdue} loading={loading} />
-                <LegendItem color="stroke-emerald-500" label="No vencidas" value={Math.max(0, stats.invoices - stats.invoicesOverdue)} loading={loading} />
+                <LegendItem color="stroke-amber-500" label={t('dashboard.home.overdue')} value={stats.invoicesOverdue} loading={loading} />
+                <LegendItem color="stroke-emerald-500" label={t('dashboard.home.notOverdue')} value={Math.max(0, stats.invoices - stats.invoicesOverdue)} loading={loading} />
                 <p className="text-xs text-slate-500 pt-1">
-                  {loading ? '...' : `${stats.invoices ? Math.round((stats.invoicesOverdue / Math.max(1, stats.invoices)) * 100) : 0}% vencidas`}
+                  {loading ? '...' : t('dashboard.home.overduePercent', { percent: stats.invoices ? Math.round((stats.invoicesOverdue / Math.max(1, stats.invoices)) * 100) : 0 })}
                 </p>
               </div>
             </div>
@@ -205,8 +208,8 @@ export default function DashboardHome({ user, apiUrl, token }) {
           {/* Distribución de usuarios */}
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-700">Distribución de usuarios</h3>
-              <Link to="/dashboard/users" className="text-xs text-brand hover:text-brand-700">Ver usuarios</Link>
+              <h3 className="text-sm font-semibold text-slate-700">{t('dashboard.home.userDistribution')}</h3>
+              <Link to="/dashboard/users" className="text-xs text-brand hover:text-brand-700">{t('dashboard.home.viewUsers')}</Link>
             </div>
             <div className="mt-4">
               <UsersDistribution totalUsers={stats.users} freelancers={stats.freelancers} loading={loading} />
@@ -218,24 +221,24 @@ export default function DashboardHome({ user, apiUrl, token }) {
           {/* Recent Activity Card */}
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-slate-700">Actividad Reciente</h3>
+              <h3 className="text-sm font-semibold text-slate-700">{t('dashboard.home.recentActivity')}</h3>
               <div className="flex items-center gap-2">
                 {recentActivity.length > 6 && (
                   <button
                     onClick={() => setActivityExpanded(!activityExpanded)}
                     className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                   >
-                    {activityExpanded ? 'Menos' : 'Más'}
+                    {activityExpanded ? t('dashboard.home.showLess') : t('dashboard.home.showMore')}
                   </button>
                 )}
-                <Link to="/dashboard/audit" className="text-xs font-medium text-brand-600 hover:text-brand-700">Ver todo</Link>
+                <Link to="/dashboard/audit" className="text-xs font-medium text-brand-600 hover:text-brand-700">{t('dashboard.home.viewAll')}</Link>
               </div>
             </div>
             <div className="max-h-80 overflow-y-auto">
               {loading ? (
-                <div className="p-8 text-center text-slate-500">Cargando actividad...</div>
+                <div className="p-8 text-center text-slate-500">{t('dashboard.home.loadingActivity')}</div>
               ) : recentActivity.length === 0 ? (
-                <div className="p-8 text-center text-slate-500">No hay actividad reciente registrada.</div>
+                <div className="p-8 text-center text-slate-500">{t('dashboard.home.noRecentActivity')}</div>
               ) : (
                 <div className="divide-y divide-slate-100">
                   {(activityExpanded ? recentActivity.slice(0, 20) : recentActivity.slice(0, 8)).map((log) => (
@@ -251,7 +254,7 @@ export default function DashboardHome({ user, apiUrl, token }) {
                           {log.auditable_type} #{log.auditable_id} · IP: {log.ip_address}
                         </p>
                         <p className="mt-0.5 text-[11px] text-slate-400">
-                          {new Date(log.created_at).toLocaleString()}
+                          {new Date(log.created_at).toLocaleString(locale)}
                         </p>
                       </div>
                     </div>
@@ -263,31 +266,31 @@ export default function DashboardHome({ user, apiUrl, token }) {
 
           {/* Quick Links Card */}
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-sm font-semibold text-slate-700 mb-3">Accesos Rápidos</h3>
+            <h3 className="text-sm font-semibold text-slate-700 mb-3">{t('dashboard.home.quickLinks')}</h3>
             <div className="grid grid-cols-1 gap-3">
               <QuickLink
                 to="/dashboard/tenants"
                 icon="bi-building-add"
-                title="Gestionar Empresas"
-                desc="Ver lista, crear o editar"
+                title={t('dashboard.home.manageCompanies')}
+                desc={t('dashboard.home.manageCompaniesDesc')}
               />
               <QuickLink
                 to="/dashboard/users"
                 icon="bi-person-plus"
-                title="Gestionar Usuarios"
-                desc="Invitar o administrar accesos"
+                title={t('dashboard.home.manageUsers')}
+                desc={t('dashboard.home.manageUsersDesc')}
               />
               <QuickLink
                 to="/dashboard/rbac/roles"
                 icon="bi-shield-lock"
-                title="Roles y Permisos"
-                desc="Configurar plantillas de seguridad"
+                title={t('dashboard.home.rolesPermissions')}
+                desc={t('dashboard.home.rolesPermissionsDesc')}
               />
               <QuickLink
                 to="/dashboard/settings/countries"
                 icon="bi-globe"
-                title="Configuración Global"
-                desc="Países, monedas, zonas horarias"
+                title={t('dashboard.home.globalSettings')}
+                desc={t('dashboard.home.globalSettingsDesc')}
               />
             </div>
           </div>
@@ -325,7 +328,7 @@ function StatsCard({ label, value, icon, color, to, subtext, highlight }) {
   );
 }
 
-function SevenDayActivityBars({ items, loading }) {
+function SevenDayActivityBars({ items, loading, locale }) {
   const today = new Date();
   const days = Array.from({ length: 7 }).map((_, i) => {
     const d = new Date(today);
@@ -350,7 +353,7 @@ function SevenDayActivityBars({ items, loading }) {
     <div className="grid grid-cols-7 gap-2 h-28 items-end">
       {days.map((d, idx) => {
         const pct = Math.round((d.count / max) * 100);
-        const label = d.date.toLocaleDateString(undefined, { weekday: 'short' });
+        const label = d.date.toLocaleDateString(locale, { weekday: 'short' });
         return (
           <div key={idx} className="flex flex-col items-center gap-1">
             <div className="w-full rounded-md bg-slate-100 h-24 overflow-hidden">
@@ -409,6 +412,7 @@ function LegendItem({ color, label, value, loading }) {
 }
 
 function UsersDistribution({ totalUsers, freelancers, loading }) {
+  const { t } = useI18n();
   const total = Math.max(0, Number(totalUsers || 0));
   const free = Math.max(0, Math.min(total, Number(freelancers || 0)));
   const internal = Math.max(0, total - free);
@@ -418,25 +422,25 @@ function UsersDistribution({ totalUsers, freelancers, loading }) {
   return (
     <div className="space-y-3">
       <div className="h-3 w-full rounded-full bg-slate-100 overflow-hidden">
-        <div className="h-full bg-indigo-500" style={{ width: `${internalPct}%` }} title={`Internos: ${internal}`} />
-        <div className="h-full -mt-3 bg-emerald-500" style={{ width: `${freePct}%` }} title={`Freelancers: ${free}`} />
+        <div className="h-full bg-indigo-500" style={{ width: `${internalPct}%` }} title={t('dashboard.home.internalTooltip', { count: internal })} />
+        <div className="h-full -mt-3 bg-emerald-500" style={{ width: `${freePct}%` }} title={t('dashboard.home.freelancersTooltip', { count: free })} />
       </div>
       <div className="flex items-center justify-between text-sm">
         <div className="flex items-center gap-2">
           <span className="inline-block h-2.5 w-2.5 rounded-full bg-indigo-500" />
-          <span className="text-slate-600">Internos</span>
+          <span className="text-slate-600">{t('dashboard.home.internal')}</span>
         </div>
         <span className="font-semibold text-slate-900">{loading ? '...' : internal}</span>
       </div>
       <div className="flex items-center justify-between text-sm">
         <div className="flex items-center gap-2">
           <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
-          <span className="text-slate-600">Freelancers</span>
+          <span className="text-slate-600">{t('dashboard.home.freelancers')}</span>
         </div>
         <span className="font-semibold text-slate-900">{loading ? '...' : free}</span>
       </div>
       <p className="text-xs text-slate-500">
-        {loading ? 'Cargando…' : `${total} usuarios en total`}
+        {loading ? t('dashboard.home.loadingShort') : t('dashboard.home.totalUsersCount', { count: total })}
       </p>
     </div>
   );

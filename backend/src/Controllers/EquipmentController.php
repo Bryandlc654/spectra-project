@@ -230,7 +230,7 @@ class EquipmentController
                 ]);
 
                 // Update equipment status
-                $this->pdo->prepare("UPDATE equipment SET status = 'assigned' WHERE id LIKE :id")
+                $this->pdo->prepare("UPDATE equipment SET status = 'assigned' WHERE id = :id")
                     ->execute([':id' => $data['equipment_id']]);
 
                 $this->pdo->commit();

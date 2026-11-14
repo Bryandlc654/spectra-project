@@ -278,11 +278,11 @@ class ChatbotController
         $offset = ($page - 1) * $limit;
         
         // Count
-        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM chatbot_messages WHERE conversation_id LIKE :cid");
+        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM chatbot_messages WHERE conversation_id = :cid");
         $countStmt->execute([':cid' => $conversationId]);
         $total = $countStmt->fetchColumn();
 
-        $stmt = $this->pdo->prepare("SELECT * FROM chatbot_messages WHERE conversation_id LIKE :cid ORDER BY created_at ASC LIMIT :limit OFFSET :offset");
+        $stmt = $this->pdo->prepare("SELECT * FROM chatbot_messages WHERE conversation_id = :cid ORDER BY created_at ASC LIMIT :limit OFFSET :offset");
         $stmt->bindValue(':cid', $conversationId);
         $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
@@ -402,8 +402,8 @@ class ChatbotController
     {
         try {
             // Simple full text search simulation with LIKE
-            $stmt = $this->pdo->prepare("SELECT title, content FROM kb_articles WHERE is_published = 1 AND (title LIKE :q OR content LIKE :q) LIMIT 1");
-            $stmt->execute([':q' => '%' . $query . '%']);
+            $stmt = $this->pdo->prepare("SELECT title, content FROM kb_articles WHERE is_published = 1 AND (title LIKE :q_1 OR content LIKE :q_2) LIMIT 1");
+            $stmt->execute([':q_1' => '%' . $query . '%', ':q_2' => '%' . $query . '%']);
             return $stmt->fetch(PDO::FETCH_ASSOC);
         } catch (Exception $e) {
             return null;

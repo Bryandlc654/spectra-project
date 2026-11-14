@@ -145,7 +145,7 @@ class LegalEntityController
 
     private function destroy(string $id): void
     {
-        $this->pdo->prepare("DELETE FROM legal_entities WHERE id LIKE :id")->execute([':id' => $id]);
+        $this->pdo->prepare("DELETE FROM legal_entities WHERE id = :id")->execute([':id' => $id]);
         Response::json(['message' => 'Entidad legal eliminada']);
     }
 }

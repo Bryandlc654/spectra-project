@@ -44,6 +44,10 @@ class SecurityController
                 // Ignore error if column already added or other issue
             }
         }
+
+        // Índices para listar/filtrar sesiones sin filesort
+        try { $this->pdo->exec("CREATE INDEX idx_user_sessions_active_activity ON user_sessions (is_active, last_activity)"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("CREATE INDEX idx_user_sessions_last_activity ON user_sessions (last_activity)"); } catch (\Throwable $e) {}
     }
 
     public function handle(array $segments, string $method): void
@@ -92,6 +96,14 @@ class SecurityController
 
         $where = [];
         $params = [];
+
+        // Estado: active | revoked | all (por defecto all para compatibilidad)
+        $statusFilter = trim((string)($_GET['status'] ?? 'all'));
+        if ($statusFilter === 'active') {
+            $where[] = "s.is_active = 1";
+        } elseif ($statusFilter === 'revoked') {
+            $where[] = "s.is_active = 0";
+        }
 
         if (!$canViewAll) {
             $where[] = "s.user_id = :user_id";
@@ -144,9 +156,20 @@ class SecurityController
              return;
         }
         
-        $this->pdo->exec("UPDATE user_sessions SET is_active = 0 WHERE is_active = 1");
-        
-        Response::json(['message' => 'Todas las sesiones han sido revocadas']);
+        // Se conserva la sesión de quien ejecuta la acción (antes se desconectaba
+        // a sí mismo) y la acción queda auditada.
+        $currentHash = Auth::currentTokenHash() ?? '';
+        $stmt = $this->pdo->prepare("UPDATE user_sessions SET is_active = 0 WHERE is_active = 1 AND token_hash != :current");
+        $stmt->execute([':current' => $currentHash]);
+        $revoked = $stmt->rowCount();
+
+        try {
+            (new \App\Support\AuditLogger())->log('security.sessions.revoke_all', 'user_session', null, ['revoked' => $revoked]);
+        } catch (\Throwable $e) {
+            error_log('[Spectra] audit revoke_all: ' . $e->getMessage());
+        }
+
+        Response::json(['message' => 'Todas las sesiones han sido revocadas (excepto la tuya)', 'revoked' => $revoked]);
     }
 
     private function revokeSession(string $id): void

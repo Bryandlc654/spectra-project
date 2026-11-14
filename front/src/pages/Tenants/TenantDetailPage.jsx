@@ -5,6 +5,7 @@ import { useParams, useNavigate, NavLink, Routes, Route } from 'react-router-dom
 import { createApi } from '../../lib/api';
 import { normalizePageResponse } from '../../lib/pagination';
 import ConfirmModal from '../../components/ConfirmModal';
+import { useI18n } from '../../i18n/I18nContext';
 
 // Tabs
 import TenantOverviewTab from './tabs/TenantOverviewTab';
@@ -63,6 +64,8 @@ function StatusMessage({ tone = 'info', message }) {
 export default function TenantDetailPage({ apiUrl, token }) {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { t, language } = useI18n();
+  const locale = language === 'en' ? 'en-US' : 'es-ES';
 
   // API instance (IMPORTANTE: se pasa a las tabs)
   const api = useMemo(() => createApi({ baseUrl: apiUrl, token }), [apiUrl, token]);
@@ -118,7 +121,7 @@ export default function TenantDetailPage({ apiUrl, token }) {
       const data = await api.get(`/api/tenants/${id}`);
       setTenant(data);
     } catch (e) {
-      setErr(e?.message || 'No se pudo cargar el tenant');
+      setErr(e?.message || t('tenants.legacy.detail.loadError'));
     } finally {
       setLoading(false);
     }
@@ -142,7 +145,7 @@ export default function TenantDetailPage({ apiUrl, token }) {
       setCurrencies(outCurrencies.items || []);
       setTimezones(outTimezones.items || []);
     } catch (e) {
-      setLookupsErr(e?.message || 'No se pudieron cargar los catálogos');
+      setLookupsErr(e?.message || t('tenants.legacy.detail.lookupsLoadError'));
     } finally {
       setLookupsLoading(false);
     }
@@ -203,10 +206,10 @@ export default function TenantDetailPage({ apiUrl, token }) {
         timezone_id: Number(editForm.timezone_id),
       });
       setOpenEdit(false);
-      setStatus({ tone: 'success', message: 'Tenant actualizado' });
+      setStatus({ tone: 'success', message: t('tenants.legacy.detail.updated') });
       await loadTenant();
     } catch (e2) {
-      setStatus({ tone: 'error', message: e2?.message || 'No se pudo actualizar' });
+      setStatus({ tone: 'error', message: e2?.message || t('tenants.legacy.detail.updateError') });
     }
   }
 
@@ -224,10 +227,10 @@ export default function TenantDetailPage({ apiUrl, token }) {
       await api.post(`/api/tenants/${id}/suspend`, { reason: reason.trim() });
       setOpenSuspend(false);
       setReason('');
-      setStatus({ tone: 'success', message: 'Tenant suspendido' });
+      setStatus({ tone: 'success', message: t('tenants.legacy.detail.suspended') });
       await loadTenant();
     } catch (e2) {
-      setStatus({ tone: 'error', message: e2?.message || 'No se pudo suspender' });
+      setStatus({ tone: 'error', message: e2?.message || t('tenants.legacy.detail.suspendError') });
     }
   }
 
@@ -238,10 +241,10 @@ export default function TenantDetailPage({ apiUrl, token }) {
       await api.post(`/api/tenants/${id}/activate`, { reason: reason.trim() || null });
       setOpenActivate(false);
       setReason('');
-      setStatus({ tone: 'success', message: 'Tenant activado' });
+      setStatus({ tone: 'success', message: t('tenants.legacy.detail.activated') });
       await loadTenant();
     } catch (e2) {
-      setStatus({ tone: 'error', message: e2?.message || 'No se pudo activar' });
+      setStatus({ tone: 'error', message: e2?.message || t('tenants.legacy.detail.activateError') });
     }
   }
 
@@ -251,7 +254,7 @@ export default function TenantDetailPage({ apiUrl, token }) {
       await api.del(`/api/tenants/${id}`);
       navigate('/dashboard/tenants');
     } catch (e2) {
-      setStatus({ tone: 'error', message: e2?.message || 'No se pudo eliminar el tenant' });
+      setStatus({ tone: 'error', message: e2?.message || t('tenants.legacy.detail.deleteError') });
       setOpenDelete(false);
     }
   }
@@ -261,37 +264,43 @@ export default function TenantDetailPage({ apiUrl, token }) {
   // -----------------------------
   const tabs = useMemo(() => {
     const all = [
-      { to: '', label: 'Resumen', icon: 'bi bi-grid' },
-      { to: 'settings', label: 'Configuración', icon: 'bi bi-gear' },
-      { to: 'fees', label: 'Tarifas', icon: 'bi bi-cash-coin' },
-      { to: 'contacts', label: 'Contactos', icon: 'bi bi-people' },
-      { to: 'wallet', label: 'Billetera', icon: 'bi bi-wallet2' },
-      { to: 'invoices', label: 'Facturas', icon: 'bi bi-receipt' },
-      { to: 'payroll', label: 'Nómina', icon: 'bi bi-calendar2-check' },
-      { to: 'projects', label: 'Proyectos', icon: 'bi bi-kanban' },
-      { to: 'contracts', label: 'Contratos', icon: 'bi bi-file-earmark-text' },
-      { to: 'contracts/templates', label: 'Plantillas', icon: 'bi bi-file-earmark-code' },
-      { to: 'roles', label: 'Roles', icon: 'bi bi-shield-lock' },
-      { to: 'members', label: 'Miembros', icon: 'bi bi-people' },
-      { to: 'audit', label: 'Auditoría', icon: 'bi bi-clock-history' },
-      { to: 'kyb', label: 'KYB', icon: 'bi bi-building-check' },
-      { to: 'integration', label: 'Integraciones', icon: 'bi bi-plug' },
-      { to: 'support', label: 'Incidencias', icon: 'bi bi-life-preserver' },
+      { to: '', key: 'overview', labelKey: 'tenants.legacy.detail.tabs.overview', icon: 'bi bi-grid' },
+      { to: 'settings', key: 'settings', labelKey: 'tenants.legacy.detail.tabs.settings', icon: 'bi bi-gear' },
+      { to: 'fees', key: 'fees', labelKey: 'tenants.legacy.detail.tabs.fees', icon: 'bi bi-cash-coin' },
+      { to: 'contacts', key: 'contacts', labelKey: 'tenants.legacy.detail.tabs.contacts', icon: 'bi bi-people' },
+      { to: 'wallet', key: 'wallet', labelKey: 'tenants.legacy.detail.tabs.wallet', icon: 'bi bi-wallet2' },
+      { to: 'invoices', key: 'invoices', labelKey: 'tenants.legacy.detail.tabs.invoices', icon: 'bi bi-receipt' },
+      { to: 'payroll', key: 'payroll', labelKey: 'tenants.legacy.detail.tabs.payroll', icon: 'bi bi-calendar2-check' },
+      { to: 'projects', key: 'projects', labelKey: 'tenants.legacy.detail.tabs.projects', icon: 'bi bi-kanban' },
+      { to: 'contracts', key: 'contracts', labelKey: 'tenants.legacy.detail.tabs.contracts', icon: 'bi bi-file-earmark-text' },
+      { to: 'contracts/templates', key: 'templates', labelKey: 'tenants.legacy.detail.tabs.templates', icon: 'bi bi-file-earmark-code' },
+      { to: 'roles', key: 'roles', labelKey: 'tenants.legacy.detail.tabs.roles', icon: 'bi bi-shield-lock' },
+      { to: 'members', key: 'members', labelKey: 'tenants.legacy.detail.tabs.members', icon: 'bi bi-people' },
+      { to: 'audit', key: 'audit', labelKey: 'tenants.legacy.detail.tabs.audit', icon: 'bi bi-clock-history' },
+      { to: 'kyb', key: 'kyb', labelKey: 'tenants.legacy.detail.tabs.kyb', icon: 'bi bi-building-check' },
+      { to: 'integration', key: 'integration', labelKey: 'tenants.legacy.detail.tabs.integration', icon: 'bi bi-plug' },
+      { to: 'support', key: 'support', labelKey: 'tenants.legacy.detail.tabs.support', icon: 'bi bi-life-preserver' },
     ];
 
     if (isSupport) {
       // Support View: Strict subset
-      const allowed = ['Resumen', 'Miembros', 'Proyectos', 'Facturas', 'Incidencias'];
-      return all.filter(t => allowed.includes(t.label));
+      const allowed = ['overview', 'members', 'projects', 'invoices', 'support'];
+      return all.filter(tab => allowed.includes(tab.key));
     }
 
     if (role === PLATFORM_ROLES.COMPANY_ADMIN) {
       // Company Admin: Hide Integraciones
-      return all.filter(t => t.label !== 'Integraciones');
+      return all.filter(tab => tab.key !== 'integration');
     }
 
     return all;
   }, [isSupport, role]);
+
+  const statusKey = companyStatus ? `tenants.common.${companyStatus}` : '';
+  const translatedStatus = statusKey ? t(statusKey) : '';
+  const statusLabel = companyStatus
+    ? (translatedStatus === statusKey ? companyStatus : translatedStatus)
+    : '—';
 
   return (
     <div className="space-y-5">
@@ -304,12 +313,12 @@ export default function TenantDetailPage({ apiUrl, token }) {
             className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-900"
           >
             <i className="bi bi-arrow-left" aria-hidden="true" />
-            Volver a Tenants
+            {t('tenants.legacy.detail.backToTenants')}
           </button>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
             <div>
-              <div className="text-xs font-semibold tracking-widest text-slate-500 uppercase">Tenant</div>
+              <div className="text-xs font-semibold tracking-widest text-slate-500 uppercase">{t('tenants.legacy.detail.tenantLabel')}</div>
               <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 leading-tight">
                 {company?.legal_name || '—'}
               </h1>
@@ -317,7 +326,7 @@ export default function TenantDetailPage({ apiUrl, token }) {
                 {company?.trade_name ? (
                   <span>{company.trade_name}</span>
                 ) : (
-                  <span className="text-slate-400">Sin nombre comercial</span>
+                  <span className="text-slate-400">{t('tenants.legacy.detail.noTradeName')}</span>
                 )}
               </div>
             </div>
@@ -331,7 +340,7 @@ export default function TenantDetailPage({ apiUrl, token }) {
                     : 'border-emerald-200 bg-emerald-50 text-emerald-800'
                 )}
               >
-                {companyStatus || '—'}
+                {statusLabel}
               </span>
 
               <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700">
@@ -351,7 +360,7 @@ export default function TenantDetailPage({ apiUrl, token }) {
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-extrabold text-slate-900 hover:bg-slate-50 disabled:opacity-60"
               >
                 <i className="bi bi-pencil" aria-hidden="true" />
-                Editar
+                {t('tenants.common.edit')}
               </button>
 
               {isSuspended ? (
@@ -364,7 +373,7 @@ export default function TenantDetailPage({ apiUrl, token }) {
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-extrabold text-white hover:bg-emerald-700"
                 >
                   <i className="bi bi-play-fill" aria-hidden="true" />
-                  Activar
+                  {t('tenants.common.enable')}
                 </button>
               ) : (
                 <button
@@ -376,7 +385,7 @@ export default function TenantDetailPage({ apiUrl, token }) {
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-extrabold text-white hover:bg-amber-600"
                 >
                   <i className="bi bi-pause-fill" aria-hidden="true" />
-                  Suspender
+                  {t('tenants.legacy.detail.suspend')}
                 </button>
               )}
             </>
@@ -392,14 +401,14 @@ export default function TenantDetailPage({ apiUrl, token }) {
       <div className="rounded-2xl border border-slate-200 bg-white p-5">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">País</div>
+            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{t('tenants.legacy.detail.country')}</div>
             <div className="mt-1 text-sm font-extrabold text-slate-900">
               {countryObj ? `${countryObj.iso2} — ${countryObj.name}` : company?.country_id ?? '—'}
             </div>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Moneda</div>
+            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{t('tenants.common.currency')}</div>
             <div className="mt-1 text-sm font-extrabold text-slate-900">
               {currencyObj
                 ? `${currencyObj.code} — ${currencyObj.name}${currencyObj.symbol ? ` (${currencyObj.symbol})` : ''}`
@@ -408,14 +417,14 @@ export default function TenantDetailPage({ apiUrl, token }) {
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Zona horaria</div>
+            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{t('tenants.legacy.detail.timezone')}</div>
             <div className="mt-1 text-sm font-extrabold text-slate-900">
               {tzObj ? tzObj.name : company?.timezone_id ?? '—'}
             </div>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Wallet</div>
+            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{t('tenants.legacy.detail.wallet')}</div>
             <div className="mt-1 text-sm font-extrabold text-slate-900">
               {wallet?.balance ?? '—'} {wallet?.currency_id ? `(#${wallet.currency_id})` : ''}
             </div>
@@ -424,13 +433,13 @@ export default function TenantDetailPage({ apiUrl, token }) {
 
         {lookupsErr ? (
           <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            No se pudieron cargar catálogos (Países/Monedas/Zonas horarias).{' '}
+            {t('tenants.legacy.detail.lookupsWarning')}{' '}
             <button
               type="button"
               onClick={loadLookups}
               className="font-semibold underline decoration-amber-400 underline-offset-2"
             >
-              Reintentar
+              {t('tenants.legacy.detail.retry')}
             </button>
             <div className="mt-1 text-xs text-amber-800">{lookupsErr}</div>
           </div>
@@ -440,11 +449,11 @@ export default function TenantDetailPage({ apiUrl, token }) {
       {/* Tabs */}
       <div className="rounded-2xl border border-slate-200 bg-white">
         <div className="flex flex-wrap gap-2 border-b border-slate-200 p-3">
-          {tabs.map((t) => (
+          {tabs.map((tab) => (
             <NavLink
-              key={t.to}
-              end={t.to === ''}
-              to={t.to === '' ? '.' : t.to}
+              key={tab.to}
+              end={tab.to === ''}
+              to={tab.to === '' ? '.' : tab.to}
               className={({ isActive }) =>
                 cx(
                   'inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-extrabold transition',
@@ -452,8 +461,8 @@ export default function TenantDetailPage({ apiUrl, token }) {
                 )
               }
             >
-              <i className={t.icon} aria-hidden="true" />
-              {t.label}
+              <i className={tab.icon} aria-hidden="true" />
+              {t(tab.labelKey)}
             </NavLink>
           ))}
         </div>
@@ -461,7 +470,7 @@ export default function TenantDetailPage({ apiUrl, token }) {
         <div className="p-4">
           {loading && !tenant ? (
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-              Cargando tenant…
+              {t('tenants.legacy.detail.loadingTenant')}
             </div>
           ) : null}
 
@@ -550,7 +559,7 @@ export default function TenantDetailPage({ apiUrl, token }) {
                 path="*"
                 element={
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-700">
-                    Ruta no encontrada.
+                    {t('tenants.legacy.detail.routeNotFound')}
                   </div>
                 }
               />
@@ -560,11 +569,11 @@ export default function TenantDetailPage({ apiUrl, token }) {
       </div>
 
       {/* Edit modal */}
-      <Modal open={openEdit} title="Editar tenant" onClose={() => setOpenEdit(false)} maxWidth="max-w-2xl">
+      <Modal open={openEdit} title={t('tenants.legacy.detail.editTitle')} onClose={() => setOpenEdit(false)} maxWidth="max-w-2xl">
         <form onSubmit={submitEdit} className="space-y-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className="text-sm font-semibold text-slate-700">Razón social</label>
+              <label className="text-sm font-semibold text-slate-700">{t('tenants.legacy.detail.legalName')}</label>
               <input
                 required
                 value={editForm.legal_name}
@@ -574,7 +583,7 @@ export default function TenantDetailPage({ apiUrl, token }) {
             </div>
 
             <div>
-              <label className="text-sm font-semibold text-slate-700">Nombre comercial</label>
+              <label className="text-sm font-semibold text-slate-700">{t('tenants.legacy.detail.tradeName')}</label>
               <input
                 value={editForm.trade_name}
                 onChange={(e) => setEditForm((p) => ({ ...p, trade_name: e.target.value }))}
@@ -585,7 +594,7 @@ export default function TenantDetailPage({ apiUrl, token }) {
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
-              <label className="text-sm font-semibold text-slate-700">País</label>
+              <label className="text-sm font-semibold text-slate-700">{t('tenants.legacy.detail.country')}</label>
               <div className="relative">
                 <select
                   required
@@ -595,7 +604,7 @@ export default function TenantDetailPage({ apiUrl, token }) {
                   className="mt-1 w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 pr-10 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand disabled:opacity-60"
                 >
                   <option value="">
-                    {lookupsLoading ? 'Cargando…' : countries.length ? 'Selecciona' : 'Sin países'}
+                    {lookupsLoading ? t('tenants.common.loading') : countries.length ? t('tenants.common.select') : t('tenants.legacy.detail.noCountries')}
                   </option>
                   {countries.map((c) => (
                     <option key={c.id} value={String(c.id)}>
@@ -611,7 +620,7 @@ export default function TenantDetailPage({ apiUrl, token }) {
             </div>
 
             <div>
-              <label className="text-sm font-semibold text-slate-700">Moneda</label>
+              <label className="text-sm font-semibold text-slate-700">{t('tenants.common.currency')}</label>
               <div className="relative">
                 <select
                   required
@@ -621,7 +630,7 @@ export default function TenantDetailPage({ apiUrl, token }) {
                   className="mt-1 w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 pr-10 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand disabled:opacity-60"
                 >
                   <option value="">
-                    {lookupsLoading ? 'Cargando…' : currencies.length ? 'Selecciona' : 'Sin monedas'}
+                    {lookupsLoading ? t('tenants.common.loading') : currencies.length ? t('tenants.common.select') : t('tenants.legacy.detail.noCurrencies')}
                   </option>
                   {currencies.map((c) => (
                     <option key={c.id} value={String(c.id)}>
@@ -638,7 +647,7 @@ export default function TenantDetailPage({ apiUrl, token }) {
             </div>
 
             <div>
-              <label className="text-sm font-semibold text-slate-700">Zona horaria</label>
+              <label className="text-sm font-semibold text-slate-700">{t('tenants.legacy.detail.timezone')}</label>
               <div className="relative">
                 <select
                   required
@@ -648,7 +657,7 @@ export default function TenantDetailPage({ apiUrl, token }) {
                   className="mt-1 w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 pr-10 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand disabled:opacity-60"
                 >
                   <option value="">
-                    {lookupsLoading ? 'Cargando…' : timezones.length ? 'Selecciona' : 'Sin zonas'}
+                    {lookupsLoading ? t('tenants.common.loading') : timezones.length ? t('tenants.common.select') : t('tenants.legacy.detail.noTimezones')}
                   </option>
                   {timezones.map((t) => (
                     <option key={t.id} value={String(t.id)}>
@@ -670,35 +679,35 @@ export default function TenantDetailPage({ apiUrl, token }) {
               onClick={() => setOpenEdit(false)}
               className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
-              Cancelar
+              {t('tenants.common.cancel')}
             </button>
             <button
               disabled={lookupsLoading}
               className="rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand/90 disabled:opacity-60"
               type="submit"
             >
-              Guardar cambios
+              {t('tenants.legacy.detail.saveChanges')}
             </button>
           </div>
         </form>
       </Modal>
 
       {/* Suspend modal */}
-      <Modal open={openSuspend} title="Suspender tenant" onClose={() => setOpenSuspend(false)}>
+      <Modal open={openSuspend} title={t('tenants.legacy.detail.suspendTitle')} onClose={() => setOpenSuspend(false)}>
         <form onSubmit={doSuspend} className="space-y-4">
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            Esta acción pondrá el tenant en estado <span className="font-extrabold">suspended</span>.
+            {t('tenants.legacy.detail.suspendWarningBefore')} <span className="font-extrabold">suspended</span>{t('tenants.legacy.detail.suspendWarningAfter')}
           </div>
 
           <div>
-            <label className="text-sm font-semibold text-slate-700">Motivo</label>
+            <label className="text-sm font-semibold text-slate-700">{t('tenants.common.reason')}</label>
             <textarea
               required
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               rows={4}
               className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand"
-              placeholder="Describe el motivo de la suspensión…"
+              placeholder={t('tenants.legacy.detail.suspendReasonPlaceholder')}
             />
           </div>
 
@@ -708,33 +717,33 @@ export default function TenantDetailPage({ apiUrl, token }) {
               onClick={() => setOpenSuspend(false)}
               className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
-              Cancelar
+              {t('tenants.common.cancel')}
             </button>
             <button
               className="rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-600"
               type="submit"
             >
-              Confirmar suspensión
+              {t('tenants.legacy.detail.confirmSuspend')}
             </button>
           </div>
         </form>
       </Modal>
 
       {/* Activate modal */}
-      <Modal open={openActivate} title="Activar tenant" onClose={() => setOpenActivate(false)}>
+      <Modal open={openActivate} title={t('tenants.legacy.detail.activateTitle')} onClose={() => setOpenActivate(false)}>
         <form onSubmit={doActivate} className="space-y-4">
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-            Esta acción pondrá el tenant en estado <span className="font-extrabold">active</span>.
+            {t('tenants.legacy.detail.activateWarningBefore')} <span className="font-extrabold">active</span>{t('tenants.legacy.detail.activateWarningAfter')}
           </div>
 
           <div>
-            <label className="text-sm font-semibold text-slate-700">Motivo (opcional)</label>
+            <label className="text-sm font-semibold text-slate-700">{t('tenants.legacy.detail.reasonOptional')}</label>
             <textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               rows={4}
               className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand"
-              placeholder="Describe el motivo de la activación… (opcional)"
+              placeholder={t('tenants.legacy.detail.activateReasonPlaceholder')}
             />
           </div>
 
@@ -744,13 +753,13 @@ export default function TenantDetailPage({ apiUrl, token }) {
               onClick={() => setOpenActivate(false)}
               className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
-              Cancelar
+              {t('tenants.common.cancel')}
             </button>
             <button
               className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700"
               type="submit"
             >
-              Confirmar activación
+              {t('tenants.legacy.detail.confirmActivate')}
             </button>
           </div>
         </form>

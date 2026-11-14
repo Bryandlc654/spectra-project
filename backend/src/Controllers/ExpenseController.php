@@ -112,10 +112,10 @@ class ExpenseController {
             $whereClauses = [];
 
             if ($mode === 'team' && $managerId) {
-                $whereClauses[] = "u.manager_id LIKE :mid";
+                $whereClauses[] = "u.manager_id = :mid";
                 $params[':mid'] = $managerId;
             } elseif ($userId) {
-                $whereClauses[] = "e.user_id LIKE :uid";
+                $whereClauses[] = "e.user_id = :uid";
                 $params[':uid'] = $userId;
             }
             
@@ -177,7 +177,7 @@ class ExpenseController {
             $status = $data['status'] ?? null;
             
             if ($status && in_array($status, ['approved', 'rejected', 'reimbursed'])) {
-                $stmt = $this->pdo->prepare("UPDATE expenses SET status = ?, updated_at = NOW() WHERE id LIKE ?");
+                $stmt = $this->pdo->prepare("UPDATE expenses SET status = ?, updated_at = NOW() WHERE id = ?");
                 $stmt->execute([$status, $id]);
                 echo json_encode(['message' => 'Expense updated']);
             } else {

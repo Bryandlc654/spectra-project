@@ -241,7 +241,7 @@ export default function EnvelopesPage({ apiUrl, token }) {
                         <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
                             <tr>
                                 <th className="px-4 py-3 text-left">Envelope ID</th>
-                                <th className="px-4 py-3 text-left">Contrato / Tenant</th>
+                                <th className="px-4 py-3 text-left">Contrato / Empresa</th>
                                 <th className="px-4 py-3 text-left">Estado</th>
                                 <th className="px-4 py-3 text-left">Último Evento</th>
                                 <th className="px-4 py-3 text-right">Acciones</th>
@@ -255,7 +255,7 @@ export default function EnvelopesPage({ apiUrl, token }) {
                                     </td>
                                     <td className="px-4 py-3">
                                         <div className="font-semibold text-slate-900">{e.contract_title || 'Sin título'}</div>
-                                        <div className="text-xs text-slate-500">{e.company_name || 'Tenant desconocido'}</div>
+                                        <div className="text-xs text-slate-500">{e.company_name || 'Empresa desconocida'}</div>
                                     </td>
                                     <td className="px-4 py-3">
                                         {renderStatusBadge(e.status)}
@@ -343,7 +343,7 @@ export default function EnvelopesPage({ apiUrl, token }) {
                         <h3 className="mb-4 text-lg font-bold text-slate-900">Nuevo Sobre de Firma</h3>
                         <form onSubmit={handleCreate} className="space-y-4">
                             <div>
-                                <label className="block text-xs font-medium text-slate-700">Empresa (Tenant)</label>
+                                <label className="block text-xs font-medium text-slate-700">Empresa</label>
                                 <select 
                                     className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
                                     value={selectedCompanyId}

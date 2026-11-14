@@ -4,8 +4,15 @@ import { createApi } from '../../lib/api';
 import { normalizePageResponse } from '../../lib/pagination';
 import Modal from '../../components/Modal';
 import { useToast } from '../../components/ToastProvider';
+import { useI18n } from '../../i18n/I18nContext';
 
 export default function TenantsSubscriptionPage({ apiUrl, token }) {
+    const { t, language } = useI18n();
+    const locale = language === 'en' ? 'en-US' : 'es-ES';
+    const amountFormatter = useMemo(
+        () => new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        [locale]
+    );
     const api = useMemo(() => createApi({ baseUrl: apiUrl, token }), [apiUrl, token]);
     const navigate = useNavigate();
     const toast = useToast();
@@ -42,7 +49,7 @@ export default function TenantsSubscriptionPage({ apiUrl, token }) {
     async function fetchData() {
         setLoading(true);
         try {
-            const res = await api.get(`/api/analytics/contracts-subscriptions?page=${page}&q=${debouncedQ}&period=${period}`);
+            const res = await api.get(`/api/analytics/contracts-subscriptions?page=${page}&q=${encodeURIComponent(debouncedQ)}&period=${encodeURIComponent(period)}`);
             const { items, meta: m } = normalizePageResponse(res);
             setData(items || []);
             setMeta(m);
@@ -147,7 +154,7 @@ export default function TenantsSubscriptionPage({ apiUrl, token }) {
                 end_date: formEnd || null
             };
             await api.post(`/api/tenants/${selectedCompany.id}/contracts`, payload);
-            toast.success('Contrato creado exitosamente');
+            toast.success(t('tenants.detail.subscription.created'));
             setStartModalOpen(false);
             setCreateStep(1);
             setSelectedCompany(null);
@@ -161,7 +168,7 @@ export default function TenantsSubscriptionPage({ apiUrl, token }) {
             setFormStart('');
             setFormEnd('');
         } catch (err) {
-            toast.error(err.message || 'Error al crear contrato');
+            toast.error(err.message || t('tenants.detail.subscription.createError'));
         } finally {
             setSubmitting(false);
         }
@@ -171,14 +178,15 @@ export default function TenantsSubscriptionPage({ apiUrl, token }) {
         <div className="space-y-6">
             <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-slate-900">Contratos por Empresa</h1>
+                    <h1 className="text-2xl font-bold text-slate-900">{t('tenants.detail.subscription.title')}</h1>
                     <p className="text-slate-600">
-                        Resumen de cuántos contratos activos tiene cada empresa y el monto estimado a cobrar.
+                        {t('tenants.detail.subscription.subtitle')}
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
-                    <label className="text-sm text-slate-600">Periodo:</label>
+                    <label htmlFor="subscription-period" className="text-sm text-slate-600">{t('tenants.detail.subscription.periodLabel')}</label>
                     <select
+                        id="subscription-period"
                         value={period}
                         onChange={e => {
                             setPage(1);
@@ -186,15 +194,15 @@ export default function TenantsSubscriptionPage({ apiUrl, token }) {
                         }}
                         className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand"
                     >
-                        <option value="current_month">Mes Actual</option>
-                        <option value="last_month">Mes Anterior</option>
+                        <option value="current_month">{t('tenants.detail.subscription.periodCurrentMonth')}</option>
+                        <option value="last_month">{t('tenants.detail.subscription.periodLastMonth')}</option>
                     </select>
                     <button
                         onClick={() => setStartModalOpen(true)}
                         className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-brand/20 hover:bg-brand-600"
                     >
                         <i className="bi bi-plus-lg" />
-                        Iniciar gestión de contrato
+                        {t('tenants.detail.subscription.start')}
                     </button>
                 </div>
             </div>
@@ -202,7 +210,8 @@ export default function TenantsSubscriptionPage({ apiUrl, token }) {
             <div className="flex gap-4">
                 <input 
                     type="text" 
-                    placeholder="Buscar empresa..." 
+                    placeholder={t('tenants.detail.subscription.searchCompanyPlaceholder')} 
+                    aria-label={t('tenants.detail.subscription.searchCompanyPlaceholder')}
                     className="w-full max-w-sm rounded-xl border border-slate-200 px-4 py-2 text-sm outline-none focus:border-brand"
                     value={q}
                     onChange={e => {
@@ -217,17 +226,17 @@ export default function TenantsSubscriptionPage({ apiUrl, token }) {
                     <table className="w-full text-left text-sm">
                         <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-100">
                             <tr>
-                                <th className="px-6 py-4">Empresa</th>
-                                <th className="px-6 py-4 text-right">Contratos con freelancers</th>
-                                <th className="px-6 py-4 text-right">Total a cobrar</th>
-                                <th className="px-6 py-4 text-right">Acciones</th>
+                                <th className="px-6 py-4">{t('tenants.detail.company')}</th>
+                                <th className="px-6 py-4 text-right">{t('tenants.detail.subscription.tableContracts')}</th>
+                                <th className="px-6 py-4 text-right">{t('tenants.detail.subscription.tableTotal')}</th>
+                                <th className="px-6 py-4 text-right">{t('tenants.common.actions')}</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {loading && data.length === 0 ? (
-                                <tr><td colSpan="4" className="px-6 py-8 text-center text-slate-500">Cargando...</td></tr>
+                                <tr><td colSpan="4" className="px-6 py-8 text-center text-slate-500">{t('tenants.common.loading')}</td></tr>
                             ) : data.length === 0 ? (
-                                <tr><td colSpan="4" className="px-6 py-8 text-center text-slate-500">No se encontraron resultados</td></tr>
+                                <tr><td colSpan="4" className="px-6 py-8 text-center text-slate-500">{t('tenants.common.noResults')}</td></tr>
                             ) : (
                                 data.map(item => (
                                     <tr key={item.company_id} className="hover:bg-slate-50/50">
@@ -240,7 +249,7 @@ export default function TenantsSubscriptionPage({ apiUrl, token }) {
                                         </td>
                                         <td className="px-6 py-4 text-right tabular-nums font-semibold text-slate-900">
                                             {item.total_amount > 0
-                                                ? `${item.total_amount.toFixed(2)} ${item.currency_code || ''}`
+                                                ? `${amountFormatter.format(item.total_amount)} ${item.currency_code || ''}`
                                                 : '-'}
                                         </td>
                                         <td className="px-6 py-4 text-right">
@@ -250,7 +259,7 @@ export default function TenantsSubscriptionPage({ apiUrl, token }) {
                                                 className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                                             >
                                                 <i className="bi bi-gear" />
-                                                Gestionar contratos
+                                                {t('tenants.detail.subscription.manageContracts')}
                                             </button>
                                         </td>
                                     </tr>
@@ -267,29 +276,29 @@ export default function TenantsSubscriptionPage({ apiUrl, token }) {
                             onClick={() => setPage(p => p - 1)}
                             className="text-sm font-semibold text-slate-600 disabled:opacity-50"
                         >
-                            Anterior
+                            {t('tenants.common.previous')}
                         </button>
                         <span className="text-sm text-slate-500">
-                            Página {meta.page} de {meta.last_page}
+                            {t('tenants.common.pageOf', { page: meta.page, total: meta.last_page })}
                         </span>
                         <button 
                             disabled={page >= meta.last_page}
                             onClick={() => setPage(p => p + 1)}
                             className="text-sm font-semibold text-slate-600 disabled:opacity-50"
                         >
-                            Siguiente
+                            {t('tenants.common.next')}
                         </button>
                     </div>
                 )}
             </div>
 
             {startModalOpen && (
-                <Modal open={true} title="Iniciar gestión de contrato" onClose={() => setStartModalOpen(false)}>
+                <Modal open={true} title={t('tenants.detail.subscription.start')} onClose={() => setStartModalOpen(false)}>
                     <div className="space-y-4">
                         {createStep === 1 && (
                         <>
                         <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">Empresa</label>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.detail.company')}</label>
                             {selectedCompany ? (
                                 <div className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
                                     <span className="text-sm font-medium text-emerald-900">{selectedCompany.legal_name}</span>
@@ -301,7 +310,7 @@ export default function TenantsSubscriptionPage({ apiUrl, token }) {
                                 <div className="relative">
                                     <i className="bi bi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                                     <input
-                                        placeholder="Buscar por razón social..."
+                                        placeholder={t('tenants.detail.subscription.searchLegalNamePlaceholder')}
                                         className="w-full rounded-xl border-slate-200 pl-9"
                                         value={companySearch}
                                         onChange={e => setCompanySearch(e.target.value)}
@@ -330,7 +339,7 @@ export default function TenantsSubscriptionPage({ apiUrl, token }) {
                         </div>
 
                         <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">Freelancer</label>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.detail.subscription.freelancerLabel')}</label>
                             {selectedFreelancer ? (
                                 <div className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
                                     <span className="text-sm font-medium text-emerald-900">
@@ -344,7 +353,7 @@ export default function TenantsSubscriptionPage({ apiUrl, token }) {
                                 <div className="relative">
                                     <i className="bi bi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                                     <input
-                                        placeholder="Buscar por nombre o email..."
+                                        placeholder={t('tenants.detail.subscription.searchFreelancerPlaceholder')}
                                         className="w-full rounded-xl border-slate-200 pl-9"
                                         value={freelancerSearch}
                                         onChange={e => setFreelancerSearch(e.target.value)}
@@ -378,7 +387,7 @@ export default function TenantsSubscriptionPage({ apiUrl, token }) {
                                 onClick={() => setStartModalOpen(false)}
                                 className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
                             >
-                                Cancelar
+                                {t('tenants.common.cancel')}
                             </button>
                             <button
                                 type="button"
@@ -386,7 +395,7 @@ export default function TenantsSubscriptionPage({ apiUrl, token }) {
                                 onClick={handleGoManage}
                                 className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
                             >
-                                Continuar
+                                {t('tenants.detail.subscription.continue')}
                             </button>
                         </div>
                         </>
@@ -400,11 +409,11 @@ export default function TenantsSubscriptionPage({ apiUrl, token }) {
                                         <div className="font-medium">{selectedCompany?.legal_name}</div>
                                         <div className="text-xs text-slate-500">{selectedFreelancer?.full_name} ({selectedFreelancer?.email})</div>
                                     </div>
-                                    <button type="button" onClick={() => setCreateStep(1)} className="text-slate-600 hover:text-slate-800">Cambiar</button>
+                                    <button type="button" onClick={() => setCreateStep(1)} className="text-slate-600 hover:text-slate-800">{t('tenants.detail.subscription.change')}</button>
                                 </div>
                             </div>
                             <div>
-                                <label className="mb-1 block text-sm font-medium text-slate-700">Plantilla</label>
+                                <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.detail.subscription.templateLabel')}</label>
                                 <select
                                     className="w-full rounded-xl border-slate-200"
                                     value={formTemplateId}
@@ -422,7 +431,7 @@ export default function TenantsSubscriptionPage({ apiUrl, token }) {
                                         }
                                     }}
                                 >
-                                    <option value="">Selecciona plantilla...</option>
+                                    <option value="">{t('tenants.detail.subscription.selectTemplate')}</option>
                                     {templates.map(t => (
                                         <option key={t.id} value={t.id}>{t.title}</option>
                                     ))}
@@ -430,28 +439,28 @@ export default function TenantsSubscriptionPage({ apiUrl, token }) {
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="mb-1 block text-sm font-medium text-slate-700">Título</label>
+                                    <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.detail.subscription.contractTitleLabel')}</label>
                                     <input className="w-full rounded-xl border-slate-200" required value={formTitle} onChange={e => setFormTitle(e.target.value)} />
                                 </div>
                                 <div>
-                                    <label className="mb-1 block text-sm font-medium text-slate-700">Tipo</label>
+                                    <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.common.type')}</label>
                                     <select className="w-full rounded-xl border-slate-200" value={formType} onChange={e => setFormType(e.target.value)}>
-                                        <option value="fixed">Fixed</option>
-                                        <option value="hourly">Hourly</option>
-                                        <option value="retainer">Retainer</option>
-                                        <option value="milestone">Milestone</option>
+                                        <option value="fixed">{t('tenants.detail.subscription.contractTypes.fixed')}</option>
+                                        <option value="hourly">{t('tenants.detail.subscription.contractTypes.hourly')}</option>
+                                        <option value="retainer">{t('tenants.detail.subscription.contractTypes.retainer')}</option>
+                                        <option value="milestone">{t('tenants.detail.subscription.contractTypes.milestone')}</option>
                                     </select>
                                 </div>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="mb-1 block text-sm font-medium text-slate-700">Tarifa</label>
+                                    <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.detail.subscription.rateLabel')}</label>
                                     <input type="number" className="w-full rounded-xl border-slate-200" value={formRate} onChange={e => setFormRate(e.target.value)} />
                                 </div>
                                 <div>
-                                    <label className="mb-1 block text-sm font-medium text-slate-700">Moneda</label>
+                                    <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.common.currency')}</label>
                                     <select className="w-full rounded-xl border-slate-200" value={formCurrencyId} onChange={e => setFormCurrencyId(e.target.value)}>
-                                        <option value="">Selecciona...</option>
+                                        <option value="">{t('tenants.common.select')}</option>
                                         {currencies.map(c => (
                                             <option key={c.id} value={c.id}>{c.code} - {c.name}</option>
                                         ))}
@@ -460,18 +469,18 @@ export default function TenantsSubscriptionPage({ apiUrl, token }) {
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="mb-1 block text-sm font-medium text-slate-700">Fecha Inicio</label>
+                                    <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.detail.subscription.startDateLabel')}</label>
                                     <input type="date" required className="w-full rounded-xl border-slate-200" value={formStart} onChange={e => setFormStart(e.target.value)} />
                                 </div>
                                 <div>
-                                    <label className="mb-1 block text-sm font-medium text-slate-700">Fecha Fin (Opcional)</label>
+                                    <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.detail.subscription.endDateLabel')}</label>
                                     <input type="date" className="w-full rounded-xl border-slate-200" value={formEnd} onChange={e => setFormEnd(e.target.value)} />
                                 </div>
                             </div>
                             <div className="flex justify-end gap-3 pt-2">
-                                <button type="button" onClick={() => setCreateStep(1)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">Atrás</button>
+                                <button type="button" onClick={() => setCreateStep(1)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">{t('tenants.common.back')}</button>
                                 <button type="submit" disabled={submitting} className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50">
-                                    Crear contrato
+                                    {t('tenants.detail.subscription.createContract')}
                                 </button>
                             </div>
                         </form>

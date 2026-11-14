@@ -2,9 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useToast } from '../../../components/ToastProvider';
 import Modal from '../../../components/Modal';
+import { useI18n } from '../../../i18n/I18nContext';
 
 export default function TenantContractsTab({ companyId, api }) {
     const toast = useToast();
+    const { t, language } = useI18n();
+    const locale = language === 'en' ? 'en-US' : 'es-ES';
     const safeApi = useMemo(() => api, [api]);
 
     const [searchParams] = useSearchParams();
@@ -69,7 +72,7 @@ export default function TenantContractsTab({ companyId, api }) {
             link.remove();
         } catch (e) {
             console.error(e);
-            toast.error('Error al exportar datos legales');
+            toast.error(t('tenants.contracts.list.exportLegalError'));
         }
     };
 
@@ -82,7 +85,7 @@ export default function TenantContractsTab({ companyId, api }) {
             setObservations(obs || []);
         } catch (e) {
             console.error(e);
-            toast.error('Error al cargar observaciones');
+            toast.error(t('tenants.contracts.list.loadObservationsError'));
         } finally {
             setLoadingLegal(false);
         }
@@ -97,19 +100,19 @@ export default function TenantContractsTab({ companyId, api }) {
             await safeApi.post(`/api/tenants/${companyId}/contracts/${legalContract.id}/assign-legal`, {
                 legal_reviewer_id: reviewerId || null
             });
-            toast.success('Asignación actualizada');
+            toast.success(t('tenants.contracts.list.assignmentUpdated'));
             forceReload();
             // Update local state
             setLegalContract(prev => ({ ...prev, legal_reviewer_id: reviewerId, legal_status: reviewerId ? 'pending_review' : 'not_required' }));
         } catch (e) {
             console.error(e);
-            toast.error('Error al asignar revisor');
+            toast.error(t('tenants.contracts.list.assignReviewerError'));
         }
     };
 
     const handleLegalAction = async (status, observation) => {
         if (!observation && status !== 'approved') {
-            toast.error('La observación es requerida para rechazar o solicitar cambios');
+            toast.error(t('tenants.contracts.list.observationRequired'));
             return;
         }
         
@@ -118,12 +121,12 @@ export default function TenantContractsTab({ companyId, api }) {
                 status,
                 observation
             });
-            toast.success('Revisión registrada');
+            toast.success(t('tenants.contracts.list.reviewRecorded'));
             forceReload();
             setLegalModalOpen(false);
         } catch (e) {
             console.error(e);
-            toast.error('Error al registrar revisión');
+            toast.error(t('tenants.contracts.list.reviewError'));
         }
     };
 
@@ -160,7 +163,7 @@ export default function TenantContractsTab({ companyId, api }) {
                 }
             } catch (e) {
                 if (!cancelled) {
-                    setErr(e?.message || 'No se pudieron cargar los contratos');
+                    setErr(e?.message || t('tenants.contracts.list.loadError'));
                 }
             } finally {
                 if (!cancelled) setLoading(false);
@@ -172,7 +175,7 @@ export default function TenantContractsTab({ companyId, api }) {
         return () => {
             cancelled = true;
         };
-    }, [safeApi, companyId, page, statusFilter, search, reloadKey]);
+    }, [safeApi, companyId, page, statusFilter, search, reloadKey, t]);
 
     const forceReload = () => setReloadKey(k => k + 1);
 
@@ -254,7 +257,7 @@ export default function TenantContractsTab({ companyId, api }) {
             };
 
             await safeApi.post(`/api/tenants/${companyId}/contracts`, payload);
-            toast.success('Contrato creado exitosamente');
+            toast.success(t('tenants.contracts.list.createdSuccess'));
             setCreateModalOpen(false);
             // Reset states
             setSelectedFreelancer(null);
@@ -262,7 +265,7 @@ export default function TenantContractsTab({ companyId, api }) {
             forceReload();
         } catch (error) {
             console.error(error);
-            toast.error(error?.message || 'Error al crear el contrato');
+            toast.error(error?.message || t('tenants.contracts.list.createError'));
         } finally {
             setCreating(false);
         }
@@ -271,16 +274,16 @@ export default function TenantContractsTab({ companyId, api }) {
     const [signing, setSigning] = useState(null);
 
     const handleSign = async (contract) => {
-        if (!window.confirm(`¿Enviar "${contract.title}" para firma digital?`)) return;
+        if (!window.confirm(t('tenants.contracts.list.sendForSignatureConfirm', { title: contract.title }))) return;
         
         setSigning(contract.id);
         try {
             await safeApi.post('/api/envelopes', { contract_id: contract.id });
-            toast.success('Contrato enviado para firma');
+            toast.success(t('tenants.contracts.list.sentForSignature'));
             forceReload();
         } catch (error) {
             console.error(error);
-            toast.error(error?.message || 'Error al enviar contrato');
+            toast.error(error?.message || t('tenants.contracts.list.sendError'));
         } finally {
             setSigning(null);
         }
@@ -310,12 +313,12 @@ export default function TenantContractsTab({ companyId, api }) {
             };
 
             await safeApi.put(`/api/tenants/${companyId}/contracts/${editingContract.id}`, payload);
-            toast.success('Contrato actualizado exitosamente');
+            toast.success(t('tenants.contracts.list.updatedSuccess'));
             setEditModalOpen(false);
             forceReload();
         } catch (error) {
             console.error(error);
-            toast.error(error?.message || 'Error al actualizar el contrato');
+            toast.error(error?.message || t('tenants.contracts.list.updateError'));
         } finally {
             setEditing(false);
         }
@@ -339,17 +342,17 @@ export default function TenantContractsTab({ companyId, api }) {
             };
 
             await safeApi.post(`/api/tenants/${companyId}/contracts/${terminatingContract.id}/terminate`, payload);
-            toast.success('Contrato terminado exitosamente');
+            toast.success(t('tenants.contracts.list.terminatedSuccess'));
 
             // Trigger Offboarding
             if (terminatingContract.freelancer_id) {
                 try {
                     await safeApi.post('/api/onboarding/trigger-offboarding', { user_id: terminatingContract.freelancer_id });
-                    toast.success('Proceso de offboarding iniciado');
+                    toast.success(t('tenants.contracts.list.offboardingStarted'));
                 } catch (offErr) {
                     console.error('Error triggering offboarding:', offErr);
                     // Don't block the UI, just warn
-                    toast.warning('Contrato terminado, pero falló inicio de offboarding');
+                    toast.warning(t('tenants.contracts.list.offboardingFailed'));
                 }
             }
 
@@ -357,7 +360,7 @@ export default function TenantContractsTab({ companyId, api }) {
             forceReload();
         } catch (error) {
             console.error(error);
-            toast.error(error?.message || 'Error al terminar el contrato');
+            toast.error(error?.message || t('tenants.contracts.list.terminateError'));
         } finally {
             setTerminating(false);
         }
@@ -378,23 +381,23 @@ export default function TenantContractsTab({ companyId, api }) {
             setCurrentAmendments(Array.isArray(res) ? res : (res.data || []));
         } catch (error) {
             console.error(error);
-            toast.error('Error al cargar enmiendas');
+            toast.error(t('tenants.contracts.list.loadAmendmentsError'));
         } finally {
             setLoadingAmendments(false);
         }
     };
 
     const handleSignAmendment = async (amendment) => {
-        if (!window.confirm(`¿Enviar enmienda para firma digital?`)) return;
+        if (!window.confirm(t('tenants.contracts.list.sendAmendmentConfirm'))) return;
         
         try {
             await safeApi.post('/api/envelopes', { amendment_id: amendment.id });
-            toast.success('Enmienda enviada para firma');
+            toast.success(t('tenants.contracts.list.amendmentSent'));
             // Reload amendments list
             handleViewAmendments(selectedContractForAmendments);
         } catch (error) {
             console.error(error);
-            toast.error(error?.message || 'Error al enviar enmienda');
+            toast.error(error?.message || t('tenants.contracts.list.sendAmendmentError'));
         }
     };
 
@@ -420,12 +423,12 @@ export default function TenantContractsTab({ companyId, api }) {
             };
 
             await safeApi.post(`/api/tenants/${companyId}/contracts/${amendingContract.id}/amend`, payload);
-            toast.success('Enmienda creada y registrada');
+            toast.success(t('tenants.contracts.list.amendmentCreated'));
             setAmendModalOpen(false);
             forceReload();
         } catch (error) {
             console.error(error);
-            toast.error(error?.message || 'Error al crear enmienda');
+            toast.error(error?.message || t('tenants.contracts.list.createAmendmentError'));
         } finally {
             setAmending(false);
         }
@@ -435,11 +438,11 @@ export default function TenantContractsTab({ companyId, api }) {
         if (!value) return '—';
         const d = new Date(value);
         if (Number.isNaN(d.getTime())) return String(value);
-        return d.toLocaleDateString();
+        return d.toLocaleDateString(locale);
     };
 
     const renderStatusBadge = (statusRaw) => {
-        if (!statusRaw) return <span className="text-xs text-slate-500">Sin estado</span>;
+        if (!statusRaw) return <span className="text-xs text-slate-500">{t('tenants.contracts.list.noStatus')}</span>;
         const status = String(statusRaw).toLowerCase();
         let cls = 'bg-slate-100 text-slate-700';
         
@@ -449,9 +452,17 @@ export default function TenantContractsTab({ companyId, api }) {
         else if (status === 'terminated') cls = 'bg-gray-200 text-gray-700';
         else if (status === 'pending') cls = 'bg-amber-50 text-amber-700';
 
+        const statusLabels = {
+            draft: t('tenants.contracts.list.status.draft'),
+            active: t('tenants.common.active'),
+            pending: t('tenants.common.pending'),
+            expired: t('tenants.contracts.list.status.expired'),
+            terminated: t('tenants.contracts.list.status.terminated'),
+        };
+
         return (
             <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${cls}`}>
-                {status || 'Desconocido'}
+                {statusLabels[status] || statusRaw || t('tenants.common.unknown')}
             </span>
         );
     };
@@ -462,28 +473,28 @@ export default function TenantContractsTab({ companyId, api }) {
         
         let cls = 'bg-slate-100 text-slate-600';
         let icon = 'bi-shield';
-        let label = 'Legal';
+        let label = t('tenants.contracts.list.legal.defaultLabel');
 
         if (status === 'pending_review') {
             cls = 'bg-amber-50 text-amber-700';
             icon = 'bi-hourglass-split';
-            label = 'Revisión Pendiente';
+            label = t('tenants.contracts.list.legal.pendingReview');
         } else if (status === 'in_review') {
             cls = 'bg-blue-50 text-blue-700';
             icon = 'bi-eye';
-            label = 'En Revisión';
+            label = t('tenants.contracts.list.legal.inReview');
         } else if (status === 'approved') {
             cls = 'bg-emerald-50 text-emerald-700';
             icon = 'bi-shield-check';
-            label = 'Aprobado Legal';
+            label = t('tenants.contracts.list.legal.approved');
         } else if (status === 'rejected') {
             cls = 'bg-red-50 text-red-700';
             icon = 'bi-shield-x';
-            label = 'Rechazado Legal';
+            label = t('tenants.contracts.list.legal.rejected');
         } else if (status === 'changes_requested') {
             cls = 'bg-orange-50 text-orange-700';
             icon = 'bi-pencil-square';
-            label = 'Cambios Solicitados';
+            label = t('tenants.contracts.list.legal.changesRequested');
         }
 
         return (
@@ -502,13 +513,13 @@ export default function TenantContractsTab({ companyId, api }) {
 
         if (c.envelope_status === 'sent') {
             cls = 'bg-blue-50 text-blue-700';
-            label = 'Enviado';
+            label = t('tenants.contracts.list.envelope.sent');
         } else if (c.envelope_status === 'signed' || c.envelope_status === 'completed') {
             cls = 'bg-emerald-50 text-emerald-700';
-            label = 'Firmado';
+            label = t('tenants.contracts.list.envelope.signed');
         } else if (c.envelope_status === 'voided') {
             cls = 'bg-gray-100 text-gray-500';
-            label = 'Anulado';
+            label = t('tenants.contracts.list.envelope.voided');
         }
 
         return (
@@ -524,7 +535,7 @@ export default function TenantContractsTab({ companyId, api }) {
     const handleCopyId = (id) => {
         if (!id || typeof navigator === 'undefined' || !navigator.clipboard) return;
         navigator.clipboard.writeText(String(id)).then(
-            () => toast.success('ID copiado'),
+            () => toast.success(t('tenants.common.idCopied')),
             () => {}
         );
     };
@@ -532,22 +543,22 @@ export default function TenantContractsTab({ companyId, api }) {
     if (!safeApi?.get) {
         return (
             <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
-                API no inicializada para este tab.
+                {t('tenants.contracts.list.apiNotInitialized')}
             </div>
         );
     }
 
     if (loading && !contracts.length && !err) {
-        return <div className="py-8 text-center text-slate-500">Cargando contratos…</div>;
+        return <div className="py-8 text-center text-slate-500">{t('tenants.contracts.list.loadingContracts')}</div>;
     }
 
     return (
         <div className="space-y-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h3 className="text-lg font-bold text-slate-900">Contratos</h3>
+                    <h3 className="text-lg font-bold text-slate-900">{t('tenants.contracts.list.title')}</h3>
                     <p className="text-xs text-slate-500">
-                        Listado de contratos asociados a este tenant.
+                        {t('tenants.contracts.list.subtitle')}
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -559,12 +570,12 @@ export default function TenantContractsTab({ companyId, api }) {
                         }}
                         className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700"
                     >
-                        <option value="">Todos los estados</option>
-                        <option value="draft">Borrador</option>
-                        <option value="active">Activo</option>
-                        <option value="pending">Pendiente</option>
-                        <option value="expired">Expirado</option>
-                        <option value="terminated">Terminado</option>
+                        <option value="">{t('tenants.contracts.list.allStatuses')}</option>
+                        <option value="draft">{t('tenants.contracts.list.status.draft')}</option>
+                        <option value="active">{t('tenants.common.active')}</option>
+                        <option value="pending">{t('tenants.common.pending')}</option>
+                        <option value="expired">{t('tenants.contracts.list.status.expired')}</option>
+                        <option value="terminated">{t('tenants.contracts.list.status.terminated')}</option>
                     </select>
 
                     <input
@@ -574,7 +585,7 @@ export default function TenantContractsTab({ companyId, api }) {
                             setSearch(e.target.value);
                             setPage(1);
                         }}
-                        placeholder="Buscar por título, ref…"
+                        placeholder={t('tenants.contracts.list.searchPlaceholder')}
                         className="w-40 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 placeholder:text-slate-400 focus:border-brand focus:ring-brand"
                     />
 
@@ -584,17 +595,17 @@ export default function TenantContractsTab({ companyId, api }) {
                         className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                     >
                         <i className="bi bi-arrow-repeat" />
-                        Refrescar
+                        {t('tenants.common.refresh')}
                     </button>
 
                     <button
                         type="button"
                         onClick={handleExportLegal}
                         className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                        title="Exportar datos legales"
+                        title={t('tenants.contracts.list.exportLegalTitle')}
                     >
                         <i className="bi bi-file-earmark-spreadsheet" />
-                        Exportar
+                        {t('tenants.contracts.list.export')}
                     </button>
 
                     <button
@@ -603,7 +614,7 @@ export default function TenantContractsTab({ companyId, api }) {
                         className="inline-flex items-center gap-1 rounded-xl bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand/90"
                     >
                         <i className="bi bi-plus-lg" />
-                        Nuevo Contrato
+                        {t('tenants.contracts.list.newContract')}
                     </button>
                 </div>
             </div>
@@ -616,7 +627,7 @@ export default function TenantContractsTab({ companyId, api }) {
 
             {!contracts.length && !loading && !err && (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
-                    No hay contratos registrados para este tenant.
+                    {t('tenants.contracts.list.empty')}
                 </div>
             )}
 
@@ -625,19 +636,27 @@ export default function TenantContractsTab({ companyId, api }) {
                     <table className="w-full text-sm">
                         <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
                             <tr>
-                                <th className="px-4 py-3 text-left">Título / Referencia</th>
-                                <th className="px-4 py-3 text-left">Estado</th>
-                                <th className="px-4 py-3 text-left">Tipo</th>
-                                <th className="px-4 py-3 text-left">Inicio</th>
-                                <th className="px-4 py-3 text-left">Fin</th>
-                                <th className="px-4 py-3 text-right">Acciones</th>
+                                <th className="px-4 py-3 text-left">{t('tenants.contracts.list.tableTitle')}</th>
+                                <th className="px-4 py-3 text-left">{t('tenants.common.status')}</th>
+                                <th className="px-4 py-3 text-left">{t('tenants.common.type')}</th>
+                                <th className="px-4 py-3 text-left">{t('tenants.contracts.list.tableStart')}</th>
+                                <th className="px-4 py-3 text-left">{t('tenants.contracts.list.tableEnd')}</th>
+                                <th className="px-4 py-3 text-right">{t('tenants.common.actions')}</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {contracts.map((c) => {
                                 const title = c.title || c.name || c.subject || c.id;
                                 const ref = c.reference || c.contract_number || '';
-                                const type = c.type || c.contract_type || '—';
+                                const rawType = c.type || c.contract_type || '';
+                                const typeLabels = {
+                                    fixed: t('tenants.contracts.list.types.fixed'),
+                                    hourly: t('tenants.contracts.list.types.hourly'),
+                                    milestone: t('tenants.contracts.list.types.milestone'),
+                                    retainer: t('tenants.contracts.list.types.retainer'),
+                                    project: t('tenants.contracts.list.types.project'),
+                                };
+                                const type = rawType ? (typeLabels[String(rawType).toLowerCase()] || rawType) : t('tenants.common.notAvailable');
                                 const start = c.start_date || c.starts_at || c.created_at;
                                 const end = c.end_date || c.ends_at || null;
 
@@ -646,14 +665,14 @@ export default function TenantContractsTab({ companyId, api }) {
                                         <td className="px-4 py-3">
                                             <div className="flex items-center gap-2">
                                                 <span className="font-semibold text-slate-900">
-                                                    {title || 'Sin título'}
+                                                    {title || t('tenants.contracts.list.untitled')}
                                                 </span>
                                                 {c.id && (
                                                     <button
                                                         type="button"
                                                         onClick={() => handleCopyId(c.id)}
                                                         className="text-slate-400 hover:text-brand"
-                                                        title="Copiar ID"
+                                                        title={t('tenants.common.copyId')}
                                                     >
                                                         <i className="bi bi-clipboard" />
                                                     </button>
@@ -661,7 +680,7 @@ export default function TenantContractsTab({ companyId, api }) {
                                             </div>
                                             {ref && (
                                                 <div className="text-xs text-slate-500 font-mono">
-                                                    Ref: {ref}
+                                                    {t('tenants.contracts.list.ref')}: {ref}
                                                 </div>
                                             )}
                                         </td>
@@ -677,7 +696,7 @@ export default function TenantContractsTab({ companyId, api }) {
                                             {formatDate(start)}
                                         </td>
                                         <td className="px-4 py-3 text-slate-700 whitespace-nowrap">
-                                            {end ? formatDate(end) : 'Indefinido'}
+                                            {end ? formatDate(end) : t('tenants.contracts.list.indefinite')}
                                         </td>
                                         <td className="px-4 py-3 text-right">
                                             <div className="flex items-center justify-end gap-2">
@@ -685,7 +704,7 @@ export default function TenantContractsTab({ companyId, api }) {
                                                     type="button"
                                                     onClick={() => handleEdit(c)}
                                                     className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-brand"
-                                                    title="Editar"
+                                                    title={t('tenants.common.edit')}
                                                 >
                                                     <i className="bi bi-pencil" />
                                                 </button>
@@ -693,7 +712,7 @@ export default function TenantContractsTab({ companyId, api }) {
                                                     type="button"
                                                     onClick={() => handleOpenLegal(c)}
                                                     className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600"
-                                                    title="Revisión Legal"
+                                                    title={t('tenants.contracts.list.legalReview')}
                                                 >
                                                     <i className="bi bi-shield-check" />
                                                 </button>
@@ -703,7 +722,7 @@ export default function TenantContractsTab({ companyId, api }) {
                                                             type="button"
                                                             onClick={() => handleViewAmendments(c)}
                                                             className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-purple-50 hover:text-purple-600"
-                                                            title="Historial de Enmiendas"
+                                                            title={t('tenants.contracts.list.amendmentsHistory')}
                                                         >
                                                             <i className="bi bi-clock-history" />
                                                         </button>
@@ -711,7 +730,7 @@ export default function TenantContractsTab({ companyId, api }) {
                                                             type="button"
                                                             onClick={() => handleAmend(c)}
                                                             className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
-                                                            title="Crear Enmienda"
+                                                            title={t('tenants.contracts.list.createAmendment')}
                                                         >
                                                             <i className="bi bi-file-earmark-diff" />
                                                         </button>
@@ -722,7 +741,7 @@ export default function TenantContractsTab({ companyId, api }) {
                                                         type="button"
                                                         onClick={() => handleTerminate(c)}
                                                         className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
-                                                        title="Terminar Contrato"
+                                                        title={t('tenants.contracts.list.terminateContract')}
                                                     >
                                                         <i className="bi bi-x-lg" />
                                                     </button>
@@ -744,10 +763,10 @@ export default function TenantContractsTab({ companyId, api }) {
                                 className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                             >
                                 <i className="bi bi-chevron-left" />
-                                Anterior
+                                {t('tenants.common.previous')}
                             </button>
                             <span>
-                                Página {page} de {totalPages}
+                                {t('tenants.common.pageOf', { page, total: totalPages })}
                             </span>
                             <button
                                 type="button"
@@ -755,7 +774,7 @@ export default function TenantContractsTab({ companyId, api }) {
                                 onClick={() => setPage((p) => p + 1)}
                                 className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                             >
-                                Siguiente
+                                {t('tenants.common.next')}
                                 <i className="bi bi-chevron-right" />
                             </button>
                         </div>
@@ -764,34 +783,34 @@ export default function TenantContractsTab({ companyId, api }) {
             )}
 
             {/* Create Modal */}
-            <Modal open={createModalOpen} onClose={() => setCreateModalOpen(false)} title="Nuevo Contrato">
+            <Modal open={createModalOpen} onClose={() => setCreateModalOpen(false)} title={t('tenants.contracts.list.newContract')}>
                 <form onSubmit={handleCreate} className="space-y-4">
                     <div>
-                        <label className="mb-1 block text-sm font-medium text-slate-700">Título del Contrato</label>
+                        <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.contractTitle')}</label>
                         <input
                             required
                             name="title"
                             type="text"
-                            placeholder="Ej. Desarrollo Web Frontend"
+                            placeholder={t('tenants.contracts.list.contractTitlePlaceholder')}
                             className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand focus:ring-brand"
                         />
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">Tipo</label>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.common.type')}</label>
                             <select
                                 name="type"
                                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-brand focus:ring-brand"
                             >
-                                <option value="fixed">Fixed Rate</option>
-                                <option value="hourly">Hourly</option>
-                                <option value="milestone">Milestone</option>
-                                <option value="retainer">Retainer</option>
+                                <option value="fixed">{t('tenants.contracts.list.types.fixed')}</option>
+                                <option value="hourly">{t('tenants.contracts.list.types.hourly')}</option>
+                                <option value="milestone">{t('tenants.contracts.list.types.milestone')}</option>
+                                <option value="retainer">{t('tenants.contracts.list.types.retainer')}</option>
                             </select>
                         </div>
                         <div className="relative">
-                            <label className="mb-1 block text-sm font-medium text-slate-700">Freelancer</label>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.freelancer')}</label>
                             {selectedFreelancer ? (
                                 <div className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
                                     <div className="flex items-center gap-2 overflow-hidden">
@@ -824,7 +843,7 @@ export default function TenantContractsTab({ companyId, api }) {
                                                 setShowFreelancerResults(true);
                                             }}
                                             onFocus={() => setShowFreelancerResults(true)}
-                                            placeholder="Buscar freelancer por nombre..."
+                                            placeholder={t('tenants.contracts.list.searchFreelancer')}
                                             className="w-full rounded-xl border border-slate-300 pl-9 pr-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand focus:ring-brand"
                                             autoComplete="off"
                                         />
@@ -849,7 +868,7 @@ export default function TenantContractsTab({ companyId, api }) {
                                                     </div>
                                                     <div>
                                                         <div className="text-sm font-medium text-slate-900">{f.full_name}</div>
-                                                        <div className="text-xs text-slate-500">{f.email} • {f.area || 'General'}</div>
+                                                        <div className="text-xs text-slate-500">{f.email} • {f.area || t('tenants.contracts.list.generalArea')}</div>
                                                     </div>
                                                 </button>
                                             ))}
@@ -862,7 +881,7 @@ export default function TenantContractsTab({ companyId, api }) {
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">Fecha Inicio</label>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.startDate')}</label>
                             <input
                                 required
                                 name="start_date"
@@ -871,7 +890,7 @@ export default function TenantContractsTab({ companyId, api }) {
                             />
                         </div>
                         <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">Fecha Fin (Opcional)</label>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.endDateOptional')}</label>
                             <input
                                 name="end_date"
                                 type="date"
@@ -882,14 +901,14 @@ export default function TenantContractsTab({ companyId, api }) {
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">Moneda</label>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.common.currency')}</label>
                             <select
                                 name="currency_id"
                                 required
                                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-brand focus:ring-brand"
                                 defaultValue=""
                             >
-                                <option value="" disabled>Selecciona una moneda</option>
+                                <option value="" disabled>{t('tenants.contracts.list.selectCurrency')}</option>
                                 {currencies.map(c => (
                                     <option key={c.id} value={String(c.id)}>
                                         {c.code} — {c.name}{c.symbol ? ` (${c.symbol})` : ''}
@@ -898,7 +917,7 @@ export default function TenantContractsTab({ companyId, api }) {
                             </select>
                         </div>
                         <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">Tarifa / Monto</label>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.rateAmount')}</label>
                             <input
                                 name="rate"
                                 type="number"
@@ -915,24 +934,24 @@ export default function TenantContractsTab({ companyId, api }) {
                             onClick={() => setCreateModalOpen(false)}
                             className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                         >
-                            Cancelar
+                            {t('tenants.common.cancel')}
                         </button>
                         <button
                             type="submit"
                             disabled={creating}
                             className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand/90 disabled:opacity-50"
                         >
-                            {creating ? 'Creando...' : 'Crear Contrato'}
+                            {creating ? t('tenants.contracts.list.creating') : t('tenants.contracts.list.createContract')}
                         </button>
                     </div>
                 </form>
             </Modal>
 
             {/* Edit Modal */}
-            <Modal open={editModalOpen} onClose={() => setEditModalOpen(false)} title="Editar Contrato">
+            <Modal open={editModalOpen} onClose={() => setEditModalOpen(false)} title={t('tenants.contracts.list.editContract')}>
                 <form onSubmit={handleEditSubmit} className="space-y-4">
                     <div>
-                        <label className="mb-1 block text-sm font-medium text-slate-700">Título del Contrato</label>
+                        <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.contractTitle')}</label>
                         <input
                             required
                             name="title"
@@ -944,7 +963,7 @@ export default function TenantContractsTab({ companyId, api }) {
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">Tarifa</label>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.rate')}</label>
                             <input
                                 name="rate"
                                 type="number"
@@ -954,24 +973,24 @@ export default function TenantContractsTab({ companyId, api }) {
                             />
                         </div>
                         <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">Estado</label>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.common.status')}</label>
                             <select
                                 name="status"
                                 defaultValue={editingContract?.status}
                                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-brand focus:ring-brand"
                             >
-                                <option value="draft">Borrador</option>
-                                <option value="active">Activo</option>
-                                <option value="pending">Pendiente</option>
-                                <option value="expired">Expirado</option>
-                                <option value="terminated">Terminado</option>
+                                <option value="draft">{t('tenants.contracts.list.status.draft')}</option>
+                                <option value="active">{t('tenants.common.active')}</option>
+                                <option value="pending">{t('tenants.common.pending')}</option>
+                                <option value="expired">{t('tenants.contracts.list.status.expired')}</option>
+                                <option value="terminated">{t('tenants.contracts.list.status.terminated')}</option>
                             </select>
                         </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">Fecha Inicio</label>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.startDate')}</label>
                             <input
                                 name="start_date"
                                 type="date"
@@ -980,7 +999,7 @@ export default function TenantContractsTab({ companyId, api }) {
                             />
                         </div>
                         <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">Fecha Fin</label>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.endDate')}</label>
                             <input
                                 name="end_date"
                                 type="date"
@@ -991,7 +1010,7 @@ export default function TenantContractsTab({ companyId, api }) {
                     </div>
 
                     <div>
-                        <label className="mb-1 block text-sm font-medium text-slate-700">Alcance del Trabajo (Scope)</label>
+                        <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.scopeOfWork')}</label>
                         <textarea
                             name="scope_of_work"
                             rows={3}
@@ -1001,7 +1020,7 @@ export default function TenantContractsTab({ companyId, api }) {
                     </div>
 
                     <div>
-                        <label className="mb-1 block text-sm font-medium text-slate-700">Cláusula Especial</label>
+                        <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.specialClause')}</label>
                         <textarea
                             name="special_clause"
                             rows={2}
@@ -1011,7 +1030,7 @@ export default function TenantContractsTab({ companyId, api }) {
                     </div>
                     
                     <div>
-                         <label className="mb-1 block text-sm font-medium text-slate-700">Periodo de Aviso (Días)</label>
+                         <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.noticePeriod')}</label>
                          <input
                             name="notice_period"
                             type="number"
@@ -1026,63 +1045,63 @@ export default function TenantContractsTab({ companyId, api }) {
                             onClick={() => setEditModalOpen(false)}
                             className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                         >
-                            Cancelar
+                            {t('tenants.common.cancel')}
                         </button>
                         <button
                             type="submit"
                             disabled={editing}
                             className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand/90 disabled:opacity-50"
                         >
-                            {editing ? 'Guardando...' : 'Guardar Cambios'}
+                            {editing ? t('tenants.common.saving') : t('tenants.contracts.list.saveChanges')}
                         </button>
                     </div>
                 </form>
             </Modal>
 
             {/* Amendment Modal */}
-            <Modal open={amendModalOpen} onClose={() => setAmendModalOpen(false)} title="Crear Enmienda / Anexo">
+            <Modal open={amendModalOpen} onClose={() => setAmendModalOpen(false)} title={t('tenants.contracts.list.amendmentModalTitle')}>
                 <form onSubmit={handleAmendSubmit} className="space-y-4">
                     <div className="rounded-lg bg-blue-50 p-4 text-sm text-blue-800">
-                        <p className="font-semibold">Modo Enmienda</p>
-                        <p>Los cambios realizados aquí se registrarán como una enmienda legal o anexo al contrato actual.</p>
+                        <p className="font-semibold">{t('tenants.contracts.list.amendmentMode')}</p>
+                        <p>{t('tenants.contracts.list.amendmentModeDescription')}</p>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
                         <div className="col-span-2">
-                            <label className="mb-1 block text-sm font-medium text-slate-700">Título del Anexo / Enmienda</label>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.amendmentTitle')}</label>
                             <input
                                 name="amendment_title"
                                 type="text"
-                                defaultValue={`Enmienda ${new Date().toLocaleDateString()}`}
+                                defaultValue={t('tenants.contracts.list.amendmentDefaultTitle', { date: new Date().toLocaleDateString(locale) })}
                                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand focus:ring-brand"
                                 required
                             />
                         </div>
                         <div className="col-span-2">
-                            <label className="mb-1 block text-sm font-medium text-slate-700">Descripción / Notas Adicionales</label>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.amendmentDescription')}</label>
                             <textarea
                                 name="amendment_description"
                                 rows={2}
-                                placeholder="Describe el propósito de este anexo..."
+                                placeholder={t('tenants.contracts.list.amendmentDescriptionPlaceholder')}
                                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand focus:ring-brand"
                             />
                         </div>
                          <div className="col-span-2">
-                            <label className="mb-1 block text-sm font-medium text-slate-700">URL del Documento (Opcional)</label>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.documentUrlOptional')}</label>
                             <input
                                 name="document_url"
                                 type="text"
                                 placeholder="https://..."
                                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand focus:ring-brand"
                             />
-                            <p className="text-xs text-slate-500 mt-1">Si ya tienes un documento firmado o generado, pega el enlace aquí.</p>
+                            <p className="text-xs text-slate-500 mt-1">{t('tenants.contracts.list.documentUrlHelp')}</p>
                         </div>
                     </div>
 
                     <div className="border-t border-slate-200 pt-4 mt-4">
-                        <h5 className="text-sm font-semibold text-slate-800 mb-3">Modificar Campos del Contrato (Opcional)</h5>
+                        <h5 className="text-sm font-semibold text-slate-800 mb-3">{t('tenants.contracts.list.modifyContractFields')}</h5>
                         <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">Título del Contrato</label>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.contractTitle')}</label>
                         <input
                             required
                             name="title"
@@ -1094,7 +1113,7 @@ export default function TenantContractsTab({ companyId, api }) {
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">Nueva Tarifa</label>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.newRate')}</label>
                             <input
                                 name="rate"
                                 type="number"
@@ -1107,7 +1126,7 @@ export default function TenantContractsTab({ companyId, api }) {
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">Nueva Fecha Inicio</label>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.newStartDate')}</label>
                             <input
                                 name="start_date"
                                 type="date"
@@ -1116,7 +1135,7 @@ export default function TenantContractsTab({ companyId, api }) {
                             />
                         </div>
                         <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">Nueva Fecha Fin</label>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.newEndDate')}</label>
                             <input
                                 name="end_date"
                                 type="date"
@@ -1127,7 +1146,7 @@ export default function TenantContractsTab({ companyId, api }) {
                     </div>
 
                     <div>
-                        <label className="mb-1 block text-sm font-medium text-slate-700">Alcance del Trabajo (Scope)</label>
+                        <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.scopeOfWork')}</label>
                         <textarea
                             name="scope_of_work"
                             rows={3}
@@ -1137,7 +1156,7 @@ export default function TenantContractsTab({ companyId, api }) {
                     </div>
 
                     <div>
-                        <label className="mb-1 block text-sm font-medium text-slate-700">Cláusula Especial</label>
+                        <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.specialClause')}</label>
                         <textarea
                             name="special_clause"
                             rows={2}
@@ -1153,24 +1172,24 @@ export default function TenantContractsTab({ companyId, api }) {
                             onClick={() => setAmendModalOpen(false)}
                             className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                         >
-                            Cancelar
+                            {t('tenants.common.cancel')}
                         </button>
                         <button
                             type="submit"
                             disabled={amending}
                             className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
                         >
-                            {amending ? 'Guardando...' : 'Crear Enmienda'}
+                            {amending ? t('tenants.common.saving') : t('tenants.contracts.list.createAmendment')}
                         </button>
                     </div>
                 </form>
             </Modal>
 
             {/* View Amendments Modal */}
-            <Modal open={viewAmendmentsModalOpen} onClose={() => setViewAmendmentsModalOpen(false)} title="Historial de Enmiendas">
+            <Modal open={viewAmendmentsModalOpen} onClose={() => setViewAmendmentsModalOpen(false)} title={t('tenants.contracts.list.amendmentsHistory')}>
                 <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                        <h4 className="text-sm font-medium text-slate-700">Enmiendas para: {selectedContractForAmendments?.title}</h4>
+                        <h4 className="text-sm font-medium text-slate-700">{t('tenants.contracts.list.amendmentsFor', { title: selectedContractForAmendments?.title })}</h4>
                         <button
                             onClick={() => {
                                 setViewAmendmentsModalOpen(false);
@@ -1178,15 +1197,15 @@ export default function TenantContractsTab({ companyId, api }) {
                             }}
                             className="text-xs font-semibold text-brand hover:text-brand/80"
                         >
-                            + Nueva Enmienda
+                            {t('tenants.contracts.list.newAmendment')}
                         </button>
                     </div>
 
                     {loadingAmendments ? (
-                        <div className="py-8 text-center text-sm text-slate-500">Cargando historial...</div>
+                        <div className="py-8 text-center text-sm text-slate-500">{t('tenants.contracts.list.loadingHistory')}</div>
                     ) : currentAmendments.length === 0 ? (
                         <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">
-                            No hay enmiendas registradas para este contrato.
+                            {t('tenants.contracts.list.noAmendments')}
                         </div>
                     ) : (
                         <div className="space-y-3">
@@ -1199,8 +1218,8 @@ export default function TenantContractsTab({ companyId, api }) {
                                                 amendment.status === 'sent' ? 'bg-blue-100 text-blue-800' :
                                                 'bg-slate-100 text-slate-800'
                                             }`}>
-                                                {amendment.status === 'signed' ? 'Firmada' :
-                                                 amendment.status === 'sent' ? 'Enviada' : 'Borrador'}
+                                                {amendment.status === 'signed' ? t('tenants.contracts.list.amendmentStatus.signed') :
+                                                 amendment.status === 'sent' ? t('tenants.contracts.list.amendmentStatus.sent') : t('tenants.contracts.list.amendmentStatus.draft')}
                                             </span>
                                             <span className="text-xs text-slate-500">
                                                 {formatDate(amendment.created_at)}
@@ -1211,31 +1230,31 @@ export default function TenantContractsTab({ companyId, api }) {
                                                 onClick={() => handleSignAmendment(amendment)}
                                                 className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700"
                                             >
-                                                Enviar a Firma
+                                                {t('tenants.contracts.list.sendToSignature')}
                                             </button>
                                         )}
                                     </div>
                                     
                                     <div className="mb-2">
-                                        <h5 className="font-semibold text-slate-900 text-sm">{amendment.title || 'Sin Título'}</h5>
+                                        <h5 className="font-semibold text-slate-900 text-sm">{amendment.title || t('tenants.contracts.list.untitled')}</h5>
                                         {amendment.description && (
                                             <p className="text-xs text-slate-600 mt-1">{amendment.description}</p>
                                         )}
                                         {amendment.document_url && (
                                             <a href={amendment.document_url} target="_blank" rel="noopener noreferrer" className="text-xs text-brand hover:underline mt-1 inline-block">
-                                                <i className="bi bi-paperclip mr-1"></i>Ver Documento
+                                                <i className="bi bi-paperclip mr-1"></i>{t('tenants.contracts.list.viewDocument')}
                                             </a>
                                         )}
                                     </div>
 
                                     <div className="text-xs text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-100">
-                                        <p className="font-semibold mb-1">Cambios:</p>
+                                        <p className="font-semibold mb-1">{t('tenants.contracts.list.changes')}</p>
                                         <ul className="list-disc list-inside space-y-0.5">
                                             {(() => {
                                                 try {
                                                     const changes = JSON.parse(amendment.changes_json);
                                                     if (!changes || Object.keys(changes).length === 0) {
-                                                        return <li className="text-slate-400 italic">Solo documento/descripción</li>;
+                                                        return <li className="text-slate-400 italic">{t('tenants.contracts.list.onlyDocument')}</li>;
                                                     }
                                                     return Object.entries(changes).map(([field, vals]) => (
                                                         <li key={field}>
@@ -1243,7 +1262,7 @@ export default function TenantContractsTab({ companyId, api }) {
                                                         </li>
                                                     ));
                                                 } catch (e) {
-                                                    return <li>Error al leer cambios</li>;
+                                                    return <li>{t('tenants.contracts.list.changesReadError')}</li>;
                                                 }
                                             })()}
                                         </ul>
@@ -1259,22 +1278,22 @@ export default function TenantContractsTab({ companyId, api }) {
                             onClick={() => setViewAmendmentsModalOpen(false)}
                             className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                         >
-                            Cerrar
+                            {t('tenants.common.close')}
                         </button>
                     </div>
                 </div>
             </Modal>
 
             {/* Terminate Modal */}
-            <Modal open={terminateModalOpen} onClose={() => setTerminateModalOpen(false)} title="Terminar Contrato">
+            <Modal open={terminateModalOpen} onClose={() => setTerminateModalOpen(false)} title={t('tenants.contracts.list.terminateContract')}>
                 <form onSubmit={handleTerminateSubmit} className="space-y-4">
                     <div className="rounded-lg bg-red-50 p-4 text-sm text-red-800">
-                        <p className="font-semibold">¡Atención!</p>
-                        <p>Esta acción finalizará el contrato permanentemente. Asegúrese de haber liquidado todos los pagos pendientes.</p>
+                        <p className="font-semibold">{t('tenants.contracts.list.warning')}</p>
+                        <p>{t('tenants.contracts.list.terminateWarning')}</p>
                     </div>
 
                     <div>
-                        <label className="mb-1 block text-sm font-medium text-slate-700">Fecha de Terminación</label>
+                        <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.terminationDate')}</label>
                         <input
                             required
                             name="end_date"
@@ -1284,12 +1303,12 @@ export default function TenantContractsTab({ companyId, api }) {
                     </div>
 
                     <div>
-                        <label className="mb-1 block text-sm font-medium text-slate-700">Motivo de Terminación</label>
+                        <label className="mb-1 block text-sm font-medium text-slate-700">{t('tenants.contracts.list.terminationReason')}</label>
                         <textarea
                             required
                             name="reason"
                             rows={3}
-                            placeholder="Explique el motivo de la terminación..."
+                            placeholder={t('tenants.contracts.list.terminationReasonPlaceholder')}
                             className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand focus:ring-brand"
                         />
                     </div>
@@ -1300,34 +1319,34 @@ export default function TenantContractsTab({ companyId, api }) {
                             onClick={() => setTerminateModalOpen(false)}
                             className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                         >
-                            Cancelar
+                            {t('tenants.common.cancel')}
                         </button>
                         <button
                             type="submit"
                             disabled={terminating}
                             className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
                         >
-                            {terminating ? 'Terminando...' : 'Terminar Contrato'}
+                            {terminating ? t('tenants.contracts.list.terminating') : t('tenants.contracts.list.terminateContract')}
                         </button>
                     </div>
                 </form>
             </Modal>
 
             {/* Legal Review Modal */}
-            <Modal open={legalModalOpen} onClose={() => setLegalModalOpen(false)} title="Gestión Legal y Compliance">
+            <Modal open={legalModalOpen} onClose={() => setLegalModalOpen(false)} title={t('tenants.contracts.list.legalModalTitle')}>
                 <div className="space-y-6">
                     {/* 1. Asignación de Revisor */}
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                        <h4 className="mb-3 text-sm font-semibold text-slate-800">1. Asignación de Revisor Legal</h4>
+                        <h4 className="mb-3 text-sm font-semibold text-slate-800">{t('tenants.contracts.list.assignReviewerTitle')}</h4>
                         <form onSubmit={handleAssignLegal} className="flex gap-2 items-end">
                             <div className="flex-1">
-                                <label className="mb-1 block text-xs font-medium text-slate-500">Revisor Responsable</label>
+                                <label className="mb-1 block text-xs font-medium text-slate-500">{t('tenants.contracts.list.responsibleReviewer')}</label>
                                 <select
                                     name="legal_reviewer_id"
                                     defaultValue={legalContract?.legal_reviewer_id || ''}
                                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-brand focus:ring-brand"
                                 >
-                                    <option value="">-- Sin Asignar --</option>
+                                    <option value="">{t('tenants.contracts.list.unassigned')}</option>
                                     {members.map(m => (
                                         <option key={m.id} value={m.user_id || m.id}>
                                             {m.full_name || m.user?.full_name || m.email}
@@ -1339,21 +1358,21 @@ export default function TenantContractsTab({ companyId, api }) {
                                 type="submit"
                                 className="rounded-lg bg-white border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                             >
-                                Asignar
+                                {t('tenants.contracts.list.assign')}
                             </button>
                         </form>
                     </div>
 
                     {/* 2. Acción de Revisión */}
                     <div className="rounded-xl border border-slate-200 p-4">
-                         <h4 className="mb-3 text-sm font-semibold text-slate-800">2. Dictamen Legal</h4>
+                         <h4 className="mb-3 text-sm font-semibold text-slate-800">{t('tenants.contracts.list.legalOpinionTitle')}</h4>
                          <div className="space-y-3">
                              <div>
-                                <label className="mb-1 block text-xs font-medium text-slate-500">Observación / Comentario</label>
+                                <label className="mb-1 block text-xs font-medium text-slate-500">{t('tenants.contracts.list.observationLabel')}</label>
                                 <textarea
                                     id="legal_observation"
                                     rows={3}
-                                    placeholder="Ingrese observaciones detalladas..."
+                                    placeholder={t('tenants.contracts.list.observationPlaceholder')}
                                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand focus:ring-brand"
                                 />
                              </div>
@@ -1362,19 +1381,19 @@ export default function TenantContractsTab({ companyId, api }) {
                                     onClick={() => handleLegalAction('approved', document.getElementById('legal_observation').value)}
                                     className="flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
                                 >
-                                    <i className="bi bi-check-circle mr-2"></i>Aprobar
+                                    <i className="bi bi-check-circle mr-2"></i>{t('tenants.contracts.list.approve')}
                                 </button>
                                 <button
                                     onClick={() => handleLegalAction('changes_requested', document.getElementById('legal_observation').value)}
                                     className="flex-1 rounded-lg bg-orange-500 px-3 py-2 text-sm font-medium text-white hover:bg-orange-600"
                                 >
-                                    <i className="bi bi-pencil-square mr-2"></i>Solicitar Cambios
+                                    <i className="bi bi-pencil-square mr-2"></i>{t('tenants.contracts.list.requestChanges')}
                                 </button>
                                 <button
                                     onClick={() => handleLegalAction('rejected', document.getElementById('legal_observation').value)}
                                     className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
                                 >
-                                    <i className="bi bi-x-circle mr-2"></i>Rechazar
+                                    <i className="bi bi-x-circle mr-2"></i>{t('tenants.contracts.list.reject')}
                                 </button>
                              </div>
                          </div>
@@ -1382,17 +1401,17 @@ export default function TenantContractsTab({ companyId, api }) {
 
                     {/* 3. Historial de Observaciones */}
                     <div>
-                        <h4 className="mb-3 text-sm font-semibold text-slate-800">Historial de Observaciones</h4>
+                        <h4 className="mb-3 text-sm font-semibold text-slate-800">{t('tenants.contracts.list.observationsHistory')}</h4>
                         {loadingLegal ? (
-                            <div className="text-center py-4 text-slate-500 text-xs">Cargando...</div>
+                            <div className="text-center py-4 text-slate-500 text-xs">{t('tenants.common.loading')}</div>
                         ) : observations.length === 0 ? (
-                            <div className="text-center py-4 text-slate-400 text-xs italic bg-slate-50 rounded-lg">No hay observaciones registradas.</div>
+                            <div className="text-center py-4 text-slate-400 text-xs italic bg-slate-50 rounded-lg">{t('tenants.contracts.list.noObservations')}</div>
                         ) : (
                             <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
                                 {observations.map(obs => (
                                     <div key={obs.id} className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
                                         <div className="flex justify-between items-start mb-1">
-                                            <span className="text-xs font-bold text-slate-700">{obs.user_name || 'Usuario'}</span>
+                                            <span className="text-xs font-bold text-slate-700">{obs.user_name || t('tenants.contracts.list.user')}</span>
                                             <span className="text-[10px] text-slate-400">{formatDate(obs.created_at)}</span>
                                         </div>
                                         <div className="mb-2">
@@ -1411,7 +1430,7 @@ export default function TenantContractsTab({ companyId, api }) {
                             onClick={() => setLegalModalOpen(false)}
                             className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                         >
-                            Cerrar
+                            {t('tenants.common.close')}
                         </button>
                     </div>
                 </div>

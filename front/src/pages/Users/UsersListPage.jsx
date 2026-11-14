@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { createApi } from '../../lib/api';
+import { createApi, downloadFile } from '../../lib/api';
 import { normalizePageResponse } from '../../lib/pagination';
 import { useToast } from '../../components/ToastProvider';
 import ConfirmModal from '../../components/ConfirmModal';
+import Modal from '../../components/Modal';
 import { PLATFORM_ROLES, ROLE_LABELS } from '../../lib/platformRoles';
 
 export default function UsersListPage({ apiUrl, token, defaultRole, roleScope }) {
@@ -34,6 +35,33 @@ export default function UsersListPage({ apiUrl, token, defaultRole, roleScope })
   // Acciones rápidas
   const [actionLoading, setActionLoading] = useState(null); // ID del usuario siendo procesado
   const [confirmAction, setConfirmAction] = useState(null); // { type: 'block' | 'reset', user: ... }
+
+  // Detalle en modal
+  const [detailUser, setDetailUser] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailErr, setDetailErr] = useState('');
+
+  async function openDetail(user) {
+    setDetailUser(user);
+    setDetail(null);
+    setDetailErr('');
+    setDetailLoading(true);
+    try {
+      const res = await api.get(`/api/users/${user.id}`);
+      setDetail(res || null);
+    } catch (e) {
+      setDetailErr(e.message || 'Error cargando el detalle');
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  function closeDetail() {
+    setDetailUser(null);
+    setDetail(null);
+    setDetailErr('');
+  }
 
   useEffect(() => {
     if (defaultRole) {
@@ -94,15 +122,8 @@ export default function UsersListPage({ apiUrl, token, defaultRole, roleScope })
     if (defaultRole) params.set('platform_role', defaultRole);
     if (roleScope) params.set('role_scope', roleScope);
     
-    const url = `${apiUrl}/api/users/export?${params.toString()}`;
-    window.open(url, '_blank');
-  }
-
-  function handleExportCompanyAdmins() {
-    const params = new URLSearchParams();
-    if (search.trim()) params.set('q', search.trim());
-    const url = `${apiUrl}/api/users/company-admins/export?${params.toString()}`;
-    window.open(url, '_blank');
+    downloadFile(apiUrl, `/api/users/export?${params.toString()}`, 'usuarios.csv')
+      .catch((e) => toast.error(e.message || 'Error al exportar'));
   }
 
   async function toggleBlock() {
@@ -221,20 +242,24 @@ export default function UsersListPage({ apiUrl, token, defaultRole, roleScope })
     PLATFORM_ROLES.COMPANY_ADMIN
   ];
 
+  const detailInfo = detail?.user || detailUser || {};
+  const detailMemberships = detail?.memberships || [];
+  const detailSessions = detail?.active_sessions || [];
+  const detailIdentities = detail?.identities || [];
+  const detailAuthMethods = [
+    ...(detailInfo.has_password ? ['Password'] : []),
+    ...detailIdentities.map((i) => i.provider).filter(Boolean),
+  ];
+  const detailStatus = detailInfo.status || '—';
+  const detailRoleLabel = ROLE_LABELS[detailInfo.platform_role] || detailInfo.platform_role || '—';
+  const detailCreated = detailInfo.created_at ? new Date(detailInfo.created_at).toLocaleString() : '—';
+  const detailLastLogin = detailInfo.last_login_at ? new Date(detailInfo.last_login_at).toLocaleString() : '—';
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold text-slate-900">{getPageTitle()}</h1>
         <div className="flex items-center gap-3">
-          {roleScope === 'internal' && (
-            <button
-              onClick={handleExportCompanyAdmins}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all"
-            >
-              <i className="bi bi-people" />
-              Exportar Company Admins
-            </button>
-          )}
           <button
             onClick={handleExport}
             className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all"
@@ -256,8 +281,9 @@ export default function UsersListPage({ apiUrl, token, defaultRole, roleScope })
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div className="flex flex-1 gap-3 flex-wrap">
             <div className="flex-1 min-w-[200px]">
-              <label className="text-xs font-semibold text-slate-600">Buscar</label>
+              <label htmlFor="users-search" className="text-xs font-semibold text-slate-600">Buscar</label>
               <input
+                id="users-search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Nombre o email"
@@ -265,8 +291,9 @@ export default function UsersListPage({ apiUrl, token, defaultRole, roleScope })
               />
             </div>
             <div className="w-40">
-              <label className="text-xs font-semibold text-slate-600">Estado</label>
+              <label htmlFor="users-status" className="text-xs font-semibold text-slate-600">Estado</label>
               <select
+                id="users-status"
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
                 className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand"
@@ -275,11 +302,13 @@ export default function UsersListPage({ apiUrl, token, defaultRole, roleScope })
                 <option value="active">Activo</option>
                 <option value="locked">Bloqueado</option>
                 <option value="suspended">Suspendido</option>
+                <option value="disabled">Deshabilitado</option>
               </select>
             </div>
             <div className="w-40">
-              <label className="text-xs font-semibold text-slate-600">Tipo Auth</label>
+              <label htmlFor="users-auth" className="text-xs font-semibold text-slate-600">Tipo Auth</label>
               <select
+                id="users-auth"
                 value={type}
                 onChange={(e) => setType(e.target.value)}
                 className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand"
@@ -323,7 +352,7 @@ export default function UsersListPage({ apiUrl, token, defaultRole, roleScope })
               {rows.map((r) => (
                 <tr key={r.id} className="hover:bg-slate-50/60">
                   <td className="py-3 px-2">
-                    <div className="font-semibold text-slate-900">{r.name}</div>
+                    <div className="font-semibold text-slate-900">{r.full_name || r.name || '—'}</div>
                     <div className="text-xs text-slate-500">{r.email}</div>
                   </td>
                   <td className="py-3 px-2">
@@ -336,7 +365,7 @@ export default function UsersListPage({ apiUrl, token, defaultRole, roleScope })
                           : 'bg-amber-50 text-amber-800 border-amber-200'
                       }`}
                     >
-                      {r.status}
+                      {({ active: 'Activo', locked: 'Bloqueado', suspended: 'Suspendido', disabled: 'Deshabilitado' }[r.status] || r.status)}
                     </span>
                   </td>
                   <td className="py-3 px-2">
@@ -346,10 +375,10 @@ export default function UsersListPage({ apiUrl, token, defaultRole, roleScope })
                   </td>
                   <td className="py-3 px-2">
                     <span className="inline-flex items-center gap-1.5 rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
-                      {r.auth_method === 'google' && <i className="bi bi-google" />}
-                      {r.auth_method === 'microsoft' && <i className="bi bi-microsoft" />}
-                      {r.auth_method === 'password' && <i className="bi bi-key" />}
-                      {r.auth_method || '—'}
+                      <i className="bi bi-key" />
+                      {Array.isArray(r.auth_methods) && r.auth_methods.length
+                        ? r.auth_methods.join(', ')
+                        : (r.auth_method || '—')}
                     </span>
                   </td>
                   {roleScope !== 'internal' && (
@@ -359,13 +388,14 @@ export default function UsersListPage({ apiUrl, token, defaultRole, roleScope })
                   )}
                   <td className="py-3 px-2 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <Link
-                        to={`/dashboard/${roleScope === 'internal' ? 'admins' : defaultRole === 'user' ? 'company-users' : 'users'}/${r.id}`}
+                      <button
+                        onClick={() => openDetail(r)}
                         className="p-2 text-slate-500 hover:text-brand hover:bg-brand/10 rounded-lg transition"
                         title="Ver detalle"
+                        type="button"
                       >
                         <i className="bi bi-eye" />
-                      </Link>
+                      </button>
                       
                       <button
                         onClick={() => setConfirmAction({ type: 'block', user: r })}
@@ -463,9 +493,10 @@ export default function UsersListPage({ apiUrl, token, defaultRole, roleScope })
             
             <form onSubmit={createUser} className="p-6 space-y-4">
               <div>
-                <label className="text-sm font-semibold text-slate-700">Nombre Completo</label>
+                <label htmlFor="nu-name" className="text-sm font-semibold text-slate-700">Nombre Completo</label>
                 <input
                   required
+                  id="nu-name"
                   value={createForm.full_name}
                   onChange={e => setCreateForm(p => ({ ...p, full_name: e.target.value }))}
                   className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand transition-all"
@@ -474,10 +505,11 @@ export default function UsersListPage({ apiUrl, token, defaultRole, roleScope })
               </div>
               
               <div>
-                <label className="text-sm font-semibold text-slate-700">Correo Electrónico</label>
+                <label htmlFor="nu-email" className="text-sm font-semibold text-slate-700">Correo Electrónico</label>
                 <input
                   required
                   type="email"
+                  id="nu-email"
                   value={createForm.email}
                   onChange={e => setCreateForm(p => ({ ...p, email: e.target.value }))}
                   className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand transition-all"
@@ -486,10 +518,11 @@ export default function UsersListPage({ apiUrl, token, defaultRole, roleScope })
               </div>
               
               <div>
-                <label className="text-sm font-semibold text-slate-700">Contraseña Temporal</label>
+                <label htmlFor="nu-password" className="text-sm font-semibold text-slate-700">Contraseña Temporal</label>
                 <input
                   required
                   type="password"
+                  id="nu-password"
                   value={createForm.password}
                   onChange={e => setCreateForm(p => ({ ...p, password: e.target.value }))}
                   className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand transition-all"
@@ -502,8 +535,9 @@ export default function UsersListPage({ apiUrl, token, defaultRole, roleScope })
               {/* Show Role Selector if !defaultRole OR roleScope === 'internal' */}
               {(!defaultRole || roleScope === 'internal') && (
                 <div>
-                  <label className="text-sm font-semibold text-slate-700">Rol de Plataforma</label>
+                  <label htmlFor="nu-role" className="text-sm font-semibold text-slate-700">Rol de Plataforma</label>
                   <select
+                    id="nu-role"
                     value={createForm.platform_role}
                     onChange={e => setCreateForm(p => ({ ...p, platform_role: e.target.value }))}
                     className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand transition-all"
@@ -524,7 +558,7 @@ export default function UsersListPage({ apiUrl, token, defaultRole, roleScope })
                   <p className="mt-1 text-xs text-slate-500">
                     {roleScope === 'internal' 
                       ? 'Asigna un rol de gestión de plataforma.' 
-                      : '"Administrador" tiene acceso total a la gestión de tenants. "Usuario" solo ve sus empresas asignadas.'}
+                      : '"Administrador" tiene acceso total a la gestión de empresas. "Usuario" solo ve sus empresas asignadas.'}
                   </p>
                 </div>
               )}
@@ -541,10 +575,155 @@ export default function UsersListPage({ apiUrl, token, defaultRole, roleScope })
           </div>
         </div>
       )}
+      {/* Modal Detalle Usuario */}
+      <Modal
+        open={!!detailUser}
+        title="Detalle del usuario"
+        onClose={closeDetail}
+        size="3xl"
+      >
+        {detailLoading ? (
+          <div className="py-10 text-center text-sm text-slate-500">Cargando detalle...</div>
+        ) : detailErr ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">{detailErr}</div>
+        ) : (
+          <div className="space-y-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-600 font-bold">
+                  {String(detailInfo.full_name || detailInfo.email || 'U').charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-lg font-bold text-slate-900">{detailInfo.full_name || 'Sin nombre'}</div>
+                  <div className="text-sm text-slate-600">{detailInfo.email || '—'}</div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span
+                      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold border ${
+                        detailStatus === 'active'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : detailStatus === 'locked'
+                          ? 'bg-red-50 text-red-700 border-red-200'
+                          : 'bg-amber-50 text-amber-800 border-amber-200'
+                      }`}
+                    >
+                      {detailStatus}
+                    </span>
+                    <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+                      {detailRoleLabel}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <Link
+                to={`/dashboard/${roleScope === 'internal' ? 'admins' : defaultRole === 'user' ? 'company-users' : 'users'}/${detailUser?.id}`}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                <i className="bi bi-box-arrow-up-right" />
+                Ver ficha completa
+              </Link>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Autenticación</div>
+                <div className="mt-1 text-sm font-medium text-slate-800">
+                  {detailAuthMethods.length ? detailAuthMethods.join(', ') : '—'}
+                </div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Creado</div>
+                <div className="mt-1 text-sm font-medium text-slate-800">{detailCreated}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Último acceso</div>
+                <div className="mt-1 text-sm font-medium text-slate-800">{detailLastLogin}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Sesiones activas</div>
+                <div className="mt-1 text-sm font-medium text-slate-800">{detailSessions.length}</div>
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-slate-800">Empresas vinculadas</h4>
+                <span className="text-xs text-slate-500">{detailMemberships.length}</span>
+              </div>
+              {detailMemberships.length ? (
+                <div className="mt-2 overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 text-left text-xs uppercase tracking-widest text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2">Empresa</th>
+                        <th className="px-3 py-2">Cargo</th>
+                        <th className="px-3 py-2">Roles</th>
+                        <th className="px-3 py-2">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {detailMemberships.map((m) => (
+                        <tr key={m.membership_id || m.id || m.company_id}>
+                          <td className="px-3 py-2 font-medium text-slate-800">
+                            {m.trade_name || m.company_name || m.company?.legal_name || m.company_id}
+                          </td>
+                          <td className="px-3 py-2 text-slate-600">
+                            {m.job_title || '—'}{m.department ? ` · ${m.department}` : ''}
+                          </td>
+                          <td className="px-3 py-2 text-slate-600">
+                            {(m.roles || []).map((r) => r.name).filter(Boolean).join(', ') || '—'}
+                          </td>
+                          <td className="px-3 py-2 text-slate-600">{m.status || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="mt-2 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-3 text-sm text-slate-500">
+                  {detailInfo.platform_role === 'super_admin'
+                    ? 'Los super admin no requieren empresa asignada.'
+                    : 'No pertenece a ninguna empresa.'}
+                </p>
+              )}
+            </div>
+
+            {detailSessions.length > 0 && (
+              <div>
+                <h4 className="text-sm font-bold text-slate-800">Sesiones activas</h4>
+                <div className="mt-2 overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 text-left text-xs uppercase tracking-widest text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2">IP</th>
+                        <th className="px-3 py-2">Dispositivo</th>
+                        <th className="px-3 py-2">Última actividad</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {detailSessions.map((s) => (
+                        <tr key={s.id}>
+                          <td className="px-3 py-2 font-medium text-slate-800">{s.ip_address || '—'}</td>
+                          <td className="px-3 py-2 text-slate-600">
+                            <span className="line-clamp-1">{s.user_agent || '—'}</span>
+                          </td>
+                          <td className="px-3 py-2 text-slate-600">
+                            {s.last_activity ? new Date(s.last_activity).toLocaleString() : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
       <ConfirmModal
         open={confirmAction?.type === 'block'}
         title={confirmAction?.user?.status === 'locked' ? 'Desbloquear Usuario' : 'Bloquear Usuario'}
-        message={`¿Estás seguro de que deseas ${confirmAction?.user?.status === 'locked' ? 'desbloquear' : 'bloquear'} a ${confirmAction?.user?.name}?`}
+        message={`¿Estás seguro de que deseas ${confirmAction?.user?.status === 'locked' ? 'desbloquear' : 'bloquear'} a ${confirmAction?.user?.full_name || confirmAction?.user?.name || confirmAction?.user?.email}?`}
         confirmText={confirmAction?.user?.status === 'locked' ? 'Desbloquear' : 'Bloquear'}
         onClose={() => setConfirmAction(null)}
         onConfirm={toggleBlock}
@@ -555,7 +734,7 @@ export default function UsersListPage({ apiUrl, token, defaultRole, roleScope })
       <ConfirmModal
         open={confirmAction?.type === 'reset'}
         title="Cerrar sesiones"
-        message={`¿Estás seguro de cerrar todas las sesiones activas de ${confirmAction?.user?.name}?`}
+        message={`¿Estás seguro de cerrar todas las sesiones activas de ${confirmAction?.user?.full_name || confirmAction?.user?.name || confirmAction?.user?.email}?`}
         confirmText="Cerrar sesiones"
         onClose={() => setConfirmAction(null)}
         onConfirm={resetSessions}
@@ -566,7 +745,7 @@ export default function UsersListPage({ apiUrl, token, defaultRole, roleScope })
       <ConfirmModal
         open={confirmAction?.type === 'reset_password'}
         title="Enviar Reset Password"
-        message={`¿Enviar correo de restablecimiento de contraseña a ${confirmAction?.user?.name}?`}
+        message={`¿Enviar correo de restablecimiento de contraseña a ${confirmAction?.user?.full_name || confirmAction?.user?.name || confirmAction?.user?.email}?`}
         confirmText="Enviar Correo"
         onClose={() => setConfirmAction(null)}
         onConfirm={sendPasswordReset}
@@ -576,7 +755,7 @@ export default function UsersListPage({ apiUrl, token, defaultRole, roleScope })
       <ConfirmModal
         open={confirmAction?.type === 'delete'}
         title="Eliminar Usuario"
-        message={`¿Estás seguro de que deseas eliminar a ${confirmAction?.user?.name}? Esta acción no se puede deshacer.`}
+        message={`¿Estás seguro de que deseas eliminar a ${confirmAction?.user?.full_name || confirmAction?.user?.name || confirmAction?.user?.email}? Esta acción no se puede deshacer.`}
         confirmText="Eliminar"
         onClose={() => setConfirmAction(null)}
         onConfirm={deleteUser}

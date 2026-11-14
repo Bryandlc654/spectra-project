@@ -71,11 +71,11 @@ class EmployeeDocumentController
         $limit = max(1, min(100, (int)($_GET['limit'] ?? 50)));
         $offset = ($page - 1) * $limit;
 
-        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM employee_documents WHERE user_id LIKE :uid");
+        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM employee_documents WHERE user_id = :uid");
         $countStmt->execute([':uid' => $userId]);
         $total = (int)$countStmt->fetchColumn();
 
-        $stmt = $this->pdo->prepare("SELECT * FROM employee_documents WHERE user_id LIKE :uid ORDER BY created_at DESC LIMIT :limit OFFSET :offset");
+        $stmt = $this->pdo->prepare("SELECT * FROM employee_documents WHERE user_id = :uid ORDER BY created_at DESC LIMIT :limit OFFSET :offset");
         $stmt->bindValue(':uid', $userId);
         $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
@@ -95,7 +95,7 @@ class EmployeeDocumentController
 
     private function show(string $id): void
     {
-        $stmt = $this->pdo->prepare("SELECT * FROM employee_documents WHERE id LIKE :id");
+        $stmt = $this->pdo->prepare("SELECT * FROM employee_documents WHERE id = :id");
         $stmt->execute([':id' => $id]);
         $doc = $stmt->fetch(PDO::FETCH_ASSOC);
         
@@ -133,7 +133,7 @@ class EmployeeDocumentController
 
     private function destroy(string $id): void
     {
-        $stmt = $this->pdo->prepare("DELETE FROM employee_documents WHERE id LIKE :id");
+        $stmt = $this->pdo->prepare("DELETE FROM employee_documents WHERE id = :id");
         $stmt->execute([':id' => $id]);
         Response::json(['message' => 'Documento eliminado']);
     }

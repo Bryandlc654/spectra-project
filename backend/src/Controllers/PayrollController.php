@@ -132,8 +132,8 @@ class PayrollController
 
         $data = json_decode(file_get_contents('php://input'), true) ?? [];
         $country = strtoupper(trim((string)($data['country'] ?? 'PE')));
-        if ($country !== 'PE') {
-            Response::error('Por ahora solo soporta Perú (PE)', 422);
+        if (!in_array($country, ['PE', 'MX', 'CO'], true)) {
+            Response::error('Por ahora solo soporta Perú (PE), México (MX) y Colombia (CO)', 422);
             return;
         }
 
@@ -159,15 +159,26 @@ class PayrollController
         }
 
         $salaryBase = (float)($data['salary_base'] ?? 0);
-        $familyAllowance = (float)($data['family_allowance'] ?? 0);
-        $otherFixedIncome = (float)($data['other_fixed_income'] ?? 0);
+        $defaultCurrency = $country === 'MX' ? 'MXN' : ($country === 'CO' ? 'COP' : 'PEN');
+        $currencyCode = strtoupper(trim((string)($data['currency_code'] ?? $defaultCurrency)));
 
         if ($salaryBase <= 0) {
             Response::error('Sueldo básico inválido', 422);
             return;
         }
 
-        $currencyCode = strtoupper(trim((string)($data['currency_code'] ?? 'PEN')));
+        if ($country === 'MX') {
+            $this->handleMexicoSalaryCalculator($data, $startDate, $endDate, $terminationReason, $salaryBase, $currencyCode);
+            return;
+        }
+
+        if ($country === 'CO') {
+            $this->handleColombiaSalaryCalculator($data, $startDate, $endDate, $terminationReason, $salaryBase, $currencyCode);
+            return;
+        }
+
+        $familyAllowance = (float)($data['family_allowance'] ?? 0);
+        $otherFixedIncome = (float)($data['other_fixed_income'] ?? 0);
 
         $config = is_array($data['config'] ?? null) ? ($data['config'] ?? []) : [];
         $bonusRate = (float)($config['bonus_rate'] ?? 0.09);
@@ -360,6 +371,293 @@ class PayrollController
         ]);
     }
 
+    private function handleColombiaSalaryCalculator(array $data, \DateTimeImmutable $startDate, \DateTimeImmutable $endDate, string $terminationReason, float $salaryBase, string $currencyCode): void
+    {
+        $normalizedReason = strtoupper(str_replace([' ', '-'], '_', $terminationReason));
+        $isUnjustified = strpos($normalizedReason, 'SIN_JUSTA') !== false
+            || strpos($normalizedReason, 'INJUSTIFICAD') !== false
+            || strpos($normalizedReason, 'UNJUSTIFIED') !== false;
+
+        $config = is_array($data['config'] ?? null) ? ($data['config'] ?? []) : [];
+        $smlmv = max(1, (float)($config['smlmv'] ?? 1750905));
+        $seniorityInterestRate = max(0, (float)($config['seniority_interest_rate'] ?? 0.12));
+        $daysPerYear = (float)($config['days_per_year'] ?? 360);
+        $primaAdvances = max(0, (float)($data['prima_advances'] ?? 0));
+        $manualIndemnization = max(0, (float)($data['manual_indemnization'] ?? 0));
+
+        $contractType = strtoupper(trim((string)($data['contract_type'] ?? 'INDEFINIDO')));
+        $isIndefinite = in_array($contractType, ['INDEFINIDO', 'INDEFINITE', 'TERMINO_INDEFINIDO'], true);
+
+        $serviceDays = (int)$startDate->diff($endDate)->days + 1;
+        $serviceInterval = $startDate->diff($endDate);
+        $yearsForIndemnization = $daysPerYear > 0 ? ($serviceDays / $daysPerYear) : 0;
+
+        $dailySalary = $salaryBase / 30;
+        $cesantias = $salaryBase * $serviceDays / $daysPerYear;
+        $interesesCesantias = $cesantias * $seniorityInterestRate * $serviceDays / $daysPerYear;
+        $primaServiciosGross = $salaryBase * $serviceDays / $daysPerYear;
+        $primaServicios = max(0, $primaServiciosGross - $primaAdvances);
+        $vacaciones = $salaryBase * $serviceDays / 720;
+
+        $tenSmlmv = $smlmv * 10;
+        $indemnization = 0.0;
+        $indemnizationDays = 0.0;
+        $bracket = null;
+        $baseDays = 0;
+        $additionalDays = 0;
+
+        if ($isUnjustified && $isIndefinite) {
+            $bracket = $salaryBase >= $tenSmlmv ? 'high' : 'low';
+            $baseDays = $bracket === 'high' ? 20 : 30;
+            $additionalDays = $bracket === 'high' ? 15 : 20;
+
+            if ($yearsForIndemnization <= 1) {
+                $indemnizationDays = $baseDays * $yearsForIndemnization;
+            } else {
+                $indemnizationDays = $baseDays + ($additionalDays * ($yearsForIndemnization - 1));
+            }
+            $indemnization = $dailySalary * $indemnizationDays;
+        } elseif ($isUnjustified) {
+            $indemnization = $manualIndemnization;
+            $indemnizationDays = $dailySalary > 0 ? $indemnization / $dailySalary : 0;
+        }
+
+        $items = [
+            ['type' => 'benefit', 'code' => 'CESANTIAS', 'name' => 'Cesantías', 'amount' => round($cesantias, 2)],
+            ['type' => 'benefit', 'code' => 'INTERESES_CESANTIAS', 'name' => 'Intereses sobre cesantías', 'amount' => round($interesesCesantias, 2)],
+            ['type' => 'benefit', 'code' => 'PRIMA_SERVICIOS', 'name' => 'Prima de servicios', 'amount' => round($primaServicios, 2)],
+            ['type' => 'benefit', 'code' => 'VACACIONES', 'name' => 'Vacaciones', 'amount' => round($vacaciones, 2)],
+        ];
+        if ($indemnization > 0) {
+            $items[] = ['type' => 'benefit', 'code' => 'INDEMNIZACION', 'name' => 'Indemnización', 'amount' => round($indemnization, 2)];
+        }
+
+        $total = $cesantias + $interesesCesantias + $primaServicios + $vacaciones + $indemnization;
+
+        Response::json([
+            'country' => 'CO',
+            'currency_code' => $currencyCode,
+            'inputs' => [
+                'start_date' => $startDate->format('Y-m-d'),
+                'end_date' => $endDate->format('Y-m-d'),
+                'termination_reason' => $terminationReason,
+                'contract_type' => $contractType,
+                'salary_base' => round($salaryBase, 2),
+                'prima_advances' => round($primaAdvances, 2),
+                'manual_indemnization' => round($manualIndemnization, 2),
+                'config' => [
+                    'smlmv' => round($smlmv, 2),
+                    'seniority_interest_rate' => $seniorityInterestRate,
+                    'days_per_year' => $daysPerYear,
+                ],
+            ],
+            'service_time' => [
+                'years' => (int)$serviceInterval->y,
+                'months' => (int)$serviceInterval->m,
+                'days' => (int)$serviceInterval->d,
+                'total_days' => $serviceDays,
+            ],
+            'salary' => [
+                'monthly' => round($salaryBase, 2),
+                'daily' => round($dailySalary, 2),
+            ],
+            'cesantias' => [
+                'days' => $serviceDays,
+                'formula' => 'salario × días / 360',
+                'amount' => round($cesantias, 2),
+            ],
+            'intereses_cesantias' => [
+                'rate' => $seniorityInterestRate,
+                'days' => $serviceDays,
+                'base' => round($cesantias, 2),
+                'amount' => round($interesesCesantias, 2),
+            ],
+            'prima_servicios' => [
+                'days' => $serviceDays,
+                'gross' => round($primaServiciosGross, 2),
+                'advances' => round($primaAdvances, 2),
+                'amount' => round($primaServicios, 2),
+            ],
+            'vacaciones' => [
+                'days' => $serviceDays,
+                'divisor' => 720,
+                'amount' => round($vacaciones, 2),
+            ],
+            'indemnizacion' => [
+                'applied' => $indemnization > 0,
+                'unjustified_dismissal' => $isUnjustified,
+                'contract_type' => $contractType,
+                'indefinite_contract' => $isIndefinite,
+                'ten_smlmv' => round($tenSmlmv, 2),
+                'salary_bracket' => $bracket,
+                'base_days' => $baseDays,
+                'additional_days_per_year' => $additionalDays,
+                'years' => round($yearsForIndemnization, 4),
+                'days' => round($indemnizationDays, 2),
+                'amount' => round($indemnization, 2),
+                'manual' => $isUnjustified && !$isIndefinite,
+            ],
+            'items' => $items,
+            'total_pagar' => round($total, 2),
+        ]);
+    }
+
+    private function handleMexicoSalaryCalculator(array $data, \DateTimeImmutable $startDate, \DateTimeImmutable $endDate, string $terminationReason, float $salaryBase, string $currencyCode): void
+    {
+        $normalizedReason = strtoupper(str_replace([' ', '-'], '_', $terminationReason));
+        $isUnjustified = strpos($normalizedReason, 'INJUSTIFICADO') !== false || strpos($normalizedReason, 'UNJUSTIFIED') !== false;
+
+        $config = is_array($data['config'] ?? null) ? ($data['config'] ?? []) : [];
+        $daysPerMonth = (float)($config['days_per_month'] ?? 30);
+        $aguinaldoDays = (float)($config['aguinaldo_days'] ?? 15);
+        $vacationDaysAnnual = (float)($config['vacation_days'] ?? 12);
+        $vacationPremiumRate = (float)($config['vacation_premium_rate'] ?? 0.25);
+        $seniorityDaysPerYear = (float)($config['seniority_days_per_year'] ?? 12);
+        $twentyDaysPerYear = (float)($config['twenty_days_per_year'] ?? 20);
+        $includeSeniority = filter_var($config['include_seniority_premium'] ?? $isUnjustified, FILTER_VALIDATE_BOOLEAN);
+        $applyTwentyDays = filter_var($config['apply_twenty_days'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+        if ($daysPerMonth <= 0) $daysPerMonth = 30;
+        $aguinaldoDays = max(0, $aguinaldoDays);
+        $vacationDaysAnnual = max(0, $vacationDaysAnnual);
+        $vacationPremiumRate = max(0, $vacationPremiumRate);
+        $seniorityDaysPerYear = max(0, $seniorityDaysPerYear);
+        $twentyDaysPerYear = max(0, $twentyDaysPerYear);
+
+        $workedDaysLastPeriod = max(0, (float)($data['worked_days_last_period'] ?? 0));
+        $pendingVacationDays = max(0, (float)($data['pending_vacation_days'] ?? 0));
+        $otherBenefits = max(0, (float)($data['other_benefits'] ?? 0));
+
+        $dailySalary = $salaryBase / $daysPerMonth;
+        $integrationFactor = 1 + ($aguinaldoDays / 365) + (($vacationDaysAnnual * $vacationPremiumRate) / 365);
+        $integratedDailySalary = $dailySalary * $integrationFactor;
+
+        $yearStart = new \DateTimeImmutable($endDate->format('Y') . '-01-01');
+        $aguinaldoStart = $startDate > $yearStart ? $startDate : $yearStart;
+        $aguinaldoDaysWorked = max(0, (int)$aguinaldoStart->diff($endDate)->days + 1);
+
+        $serviceInterval = $startDate->diff($endDate);
+        $serviceYears = (int)$serviceInterval->y;
+        $serviceMonths = (int)$serviceInterval->m;
+        $serviceDays = (int)$serviceInterval->d;
+        $serviceYearsDecimal = $serviceYears + ($serviceMonths / 12) + ($serviceDays / 365);
+
+        $pendingSalary = $dailySalary * $workedDaysLastPeriod;
+        $aguinaldoAmount = $dailySalary * $aguinaldoDays * ($aguinaldoDaysWorked / 365);
+        $vacationAmount = $dailySalary * $pendingVacationDays;
+        $vacationPremium = $vacationAmount * $vacationPremiumRate;
+        $finiquitoTotal = $pendingSalary + $aguinaldoAmount + $vacationAmount + $vacationPremium + $otherBenefits;
+
+        $threeMonths = $isUnjustified ? ($integratedDailySalary * 90) : 0.0;
+        $seniorityPremium = $includeSeniority ? ($dailySalary * $seniorityDaysPerYear * $serviceYearsDecimal) : 0.0;
+        $twentyDays = ($isUnjustified && $applyTwentyDays) ? ($integratedDailySalary * $twentyDaysPerYear * $serviceYearsDecimal) : 0.0;
+        $indemnizationTotal = $threeMonths + $seniorityPremium + $twentyDays;
+
+        $items = [
+            ['type' => 'benefit', 'code' => 'SALARIO_PENDIENTE', 'name' => 'Salario pendiente', 'section' => 'finiquito', 'amount' => round($pendingSalary, 2)],
+            ['type' => 'benefit', 'code' => 'AGUINALDO_PROPORCIONAL', 'name' => 'Aguinaldo proporcional', 'section' => 'finiquito', 'amount' => round($aguinaldoAmount, 2)],
+            ['type' => 'benefit', 'code' => 'VACACIONES_PENDIENTES', 'name' => 'Vacaciones pendientes', 'section' => 'finiquito', 'amount' => round($vacationAmount, 2)],
+            ['type' => 'benefit', 'code' => 'PRIMA_VACACIONAL', 'name' => 'Prima vacacional', 'section' => 'finiquito', 'amount' => round($vacationPremium, 2)],
+            ['type' => 'benefit', 'code' => 'OTRAS_PRESTACIONES', 'name' => 'Otras prestaciones', 'section' => 'finiquito', 'amount' => round($otherBenefits, 2)],
+        ];
+
+        if ($isUnjustified) {
+            $items[] = ['type' => 'benefit', 'code' => 'INDEMNIZACION_3_MESES', 'name' => 'Indemnización constitucional (3 meses)', 'section' => 'indemnizacion', 'amount' => round($threeMonths, 2)];
+        }
+        if ($includeSeniority) {
+            $items[] = ['type' => 'benefit', 'code' => 'PRIMA_ANTIGUEDAD', 'name' => 'Prima de antigüedad', 'section' => 'indemnizacion', 'amount' => round($seniorityPremium, 2)];
+        }
+        if ($isUnjustified && $applyTwentyDays) {
+            $items[] = ['type' => 'benefit', 'code' => 'INDEMNIZACION_20_DIAS', 'name' => '20 días por año', 'section' => 'indemnizacion', 'amount' => round($twentyDays, 2)];
+        }
+
+        Response::json([
+            'country' => 'MX',
+            'currency_code' => $currencyCode,
+            'inputs' => [
+                'start_date' => $startDate->format('Y-m-d'),
+                'end_date' => $endDate->format('Y-m-d'),
+                'termination_reason' => $terminationReason,
+                'salary_base' => round($salaryBase, 2),
+                'worked_days_last_period' => $workedDaysLastPeriod,
+                'pending_vacation_days' => $pendingVacationDays,
+                'other_benefits' => round($otherBenefits, 2),
+                'config' => [
+                    'days_per_month' => $daysPerMonth,
+                    'aguinaldo_days' => $aguinaldoDays,
+                    'vacation_days' => $vacationDaysAnnual,
+                    'vacation_premium_rate' => $vacationPremiumRate,
+                    'seniority_days_per_year' => $seniorityDaysPerYear,
+                    'twenty_days_per_year' => $twentyDaysPerYear,
+                    'include_seniority_premium' => $includeSeniority,
+                    'apply_twenty_days' => $applyTwentyDays,
+                ],
+            ],
+            'service_time' => [
+                'years' => $serviceYears,
+                'months' => $serviceMonths,
+                'days' => $serviceDays,
+                'total_days' => (int)$serviceInterval->days,
+                'years_decimal' => round($serviceYearsDecimal, 4),
+            ],
+            'salary' => [
+                'monthly' => round($salaryBase, 2),
+                'daily' => round($dailySalary, 2),
+                'integrated_daily' => round($integratedDailySalary, 2),
+                'integration_factor' => round($integrationFactor, 6),
+            ],
+            'finiquito' => [
+                'pending_salary' => [
+                    'days' => $workedDaysLastPeriod,
+                    'daily_salary' => round($dailySalary, 2),
+                    'amount' => round($pendingSalary, 2),
+                ],
+                'aguinaldo' => [
+                    'days_worked' => $aguinaldoDaysWorked,
+                    'days_entitled' => $aguinaldoDays,
+                    'amount' => round($aguinaldoAmount, 2),
+                ],
+                'vacation' => [
+                    'days' => $pendingVacationDays,
+                    'daily_salary' => round($dailySalary, 2),
+                    'amount' => round($vacationAmount, 2),
+                ],
+                'vacation_premium' => [
+                    'rate' => $vacationPremiumRate,
+                    'amount' => round($vacationPremium, 2),
+                ],
+                'other_benefits' => round($otherBenefits, 2),
+                'total' => round($finiquitoTotal, 2),
+            ],
+            'indemnizacion' => [
+                'unjustified_dismissal' => $isUnjustified,
+                'three_months' => [
+                    'applied' => $isUnjustified,
+                    'days' => 90,
+                    'integrated_daily_salary' => round($integratedDailySalary, 2),
+                    'amount' => round($threeMonths, 2),
+                ],
+                'seniority_premium' => [
+                    'applied' => $includeSeniority,
+                    'days_per_year' => $seniorityDaysPerYear,
+                    'years' => round($serviceYearsDecimal, 4),
+                    'amount' => round($seniorityPremium, 2),
+                ],
+                'twenty_days' => [
+                    'applied' => $isUnjustified && $applyTwentyDays,
+                    'days_per_year' => $twentyDaysPerYear,
+                    'years' => round($serviceYearsDecimal, 4),
+                    'amount' => round($twentyDays, 2),
+                ],
+                'total' => round($indemnizationTotal, 2),
+            ],
+            'items' => $items,
+            'total_finiquito' => round($finiquitoTotal, 2),
+            'total_indemnizacion' => round($indemnizationTotal, 2),
+            'total_pagar' => round($finiquitoTotal + $indemnizationTotal, 2),
+        ]);
+    }
+
     private function handleDeductions(string $method, ?string $id): void
     {
         if ($method === 'GET') {
@@ -371,11 +669,11 @@ class PayrollController
 
             if ($countryId) {
                 // Count
-                $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM statutory_deductions WHERE country_id LIKE :cid");
+                $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM statutory_deductions WHERE country_id = :cid");
                 $stmt->execute([':cid' => $countryId]);
                 $total = (int)$stmt->fetchColumn();
 
-                $stmt = $this->pdo->prepare("SELECT * FROM statutory_deductions WHERE country_id LIKE :cid LIMIT :limit OFFSET :offset");
+                $stmt = $this->pdo->prepare("SELECT * FROM statutory_deductions WHERE country_id = :cid LIMIT :limit OFFSET :offset");
                 $stmt->bindValue(':cid', $countryId);
                 $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
                 $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
@@ -437,11 +735,11 @@ class PayrollController
             $params = [];
             
             if ($userId) {
-                $where .= " AND payroll_items.user_id LIKE :uid";
+                $where .= " AND payroll_items.user_id = :uid";
                 $params[':uid'] = $userId;
             }
             if ($runId) {
-                $where .= " AND payroll_items.payroll_run_id LIKE :run";
+                $where .= " AND payroll_items.payroll_run_id = :run";
                 $params[':run'] = $runId;
             }
 
@@ -529,7 +827,7 @@ class PayrollController
     {
         if ($method === 'GET') {
             if ($id) {
-                $stmt = $this->pdo->prepare("SELECT * FROM payroll_runs WHERE id LIKE ?");
+                $stmt = $this->pdo->prepare("SELECT * FROM payroll_runs WHERE id = ?");
                 $stmt->execute([$id]);
                 $run = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$run) Response::error('Payroll run not found', 404);
@@ -564,8 +862,8 @@ class PayrollController
                 $params = [];
 
                 if ($companyId) {
-                    $sql .= " WHERE company_id LIKE ?";
-                    $countSql .= " WHERE company_id LIKE ?";
+                    $sql .= " WHERE company_id = ?";
+                    $countSql .= " WHERE company_id = ?";
                     $params[] = $companyId;
                 }
                 
@@ -622,7 +920,7 @@ class PayrollController
             if ($newStatus === 'paid') {
                 $this->processPayment($id);
             } else {
-                $stmt = $this->pdo->prepare("UPDATE payroll_runs SET status = ? WHERE id LIKE ?");
+                $stmt = $this->pdo->prepare("UPDATE payroll_runs SET status = ? WHERE id = ?");
                 $stmt->execute([$newStatus, $id]);
                 Response::json(['message' => 'Payroll run updated']);
             }
@@ -855,7 +1153,7 @@ class PayrollController
     private function calculateRun(string $runId): void
     {
         // 1. Fetch Run to get Company
-        $stmt = $this->pdo->prepare("SELECT * FROM payroll_runs WHERE id LIKE ?");
+        $stmt = $this->pdo->prepare("SELECT * FROM payroll_runs WHERE id = ?");
         $stmt->execute([$runId]);
         $run = $stmt->fetch(PDO::FETCH_ASSOC);
         
@@ -873,7 +1171,7 @@ class PayrollController
             FROM contracts c
             LEFT JOIN users u ON c.freelancer_id = u.id
             LEFT JOIN countries co ON c.country_id = co.id
-            WHERE c.company_id LIKE :cid 
+            WHERE c.company_id = :cid 
               AND c.status IN ('active', 'pending')
         ");
         $stmt->execute([':cid' => $companyId]);
@@ -894,7 +1192,7 @@ class PayrollController
         $this->pdo->beginTransaction();
         try {
             // Clear existing auto-generated items for this run (optional, but good for re-calc)
-            $this->pdo->prepare("DELETE FROM payroll_items WHERE payroll_run_id LIKE ?")->execute([$runId]);
+            $this->pdo->prepare("DELETE FROM payroll_items WHERE payroll_run_id = ?")->execute([$runId]);
 
             $totalPayroll = 0;
             $countItems = 0;
@@ -970,7 +1268,7 @@ class PayrollController
             }
 
             // Update Run Total
-            $this->pdo->prepare("UPDATE payroll_runs SET total_amount = ? WHERE id LIKE ?")->execute([$totalPayroll, $runId]);
+            $this->pdo->prepare("UPDATE payroll_runs SET total_amount = ? WHERE id = ?")->execute([$totalPayroll, $runId]);
 
             $this->pdo->commit();
             Response::json(['message' => 'Payroll calculation complete', 'items_created' => $countItems, 'total_amount' => $totalPayroll]);
@@ -1012,7 +1310,7 @@ class PayrollController
             $companyId = $currentUser['company_id'] ?? null;
 
             if (!$isSuperAdmin && $companyId) {
-                $stmt = $this->pdo->prepare("SELECT company_id FROM users WHERE id LIKE ?");
+                $stmt = $this->pdo->prepare("SELECT company_id FROM users WHERE id = ?");
                 $stmt->execute([$userId]);
                 $targetUserCompany = $stmt->fetchColumn();
 
@@ -1025,7 +1323,7 @@ class PayrollController
             $stmt = $this->pdo->prepare("
                 SELECT *
                 FROM contracts 
-                WHERE freelancer_id LIKE ? AND status IN ('active', 'terminated', 'expiring') 
+                WHERE freelancer_id = ? AND status IN ('active', 'terminated', 'expiring') 
                 ORDER BY created_at DESC 
                 LIMIT 1
             ");

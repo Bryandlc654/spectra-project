@@ -202,7 +202,7 @@ class ComplianceController
 
     private function showRequirement(string $id): void
     {
-        $stmt = $this->pdo->prepare("SELECT * FROM compliance_requirements WHERE id LIKE :id");
+        $stmt = $this->pdo->prepare("SELECT * FROM compliance_requirements WHERE id = :id");
         $stmt->execute([':id' => $id]);
         $item = $stmt->fetch(PDO::FETCH_ASSOC);
         
@@ -264,7 +264,7 @@ class ComplianceController
             return;
         }
 
-        $sql = "UPDATE compliance_requirements SET " . implode(', ', $fields) . " WHERE id LIKE :id";
+        $sql = "UPDATE compliance_requirements SET " . implode(', ', $fields) . " WHERE id = :id";
         $this->pdo->prepare($sql)->execute($params);
 
         Response::json(['message' => 'Requirement updated successfully']);
@@ -459,7 +459,7 @@ class ComplianceController
             $params[':expiry'] = $input['expiry_date'];
         }
 
-        $sql .= " WHERE id LIKE :id";
+        $sql .= " WHERE id = :id";
         
         $this->pdo->prepare($sql)->execute($params);
         

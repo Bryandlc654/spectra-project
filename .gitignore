@@ -67,3 +67,9 @@ backend/storage/*.sqlite-shm
 
 # Scripts de diagnóstico que no deben ir al servidor
 backend/dev/import_db.php
+
+# Scripts locales con credenciales o de uso puntual (no versionar)
+/patch.php
+/script.php
+/test_ssh.php
+backend/update_password.php

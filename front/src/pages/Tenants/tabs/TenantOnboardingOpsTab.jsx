@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useToast } from '../../../components/ToastProvider';
 import Modal from '../../../components/Modal';
+import { useI18n } from '../../../i18n/I18nContext';
 
 function Badge({ children, color = 'gray' }) {
     const colors = {
@@ -19,6 +20,7 @@ function Badge({ children, color = 'gray' }) {
 
 export default function TenantOnboardingOpsTab({ tenant, api }) {
     const toast = useToast();
+    const { t } = useI18n();
     const [loading, setLoading] = useState(true);
     const [activeOnboardings, setActiveOnboardings] = useState([]);
     
@@ -54,7 +56,7 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
             setActiveOnboardings(data.filter(u => u.tasks_total > 0)); 
         } catch (e) {
             console.error(e);
-            toast.error('Error al cargar procesos de onboarding');
+            toast.error(t('tenants.admin.onboarding.loadError'));
         } finally {
             setLoading(false);
         }
@@ -96,7 +98,7 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
             setTemplates(Array.isArray(res) ? res : res.data || []);
         } catch (e) {
             console.error(e);
-            toast.error('Error al cargar plantillas');
+            toast.error(t('tenants.admin.onboarding.templatesLoadError'));
         }
     };
 
@@ -109,22 +111,22 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
         if (!newTemplate.title) return;
         try {
             await api.post(`/api/onboarding/templates/${tenant.id}`, newTemplate);
-            toast.success('Plantilla creada');
+            toast.success(t('tenants.admin.onboarding.templateCreated'));
             setNewTemplate({ title: '', checklist_group: 'accesos', sla_days: 0, description: '' });
             loadTemplates();
         } catch (e) {
-            toast.error('Error al crear plantilla');
+            toast.error(t('tenants.admin.onboarding.templateCreateError'));
         }
     };
 
     const handleDeleteTemplate = async (id) => {
-        if (!window.confirm('¿Eliminar esta plantilla?')) return;
+        if (!window.confirm(t('tenants.admin.onboarding.deleteTemplateConfirm'))) return;
         try {
             await api.delete(`/api/onboarding/templates/${id}`);
-            toast.success('Plantilla eliminada');
+            toast.success(t('tenants.admin.onboarding.templateDeleted'));
             loadTemplates();
         } catch (e) {
-            toast.error('Error al eliminar plantilla');
+            toast.error(t('tenants.admin.onboarding.templateDeleteError'));
         }
     };
 
@@ -151,7 +153,7 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
 
             setCandidates(Array.from(uniqueUsers.values()));
         } catch (e) {
-            toast.error('Error al cargar candidatos');
+            toast.error(t('tenants.admin.onboarding.candidatesLoadError'));
         }
     };
 
@@ -159,11 +161,11 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
         if (!selectedCandidate) return;
         try {
             await api.post('/api/onboarding/internal/assign', { user_id: selectedCandidate, company_id: tenant.id });
-            toast.success('Checklist iniciado correctamente');
+            toast.success(t('tenants.admin.onboarding.checklistStarted'));
             setIsNewModalOpen(false);
             loadData();
         } catch (e) {
-            toast.error('Error al iniciar checklist');
+            toast.error(t('tenants.admin.onboarding.checklistStartError'));
         }
     };
 
@@ -174,7 +176,7 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
             const res = await api.get(`/api/onboarding/tasks/${user.id}?type=internal_onboarding`);
             setUserTasks(Array.isArray(res) ? res : []);
         } catch (e) {
-            toast.error('Error al cargar tareas');
+            toast.error(t('tenants.admin.onboarding.tasksLoadError'));
         } finally {
             setTasksLoading(false);
         }
@@ -184,14 +186,14 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
         try {
             await api.put(`/api/onboarding/tasks/${taskId}`, updates);
             // Update local state
-            setUserTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
+            setUserTasks(prev => prev.map(task => task.id === taskId ? { ...task, ...updates } : task));
             
             // If status changed to completed, toast
             if (updates.status === 'completed') {
-                toast.success('Tarea completada');
+                toast.success(t('tenants.admin.onboarding.taskCompleted'));
             }
         } catch (e) {
-            toast.error('Error al actualizar tarea');
+            toast.error(t('tenants.admin.onboarding.taskUpdateError'));
         }
     };
 
@@ -202,31 +204,31 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
     };
 
     const handleConfirmCompliance = async () => {
-        if (!window.confirm('¿Confirmar que se ha completado todo el proceso de onboarding operativo?')) return;
+        if (!window.confirm(t('tenants.admin.onboarding.complianceConfirm'))) return;
         try {
             // Could call an API here to mark a specific flag if needed
-            toast.success('Onboarding confirmado exitosamente');
+            toast.success(t('tenants.admin.onboarding.complianceConfirmed'));
             handleCloseDetails();
         } catch (e) {
-            toast.error('Error al confirmar');
+            toast.error(t('tenants.admin.onboarding.complianceError'));
         }
     };
 
     const groupedTasks = {
-        accesos: userTasks.filter(t => t.checklist_group === 'accesos'),
-        induccion: userTasks.filter(t => t.checklist_group === 'induccion'),
-        documentacion: userTasks.filter(t => t.checklist_group === 'documentacion'),
-        others: userTasks.filter(t => !['accesos', 'induccion', 'documentacion'].includes(t.checklist_group))
+        accesos: userTasks.filter(task => task.checklist_group === 'accesos'),
+        induccion: userTasks.filter(task => task.checklist_group === 'induccion'),
+        documentacion: userTasks.filter(task => task.checklist_group === 'documentacion'),
+        others: userTasks.filter(task => !['accesos', 'induccion', 'documentacion'].includes(task.checklist_group))
     };
 
-    const isAllCompleted = userTasks.length > 0 && userTasks.every(t => t.status === 'completed');
+    const isAllCompleted = userTasks.length > 0 && userTasks.every(task => task.status === 'completed');
 
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <div>
-                    <h2 className="text-lg font-bold text-slate-900">Onboarding Operativo</h2>
-                    <p className="text-sm text-slate-500">Gestión de incorporaciones, accesos y documentación.</p>
+                    <h2 className="text-lg font-bold text-slate-900">{t('tenants.admin.onboarding.title')}</h2>
+                    <p className="text-sm text-slate-500">{t('tenants.admin.onboarding.subtitle')}</p>
                 </div>
                 <div className="flex gap-2">
                     <button 
@@ -234,34 +236,34 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
                         className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 transition"
                     >
                         <i className="bi bi-gear mr-2"></i>
-                        Gestionar Plantillas
+                        {t('tenants.admin.onboarding.manageTemplates')}
                     </button>
                     <button 
                         onClick={handleOpenNewModal}
                         className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-600 transition"
                     >
                         <i className="bi bi-plus-lg mr-2"></i>
-                        Nuevo Checklist
+                        {t('tenants.admin.onboarding.newChecklist')}
                     </button>
                 </div>
             </div>
 
             {loading ? (
-                <div className="text-center py-10 text-slate-500">Cargando...</div>
+                <div className="text-center py-10 text-slate-500">{t('tenants.common.loading')}</div>
             ) : activeOnboardings.length === 0 ? (
                 <div className="rounded-xl border border-slate-200 bg-white p-10 text-center">
                     <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100">
                         <i className="bi bi-clipboard-check text-2xl text-slate-400"></i>
                     </div>
-                    <h3 className="mt-2 text-sm font-semibold text-slate-900">No hay procesos activos</h3>
-                    <p className="mt-1 text-sm text-slate-500">Inicia un nuevo checklist para comenzar el onboarding de un miembro.</p>
+                    <h3 className="mt-2 text-sm font-semibold text-slate-900">{t('tenants.admin.onboarding.noActiveTitle')}</h3>
+                    <p className="mt-1 text-sm text-slate-500">{t('tenants.admin.onboarding.noActiveDescription')}</p>
                     <div className="mt-6">
                         <button
                             onClick={handleOpenNewModal}
                             className="inline-flex items-center rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-500"
                         >
                             <i className="bi bi-plus-lg mr-2"></i>
-                            Nuevo Checklist
+                            {t('tenants.admin.onboarding.newChecklist')}
                         </button>
                     </div>
                 </div>
@@ -270,11 +272,11 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
                     <table className="min-w-full divide-y divide-slate-200">
                         <thead className="bg-slate-50">
                             <tr>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Usuario</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Rol</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Progreso</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Estado</th>
-                                <th scope="col" className="relative px-6 py-3"><span className="sr-only">Acciones</span></th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">{t('tenants.admin.onboarding.colUser')}</th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">{t('tenants.admin.onboarding.colRole')}</th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">{t('tenants.admin.onboarding.colProgress')}</th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">{t('tenants.common.status')}</th>
+                                <th scope="col" className="relative px-6 py-3"><span className="sr-only">{t('tenants.common.actions')}</span></th>
                             </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-slate-200">
@@ -305,14 +307,14 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
                                             <span className="text-xs font-medium text-slate-700">{user.progress}%</span>
                                         </div>
                                         <div className="text-xs text-slate-500 mt-1">
-                                            {user.tasks_completed} / {user.tasks_total} tareas
+                                            {t('tenants.admin.onboarding.tasksCount', { completed: user.tasks_completed, total: user.tasks_total })}
                                         </div>
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
                                         {user.progress === 100 ? (
-                                            <Badge color="green">Completado</Badge>
+                                            <Badge color="green">{t('tenants.admin.onboarding.completed')}</Badge>
                                         ) : (
-                                            <Badge color="blue">En progreso</Badge>
+                                            <Badge color="blue">{t('tenants.admin.onboarding.inProgress')}</Badge>
                                         )}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
@@ -320,7 +322,7 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
                                             onClick={() => handleViewDetails(user)}
                                             className="text-brand hover:text-brand-600"
                                         >
-                                            Ver detalles
+                                            {t('tenants.admin.onboarding.viewDetails')}
                                         </button>
                                     </td>
                                 </tr>
@@ -334,38 +336,38 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
             <Modal
                 open={isTemplatesModalOpen}
                 onClose={() => setIsTemplatesModalOpen(false)}
-                title="Gestionar Plantillas de Onboarding"
+                title={t('tenants.admin.onboarding.templatesModalTitle')}
                 maxWidth="max-w-4xl"
             >
                 <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-2">
                     <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
-                        <h4 className="text-sm font-bold text-slate-900 mb-3">Nueva Plantilla</h4>
+                        <h4 className="text-sm font-bold text-slate-900 mb-3">{t('tenants.admin.onboarding.newTemplate')}</h4>
                         <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-end">
                             <div className="sm:col-span-4">
-                                <label className="block text-xs font-medium text-slate-700">Título de la Tarea</label>
+                                <label className="block text-xs font-medium text-slate-700">{t('tenants.admin.onboarding.taskTitle')}</label>
                                 <input 
                                     type="text" 
                                     className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand focus:ring-brand sm:text-sm p-2 border"
                                     value={newTemplate.title}
                                     onChange={e => setNewTemplate({...newTemplate, title: e.target.value})}
-                                    placeholder="Ej: Configurar Email"
+                                    placeholder={t('tenants.admin.onboarding.taskTitlePlaceholder')}
                                 />
                             </div>
                             <div className="sm:col-span-3">
-                                <label className="block text-xs font-medium text-slate-700">Grupo</label>
+                                <label className="block text-xs font-medium text-slate-700">{t('tenants.admin.onboarding.group')}</label>
                                 <select 
                                     className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand focus:ring-brand sm:text-sm p-2 border"
                                     value={newTemplate.checklist_group}
                                     onChange={e => setNewTemplate({...newTemplate, checklist_group: e.target.value})}
                                 >
-                                    <option value="accesos">Accesos</option>
-                                    <option value="induccion">Inducción</option>
-                                    <option value="documentacion">Documentación</option>
-                                    <option value="otros">Otros</option>
+                                    <option value="accesos">{t('tenants.admin.onboarding.groupAccess')}</option>
+                                    <option value="induccion">{t('tenants.admin.onboarding.groupInduction')}</option>
+                                    <option value="documentacion">{t('tenants.admin.onboarding.groupDocumentation')}</option>
+                                    <option value="otros">{t('tenants.admin.onboarding.groupOther')}</option>
                                 </select>
                             </div>
                             <div className="sm:col-span-2">
-                                <label className="block text-xs font-medium text-slate-700">SLA (Días)</label>
+                                <label className="block text-xs font-medium text-slate-700">{t('tenants.admin.onboarding.slaDays')}</label>
                                 <input 
                                     type="number" 
                                     className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand focus:ring-brand sm:text-sm p-2 border"
@@ -379,7 +381,7 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
                                     disabled={!newTemplate.title}
                                     className="w-full rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-600 disabled:opacity-50"
                                 >
-                                    <i className="bi bi-plus-lg mr-1"></i> Agregar
+                                    <i className="bi bi-plus-lg mr-1"></i> {t('tenants.common.add')}
                                 </button>
                             </div>
                         </div>
@@ -389,21 +391,21 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
                         <table className="min-w-full divide-y divide-slate-200">
                             <thead className="bg-slate-50">
                                 <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Tarea</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Grupo</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">SLA</th>
-                                    <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Acciones</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">{t('tenants.admin.onboarding.colTask')}</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">{t('tenants.admin.onboarding.group')}</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">{t('tenants.admin.onboarding.colSla')}</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">{t('tenants.common.actions')}</th>
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-slate-200">
-                                {templates.map(t => (
-                                    <tr key={t.id}>
-                                        <td className="px-6 py-4 text-sm text-slate-900">{t.title}</td>
-                                        <td className="px-6 py-4 text-sm text-slate-500 capitalize">{t.checklist_group}</td>
-                                        <td className="px-6 py-4 text-sm text-slate-500">{t.sla_days} días</td>
+                                {templates.map(tpl => (
+                                    <tr key={tpl.id}>
+                                        <td className="px-6 py-4 text-sm text-slate-900">{tpl.title}</td>
+                                        <td className="px-6 py-4 text-sm text-slate-500 capitalize">{tpl.checklist_group}</td>
+                                        <td className="px-6 py-4 text-sm text-slate-500">{t('tenants.admin.onboarding.daysCount', { count: tpl.sla_days })}</td>
                                         <td className="px-6 py-4 text-right text-sm font-medium">
                                             <button 
-                                                onClick={() => handleDeleteTemplate(t.id)}
+                                                onClick={() => handleDeleteTemplate(tpl.id)}
                                                 className="text-red-600 hover:text-red-900"
                                             >
                                                 <i className="bi bi-trash"></i>
@@ -414,7 +416,7 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
                                 {templates.length === 0 && (
                                     <tr>
                                         <td colSpan="4" className="px-6 py-10 text-center text-slate-500 text-sm">
-                                            No hay plantillas definidas. Agrega una arriba.
+                                            {t('tenants.admin.onboarding.noTemplates')}
                                         </td>
                                     </tr>
                                 )}
@@ -428,21 +430,21 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
             <Modal
                 open={isNewModalOpen}
                 onClose={() => setIsNewModalOpen(false)}
-                title="Iniciar Onboarding Operativo"
+                title={t('tenants.admin.onboarding.newChecklistModalTitle')}
             >
                 <div className="space-y-4">
                     <p className="text-sm text-slate-500">
-                        Selecciona un miembro del equipo para iniciar su lista de verificación de onboarding (Accesos, Inducción, Documentación).
+                        {t('tenants.admin.onboarding.newChecklistDescription')}
                     </p>
                     
                     <div>
-                        <label className="block text-sm font-medium text-slate-700">Miembro del equipo</label>
+                        <label className="block text-sm font-medium text-slate-700">{t('tenants.admin.onboarding.teamMember')}</label>
                         <select
                             value={selectedCandidate}
                             onChange={(e) => setSelectedCandidate(e.target.value)}
                             className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand focus:ring-brand sm:text-sm p-2 border"
                         >
-                            <option value="">Selecciona un usuario...</option>
+                            <option value="">{t('tenants.admin.onboarding.selectUser')}</option>
                             {candidates.map(c => (
                                 <option key={c.id} value={c.id}>
                                     {c.full_name} ({c.email})
@@ -457,7 +459,7 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
                             onClick={() => setIsNewModalOpen(false)}
                             className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
                         >
-                            Cancelar
+                            {t('tenants.common.cancel')}
                         </button>
                         <button
                             type="button"
@@ -465,7 +467,7 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
                             disabled={!selectedCandidate}
                             className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-600 disabled:opacity-50"
                         >
-                            Iniciar Checklist
+                            {t('tenants.admin.onboarding.startChecklist')}
                         </button>
                     </div>
                 </div>
@@ -476,7 +478,7 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
                 <Modal
                     open={true}
                     onClose={handleCloseDetails}
-                    title={`Checklist: ${selectedUser.full_name}`}
+                    title={t('tenants.admin.onboarding.checklistTitle', { name: selectedUser.full_name })}
                     maxWidth="max-w-4xl"
                 >
                     <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-2">
@@ -484,51 +486,51 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
                         <div className="flex items-center justify-between bg-slate-50 p-4 rounded-lg border border-slate-200">
                             <div>
                                 <h4 className="font-semibold text-slate-900">{selectedUser.email}</h4>
-                                <p className="text-xs text-slate-500">Rol: {selectedUser.platform_role}</p>
+                                <p className="text-xs text-slate-500">{t('tenants.admin.onboarding.roleLabel', { role: selectedUser.platform_role })}</p>
                             </div>
                             <div className="text-right">
                                 <div className="text-sm font-medium text-slate-700">
-                                    Progreso General
+                                    {t('tenants.admin.onboarding.overallProgress')}
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <div className="w-32 bg-slate-200 rounded-full h-2.5">
                                         <div 
                                             className="bg-brand h-2.5 rounded-full transition-all duration-500" 
-                                            style={{ width: `${(userTasks.filter(t => t.status === 'completed').length / (userTasks.length || 1)) * 100}%` }}
+                                            style={{ width: `${(userTasks.filter(task => task.status === 'completed').length / (userTasks.length || 1)) * 100}%` }}
                                         ></div>
                                     </div>
                                     <span className="text-xs font-bold text-brand">
-                                        {Math.round((userTasks.filter(t => t.status === 'completed').length / (userTasks.length || 1)) * 100)}%
+                                        {Math.round((userTasks.filter(task => task.status === 'completed').length / (userTasks.length || 1)) * 100)}%
                                     </span>
                                 </div>
                             </div>
                         </div>
 
                         {tasksLoading ? (
-                            <div className="text-center py-10">Cargando tareas...</div>
+                            <div className="text-center py-10">{t('tenants.admin.onboarding.loadingTasks')}</div>
                         ) : (
                             <div className="space-y-8">
                                 <ChecklistGroup 
-                                    title="1. Accesos y Herramientas" 
+                                    title={t('tenants.admin.onboarding.groupAccessTitle')} 
                                     tasks={groupedTasks.accesos} 
                                     teamMembers={teamMembers}
                                     onUpdate={handleUpdateTask}
                                 />
                                 <ChecklistGroup 
-                                    title="2. Inducción y Cultura" 
+                                    title={t('tenants.admin.onboarding.groupInductionTitle')} 
                                     tasks={groupedTasks.induccion} 
                                     teamMembers={teamMembers}
                                     onUpdate={handleUpdateTask}
                                 />
                                 <ChecklistGroup 
-                                    title="3. Documentación Legal" 
+                                    title={t('tenants.admin.onboarding.groupDocumentationTitle')} 
                                     tasks={groupedTasks.documentacion} 
                                     teamMembers={teamMembers}
                                     onUpdate={handleUpdateTask}
                                 />
                                 {groupedTasks.others.length > 0 && (
                                     <ChecklistGroup 
-                                        title="Otros" 
+                                        title={t('tenants.admin.onboarding.groupOtherTitle')} 
                                         tasks={groupedTasks.others} 
                                         teamMembers={teamMembers}
                                         onUpdate={handleUpdateTask}
@@ -541,9 +543,9 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
                         <div className="mt-8 border-t border-slate-200 pt-6">
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <h4 className="text-sm font-bold text-slate-900">Confirmación de Cumplimiento</h4>
+                                    <h4 className="text-sm font-bold text-slate-900">{t('tenants.admin.onboarding.complianceTitle')}</h4>
                                     <p className="text-xs text-slate-500">
-                                        Solo se puede confirmar si todos los pasos obligatorios están completos.
+                                        {t('tenants.admin.onboarding.complianceDescription')}
                                     </p>
                                 </div>
                                 <button
@@ -556,7 +558,7 @@ export default function TenantOnboardingOpsTab({ tenant, api }) {
                                     }`}
                                 >
                                     <i className="bi bi-check-circle-fill mr-2"></i>
-                                    Confirmar Onboarding Completo
+                                    {t('tenants.admin.onboarding.confirmOnboarding')}
                                 </button>
                             </div>
                         </div>
@@ -590,6 +592,8 @@ function ChecklistGroup({ title, tasks, teamMembers, onUpdate }) {
 }
 
 function TaskItem({ task, teamMembers, onUpdate }) {
+    const { t, language } = useI18n();
+    const locale = language === 'en' ? 'en-US' : 'es-ES';
     const isCompleted = task.status === 'completed';
     const isOverdue = task.sla_due_at && new Date(task.sla_due_at) < new Date() && !isCompleted;
 
@@ -613,7 +617,7 @@ function TaskItem({ task, teamMembers, onUpdate }) {
                     </div>
                     {isOverdue && (
                         <span className="inline-flex items-center rounded bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-600/10">
-                            Vencido
+                            {t('tenants.admin.onboarding.overdue')}
                         </span>
                     )}
                 </div>
@@ -627,7 +631,7 @@ function TaskItem({ task, teamMembers, onUpdate }) {
                             onChange={(e) => onUpdate(task.id, { responsible_id: e.target.value })}
                             className="text-xs border-none bg-transparent p-0 text-slate-600 focus:ring-0 cursor-pointer hover:text-brand"
                         >
-                            <option value="">Sin asignar</option>
+                            <option value="">{t('tenants.admin.onboarding.unassigned')}</option>
                             {teamMembers.map(m => (
                                 <option key={m.id} value={m.id}>{m.full_name}</option>
                             ))}
@@ -638,7 +642,7 @@ function TaskItem({ task, teamMembers, onUpdate }) {
                     <div className="flex items-center gap-2 text-xs text-slate-500">
                         <i className="bi bi-calendar text-slate-400"></i>
                         <span>
-                            {task.sla_due_at ? new Date(task.sla_due_at).toLocaleDateString() : 'Sin fecha'}
+                            {task.sla_due_at ? new Date(task.sla_due_at).toLocaleDateString(locale) : t('tenants.admin.onboarding.noDate')}
                         </span>
                     </div>
                 </div>

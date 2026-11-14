@@ -2,9 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useToast } from '../../components/ToastProvider';
 import Modal from '../../components/Modal';
 import { apiFetch } from '../../lib/api';
+import { useI18n } from '../../i18n/I18nContext';
 
 export default function InvoicesPage({ apiUrl, token }) {
   const toast = useToast();
+  const { t, language } = useI18n();
+  const locale = language === 'en' ? 'en-US' : 'es-ES';
   
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -15,6 +18,7 @@ export default function InvoicesPage({ apiUrl, token }) {
 
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [monthFilter, setMonthFilter] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
 
   // View Modal State
@@ -36,6 +40,7 @@ export default function InvoicesPage({ apiUrl, token }) {
         const params = new URLSearchParams();
         params.set('page', String(page));
         if (debouncedSearch) params.set('q', debouncedSearch);
+        if (monthFilter) params.set('month', monthFilter);
 
         const res = await apiFetch(apiUrl, `/api/finance/invoices?${params.toString()}`, { token });
         
@@ -58,7 +63,7 @@ export default function InvoicesPage({ apiUrl, token }) {
         }
       } catch (e) {
         if (!cancelled) {
-          setErr(e?.message || 'No se pudieron cargar las facturas');
+          setErr(e?.message || t('invoices.loadError'));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -70,7 +75,7 @@ export default function InvoicesPage({ apiUrl, token }) {
     return () => {
       cancelled = true;
     };
-  }, [apiUrl, token, page, debouncedSearch, reloadKey]);
+  }, [apiUrl, token, page, debouncedSearch, monthFilter, reloadKey, t]);
 
   const handleReload = () => {
     setPage(1);
@@ -85,7 +90,7 @@ export default function InvoicesPage({ apiUrl, token }) {
           const res = await apiFetch(apiUrl, `/api/finance/invoices/${invoiceId}`, { token });
           setSelectedInvoice(res);
       } catch (e) {
-          toast.error('Error al cargar factura');
+          toast.error(t('invoices.detailLoadError'));
           setViewModalOpen(false);
       } finally {
           setLoadingInvoice(false);
@@ -96,7 +101,7 @@ export default function InvoicesPage({ apiUrl, token }) {
     if (!value) return '—';
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return String(value);
-    return d.toLocaleDateString();
+    return d.toLocaleDateString(locale);
   };
 
   const formatAmount = (row) => {
@@ -104,14 +109,16 @@ export default function InvoicesPage({ apiUrl, token }) {
     const symbol = row.currency_symbol || '$';
     const code = row.currency_code || '';
     return {
-      text: `${symbol} ${amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+      text: `${symbol} ${amount.toLocaleString(locale, { minimumFractionDigits: 2 })}`,
       code,
     };
   };
 
   const renderStatusBadge = (statusRaw) => {
-    if (!statusRaw) return <span className="text-xs text-slate-500">Sin estado</span>;
+    if (!statusRaw) return <span className="text-xs text-slate-500">{t('invoices.status.noStatus')}</span>;
     const status = String(statusRaw).toLowerCase();
+    const translatedStatus = t(`invoices.status.${status}`);
+    const statusLabel = translatedStatus.startsWith('invoices.status.') ? status : translatedStatus;
     let cls = 'bg-slate-100 text-slate-700';
     if (status === 'draft') cls = 'bg-slate-100 text-slate-700';
     else if (status === 'sent') cls = 'bg-blue-50 text-blue-700';
@@ -120,7 +127,7 @@ export default function InvoicesPage({ apiUrl, token }) {
 
     return (
       <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${cls}`}>
-        {status || 'Desconocido'}
+        {statusLabel}
       </span>
     );
   };
@@ -128,7 +135,7 @@ export default function InvoicesPage({ apiUrl, token }) {
   const handleCopyId = (id) => {
     if (!id || typeof navigator === 'undefined' || !navigator.clipboard) return;
     navigator.clipboard.writeText(String(id)).then(
-      () => toast.success('ID copiado'),
+      () => toast.success(t('invoices.idCopied')),
       () => {}
     );
   };
@@ -137,10 +144,21 @@ export default function InvoicesPage({ apiUrl, token }) {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Facturación / Invoices</h1>
-          <p className="text-sm text-slate-500">Gestión global de todas las facturas del sistema</p>
+          <h1 className="text-2xl font-bold text-slate-900">{t('invoices.title')}</h1>
+          <p className="text-sm text-slate-500">{t('invoices.subtitle')}</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <input
+            type="month"
+            value={monthFilter}
+            onChange={(e) => {
+              setMonthFilter(e.target.value);
+              setPage(1);
+            }}
+            aria-label={t('invoices.filterMonth')}
+            title={t('invoices.filterMonth')}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 focus:border-brand focus:ring-brand"
+          />
           <input
             type="search"
             value={search}
@@ -148,33 +166,47 @@ export default function InvoicesPage({ apiUrl, token }) {
               setSearch(e.target.value);
               setPage(1);
             }}
-            placeholder="Buscar por número..."
-            className="w-64 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 placeholder:text-slate-400 focus:border-brand focus:ring-brand"
+            placeholder={t('invoices.searchPlaceholder')}
+            className="w-72 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 placeholder:text-slate-400 focus:border-brand focus:ring-brand"
           />
+          {(monthFilter || search) && (
+            <button
+              type="button"
+              onClick={() => {
+                setMonthFilter('');
+                setSearch('');
+                setPage(1);
+              }}
+              className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              <i className="bi bi-x-lg" />
+              {t('invoices.clear')}
+            </button>
+          )}
           <button
             type="button"
             onClick={handleReload}
             className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
           >
             <i className="bi bi-arrow-repeat" />
-            Refrescar
+            {t('invoices.refresh')}
           </button>
         </div>
       </div>
 
       {/* View Invoice Modal */}
-      <Modal open={viewModalOpen} onClose={() => setViewModalOpen(false)} title="Detalle de Factura">
+      <Modal open={viewModalOpen} onClose={() => setViewModalOpen(false)} title={t('invoices.detailTitle')}>
         {loadingInvoice ? (
-            <div className="p-8 text-center text-slate-500">Cargando detalle...</div>
+            <div className="p-8 text-center text-slate-500">{t('invoices.detailLoading')}</div>
         ) : selectedInvoice ? (
             <div className="space-y-6">
                 <div className="flex justify-between items-start bg-slate-50 p-4 rounded-xl">
                     <div>
-                        <h3 className="text-lg font-bold text-slate-900">Factura #{selectedInvoice.invoice_number}</h3>
-                        <p className="text-sm text-slate-500">Emitida: {formatDate(selectedInvoice.issue_date)}</p>
+                        <h3 className="text-lg font-bold text-slate-900">{t('invoices.detailInvoice', { number: selectedInvoice.invoice_number })}</h3>
+                        <p className="text-sm text-slate-500">{t('invoices.detailIssued', { date: formatDate(selectedInvoice.issue_date) })}</p>
                         {selectedInvoice.company_name && (
                             <p className="text-sm text-slate-500 mt-1">
-                                <strong>Empresa:</strong> {selectedInvoice.company_name}
+                                <strong>{t('invoices.detailCompany')}</strong> {selectedInvoice.company_name}
                                 {selectedInvoice.company_tax_id && ` (${selectedInvoice.company_tax_id})`}
                             </p>
                         )}
@@ -193,7 +225,7 @@ export default function InvoicesPage({ apiUrl, token }) {
                 {/* Freelancer info if available */}
                 {(selectedInvoice.freelancer_first_name || selectedInvoice.freelancer_last_name) && (
                     <div className="bg-white border border-slate-100 p-4 rounded-xl">
-                        <h4 className="text-sm font-bold text-slate-900 mb-2">Freelancer</h4>
+                        <h4 className="text-sm font-bold text-slate-900 mb-2">{t('invoices.detailFreelancer')}</h4>
                         <div className="flex items-center gap-3">
                             <div className="h-8 w-8 rounded-full bg-brand/10 text-brand flex items-center justify-center font-bold text-xs">
                                 {(selectedInvoice.freelancer_first_name?.[0] || '')}{(selectedInvoice.freelancer_last_name?.[0] || '')}
@@ -209,15 +241,15 @@ export default function InvoicesPage({ apiUrl, token }) {
                 )}
 
                 <div>
-                    <h4 className="text-sm font-bold text-slate-900 mb-3">Ítems</h4>
+                    <h4 className="text-sm font-bold text-slate-900 mb-3">{t('invoices.detailItems')}</h4>
                     <div className="rounded-xl border border-slate-200 overflow-hidden">
                         <table className="w-full text-sm text-left">
                             <thead className="bg-slate-50 text-xs font-medium text-slate-500 uppercase">
                                 <tr>
-                                    <th className="px-4 py-2">Descripción</th>
-                                    <th className="px-4 py-2 text-right">Cant.</th>
-                                    <th className="px-4 py-2 text-right">Precio Unit.</th>
-                                    <th className="px-4 py-2 text-right">Total</th>
+                                    <th className="px-4 py-2">{t('invoices.itemDescription')}</th>
+                                    <th className="px-4 py-2 text-right">{t('invoices.itemQuantity')}</th>
+                                    <th className="px-4 py-2 text-right">{t('invoices.itemUnitPrice')}</th>
+                                    <th className="px-4 py-2 text-right">{t('invoices.itemTotal')}</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -226,19 +258,19 @@ export default function InvoicesPage({ apiUrl, token }) {
                                         <td className="px-4 py-2 text-slate-700">{item.description}</td>
                                         <td className="px-4 py-2 text-right text-slate-600">{item.quantity}</td>
                                         <td className="px-4 py-2 text-right text-slate-600">
-                                            {Number(item.unit_price).toLocaleString(undefined, {minimumFractionDigits: 2})}
+                                            {Number(item.unit_price).toLocaleString(locale, {minimumFractionDigits: 2})}
                                         </td>
                                         <td className="px-4 py-2 text-right font-medium text-slate-900">
-                                            {(item.quantity * item.unit_price).toLocaleString(undefined, {minimumFractionDigits: 2})}
+                                            {(item.quantity * item.unit_price).toLocaleString(locale, {minimumFractionDigits: 2})}
                                         </td>
                                     </tr>
                                 ))}
                             </tbody>
                             <tfoot className="bg-slate-50 font-bold">
                                 <tr>
-                                    <td colSpan="3" className="px-4 py-2 text-right text-slate-900">Total</td>
+                                    <td colSpan="3" className="px-4 py-2 text-right text-slate-900">{t('invoices.total')}</td>
                                     <td className="px-4 py-2 text-right text-brand">
-                                        {selectedInvoice.currency_symbol} {Number(selectedInvoice.total_amount).toLocaleString(undefined, {minimumFractionDigits: 2})}
+                                        {selectedInvoice.currency_symbol} {Number(selectedInvoice.total_amount).toLocaleString(locale, {minimumFractionDigits: 2})}
                                     </td>
                                 </tr>
                             </tfoot>
@@ -247,7 +279,7 @@ export default function InvoicesPage({ apiUrl, token }) {
                 </div>
             </div>
         ) : (
-            <div className="text-red-500">No se pudo cargar la información.</div>
+            <div className="text-red-500">{t('invoices.detailUnavailable')}</div>
         )}
       </Modal>
 
@@ -262,9 +294,9 @@ export default function InvoicesPage({ apiUrl, token }) {
           <div className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-full bg-white shadow-sm text-slate-300">
             <i className="bi bi-receipt text-3xl" />
           </div>
-          <h3 className="text-lg font-bold text-slate-900">No hay facturas</h3>
+          <h3 className="text-lg font-bold text-slate-900">{t('invoices.emptyTitle')}</h3>
           <p className="mt-2 text-slate-500">
-            No se encontraron facturas registradas en el sistema.
+            {t('invoices.emptyDescription')}
           </p>
         </div>
       )}
@@ -274,12 +306,12 @@ export default function InvoicesPage({ apiUrl, token }) {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-4 py-3 text-left">Fecha</th>
-                <th className="px-4 py-3 text-left">Factura</th>
-                <th className="px-4 py-3 text-left">Empresa</th>
-                <th className="px-4 py-3 text-left">Monto</th>
-                <th className="px-4 py-3 text-left">Estado</th>
-                <th className="px-4 py-3 text-right">Acciones</th>
+                <th className="px-4 py-3 text-left">{t('invoices.tableDate')}</th>
+                <th className="px-4 py-3 text-left">{t('invoices.tableInvoice')}</th>
+                <th className="px-4 py-3 text-left">{t('invoices.tableCompany')}</th>
+                <th className="px-4 py-3 text-left">{t('invoices.tableAmount')}</th>
+                <th className="px-4 py-3 text-left">{t('invoices.tableStatus')}</th>
+                <th className="px-4 py-3 text-right">{t('invoices.tableActions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -296,13 +328,13 @@ export default function InvoicesPage({ apiUrl, token }) {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-slate-900">
-                          {displayNumber || 'Sin número'}
+                          {displayNumber || t('invoices.noNumber')}
                         </span>
                         <button
                             type="button"
                             onClick={() => handleCopyId(inv.id)}
                             className="text-slate-400 hover:text-brand"
-                            title="Copiar ID"
+                            title={t('invoices.copyId')}
                         >
                             <i className="bi bi-clipboard" />
                         </button>
@@ -326,7 +358,7 @@ export default function InvoicesPage({ apiUrl, token }) {
                         type="button"
                         onClick={() => handleView(inv.id)}
                         className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                        title="Ver detalle"
+                        title={t('invoices.viewDetail')}
                       >
                         <i className="bi bi-eye" />
                       </button>
@@ -346,10 +378,10 @@ export default function InvoicesPage({ apiUrl, token }) {
                 className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
                 <i className="bi bi-chevron-left" />
-                Anterior
+                {t('invoices.previous')}
               </button>
               <span>
-                Página {page} de {totalPages}
+                {t('invoices.pageOf', { page, total: totalPages })}
               </span>
               <button
                 type="button"
@@ -357,7 +389,7 @@ export default function InvoicesPage({ apiUrl, token }) {
                 onClick={() => setPage((p) => p + 1)}
                 className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
-                Siguiente
+                {t('invoices.next')}
                 <i className="bi bi-chevron-right" />
               </button>
             </div>

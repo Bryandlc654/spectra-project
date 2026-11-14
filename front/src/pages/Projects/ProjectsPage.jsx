@@ -3,10 +3,12 @@ import { Link } from 'react-router-dom';
 import { useToast } from '../../components/ToastProvider';
 import Modal from '../../components/Modal';
 import { apiFetch } from '../../lib/api';
+import { useI18n } from '../../i18n/I18nContext';
 
 export default function ProjectsPage({ apiUrl, token }) {
   const toast = useToast();
-  
+  const { t, language } = useI18n();
+
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
@@ -38,7 +40,7 @@ export default function ProjectsPage({ apiUrl, token }) {
         if (search) params.set('q', search.trim());
 
         const res = await apiFetch(apiUrl, `/api/projects?${params.toString()}`, { token });
-        
+
         let items = [];
         let pages = 1;
 
@@ -58,7 +60,7 @@ export default function ProjectsPage({ apiUrl, token }) {
         }
       } catch (e) {
         if (!cancelled) {
-          setErr(e?.message || 'No se pudieron cargar los proyectos');
+          setErr(e?.message || t('projects.list.loadError'));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -70,12 +72,12 @@ export default function ProjectsPage({ apiUrl, token }) {
     return () => {
       cancelled = true;
     };
-  }, [apiUrl, token, page, search]);
+  }, [apiUrl, token, page, search, t]);
 
   const handleReload = () => {
     setPage(1);
     // Trigger reload via effect
-    setSearch(prev => prev); 
+    setSearch(prev => prev);
   };
 
   const handleCreate = () => {
@@ -106,10 +108,10 @@ export default function ProjectsPage({ apiUrl, token }) {
     e.preventDefault();
     setSaving(true);
     try {
-      const url = editingProject 
+      const url = editingProject
         ? `/api/projects/${editingProject.id}`
         : '/api/projects';
-      
+
       const method = editingProject ? 'PUT' : 'POST';
 
       await apiFetch(apiUrl, url, {
@@ -118,36 +120,42 @@ export default function ProjectsPage({ apiUrl, token }) {
         body: JSON.stringify(formData)
       });
 
-      toast.success(editingProject ? 'Proyecto actualizado' : 'Proyecto creado');
+      toast.success(editingProject ? t('projects.list.updated') : t('projects.list.created'));
       setModalOpen(false);
       handleReload();
     } catch (e) {
-      toast.error(e?.message || 'Error al guardar proyecto');
+      toast.error(e?.message || t('projects.list.saveError'));
     } finally {
       setSaving(false);
     }
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('¿Estás seguro de eliminar este proyecto?')) return;
+    if (!window.confirm(t('projects.list.deleteConfirm'))) return;
     try {
       await apiFetch(apiUrl, `/api/projects/${id}`, { token, method: 'DELETE' });
-      toast.success('Proyecto eliminado');
+      toast.success(t('projects.list.deleted'));
       handleReload();
     } catch (e) {
-      toast.error(e?.message || 'Error al eliminar proyecto');
+      toast.error(e?.message || t('projects.list.deleteError'));
     }
+  };
+
+  const statusLabel = (value) => {
+    const key = `projects.status.${String(value || '').toLowerCase()}`;
+    const translated = t(key);
+    return translated === key ? String(value || '') : translated;
   };
 
   const formatDate = (value) => {
     if (!value) return '—';
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return String(value);
-    return d.toLocaleDateString();
+    return d.toLocaleDateString(language === 'en' ? 'en-US' : 'es-ES');
   };
 
   const renderStatusBadge = (statusRaw) => {
-    if (!statusRaw) return <span className="text-xs text-slate-500">Sin estado</span>;
+    if (!statusRaw) return <span className="text-xs text-slate-500">{t('projects.status.none')}</span>;
     const status = String(statusRaw).toLowerCase();
     let cls = 'bg-slate-100 text-slate-700';
     if (status === 'active') cls = 'bg-emerald-50 text-emerald-700';
@@ -157,7 +165,7 @@ export default function ProjectsPage({ apiUrl, token }) {
 
     return (
       <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${cls}`}>
-        {status}
+        {statusLabel(status)}
       </span>
     );
   };
@@ -166,8 +174,8 @@ export default function ProjectsPage({ apiUrl, token }) {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Proyectos</h1>
-          <p className="text-sm text-slate-500">Gestión de proyectos y asignaciones</p>
+          <h1 className="text-2xl font-bold text-slate-900">{t('projects.list.title')}</h1>
+          <p className="text-sm text-slate-500">{t('projects.list.subtitle')}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <input
@@ -177,7 +185,7 @@ export default function ProjectsPage({ apiUrl, token }) {
               setSearch(e.target.value);
               setPage(1);
             }}
-            placeholder="Buscar proyectos..."
+            placeholder={t('projects.list.searchPlaceholder')}
             className="w-64 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 placeholder:text-slate-400 focus:border-brand focus:ring-brand"
           />
           <button
@@ -186,15 +194,15 @@ export default function ProjectsPage({ apiUrl, token }) {
             className="inline-flex items-center gap-1 rounded-xl bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand/90"
           >
             <i className="bi bi-plus-lg" />
-            Nuevo Proyecto
+            {t('projects.list.newProject')}
           </button>
         </div>
       </div>
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editingProject ? 'Editar Proyecto' : 'Nuevo Proyecto'}>
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editingProject ? t('projects.list.editTitle') : t('projects.list.createTitle')}>
         <form onSubmit={handleSave} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700">Nombre del Proyecto</label>
+            <label className="block text-sm font-medium text-slate-700">{t('projects.list.name')}</label>
             <input
               type="text"
               required
@@ -204,7 +212,7 @@ export default function ProjectsPage({ apiUrl, token }) {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700">Descripción</label>
+            <label className="block text-sm font-medium text-slate-700">{t('projects.list.description')}</label>
             <textarea
               rows="3"
               value={formData.description}
@@ -214,7 +222,7 @@ export default function ProjectsPage({ apiUrl, token }) {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700">Fecha Inicio</label>
+              <label className="block text-sm font-medium text-slate-700">{t('projects.list.startDate')}</label>
               <input
                 type="date"
                 value={formData.start_date}
@@ -223,7 +231,7 @@ export default function ProjectsPage({ apiUrl, token }) {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700">Fecha Fin</label>
+              <label className="block text-sm font-medium text-slate-700">{t('projects.list.endDate')}</label>
               <input
                 type="date"
                 value={formData.end_date}
@@ -233,16 +241,16 @@ export default function ProjectsPage({ apiUrl, token }) {
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700">Estado</label>
+            <label className="block text-sm font-medium text-slate-700">{t('projects.list.statusLabel')}</label>
             <select
               value={formData.status}
               onChange={e => setFormData({...formData, status: e.target.value})}
               className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-brand focus:ring-brand"
             >
-              <option value="active">Activo</option>
-              <option value="on_hold">En Espera</option>
-              <option value="completed">Completado</option>
-              <option value="archived">Archivado</option>
+              <option value="active">{t('projects.status.active')}</option>
+              <option value="on_hold">{t('projects.status.on_hold')}</option>
+              <option value="completed">{t('projects.status.completed')}</option>
+              <option value="archived">{t('projects.status.archived')}</option>
             </select>
           </div>
           <div className="flex justify-end gap-2 pt-4">
@@ -251,14 +259,14 @@ export default function ProjectsPage({ apiUrl, token }) {
               onClick={() => setModalOpen(false)}
               className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
-              Cancelar
+              {t('projects.list.cancel')}
             </button>
             <button
               type="submit"
               disabled={saving}
               className="rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand/90 disabled:opacity-50"
             >
-              {saving ? 'Guardando...' : 'Guardar'}
+              {saving ? t('projects.list.saving') : t('projects.list.save')}
             </button>
           </div>
         </form>
@@ -275,15 +283,15 @@ export default function ProjectsPage({ apiUrl, token }) {
           <div className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-full bg-white shadow-sm text-slate-300">
             <i className="bi bi-kanban text-3xl" />
           </div>
-          <h3 className="text-lg font-bold text-slate-900">No hay proyectos</h3>
+          <h3 className="text-lg font-bold text-slate-900">{t('projects.list.emptyTitle')}</h3>
           <p className="mt-2 text-slate-500">
-            No se encontraron proyectos registrados.
+            {t('projects.list.emptyDescription')}
           </p>
           <button
             onClick={handleCreate}
             className="mt-4 inline-flex items-center gap-1 rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand/90"
           >
-            Crear primer proyecto
+            {t('projects.list.createFirst')}
           </button>
         </div>
       )}
@@ -293,11 +301,11 @@ export default function ProjectsPage({ apiUrl, token }) {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-4 py-3 text-left">Nombre</th>
-                <th className="px-4 py-3 text-left">Estado</th>
-                <th className="px-4 py-3 text-left">Inicio</th>
-                <th className="px-4 py-3 text-left">Fin</th>
-                <th className="px-4 py-3 text-right">Acciones</th>
+                <th className="px-4 py-3 text-left">{t('projects.list.colName')}</th>
+                <th className="px-4 py-3 text-left">{t('projects.list.colStatus')}</th>
+                <th className="px-4 py-3 text-left">{t('projects.list.colStart')}</th>
+                <th className="px-4 py-3 text-left">{t('projects.list.colEnd')}</th>
+                <th className="px-4 py-3 text-right">{t('projects.list.colActions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -321,7 +329,7 @@ export default function ProjectsPage({ apiUrl, token }) {
                       <Link
                         to={`/dashboard/projects/${proj.id}`}
                         className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-brand"
-                        title="Ver Detalles"
+                        title={t('projects.list.viewDetails')}
                       >
                         <i className="bi bi-eye" />
                       </Link>
@@ -329,7 +337,7 @@ export default function ProjectsPage({ apiUrl, token }) {
                         type="button"
                         onClick={() => handleEdit(proj)}
                         className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                        title="Editar"
+                        title={t('projects.list.edit')}
                       >
                         <i className="bi bi-pencil" />
                       </button>
@@ -337,7 +345,7 @@ export default function ProjectsPage({ apiUrl, token }) {
                         type="button"
                         onClick={() => handleDelete(proj.id)}
                         className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
-                        title="Eliminar"
+                        title={t('projects.list.delete')}
                       >
                         <i className="bi bi-trash" />
                       </button>
@@ -347,7 +355,7 @@ export default function ProjectsPage({ apiUrl, token }) {
               ))}
             </tbody>
           </table>
-          
+
            {totalPages > 1 && (
             <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
               <button
@@ -357,10 +365,10 @@ export default function ProjectsPage({ apiUrl, token }) {
                 className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
                 <i className="bi bi-chevron-left" />
-                Anterior
+                {t('projects.list.previous')}
               </button>
               <span>
-                Página {page} de {totalPages}
+                {t('projects.list.pageOf', { page, total: totalPages })}
               </span>
               <button
                 type="button"
@@ -368,7 +376,7 @@ export default function ProjectsPage({ apiUrl, token }) {
                 onClick={() => setPage((p) => p + 1)}
                 className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
-                Siguiente
+                {t('projects.list.next')}
                 <i className="bi bi-chevron-right" />
               </button>
             </div>

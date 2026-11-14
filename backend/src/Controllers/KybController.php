@@ -6,6 +6,7 @@ use App\Database;
 use App\Support\Response;
 use App\Support\Auth;
 use App\Support\AuditLogger;
+use App\Support\Schema;
 use PDO;
 
 class KybController
@@ -40,6 +41,8 @@ class KybController
 
         try { $this->pdo->exec("ALTER TABLE kyb_requests ADD COLUMN documents JSON NULL"); } catch (\Throwable $e) {}
         try { $this->pdo->exec("ALTER TABLE kyb_requests ADD COLUMN reviewed_by_user_id CHAR(36) NULL"); } catch (\Throwable $e) {}
+
+        Schema::ensureKybStatusEnum($this->pdo);
     }
 
     public function handle(array $segments, string $method)
@@ -115,7 +118,7 @@ class KybController
         $limit = max(1, min(100, $limit));
         $offset = ($page - 1) * $limit;
         
-        $baseSql = "FROM kyb_requests k JOIN companies c ON k.company_id = c.id WHERE 1=1";
+        $baseSql = "FROM kyb_requests k JOIN companies c ON k.company_id = c.id WHERE 1=1 AND c.deleted_at IS NULL";
         $params = [];
         
         if ($status) {
@@ -221,6 +224,13 @@ class KybController
         
         if (!$companyId) {
             Response::error('company_id requerido', 400);
+            return;
+        }
+
+        $stmtCompany = $this->pdo->prepare("SELECT id FROM companies WHERE id = :cid AND deleted_at IS NULL LIMIT 1");
+        $stmtCompany->execute([':cid' => $companyId]);
+        if (!$stmtCompany->fetch()) {
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 

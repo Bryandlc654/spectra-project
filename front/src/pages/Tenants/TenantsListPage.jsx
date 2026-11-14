@@ -1,16 +1,18 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
-import { createApi } from '../../lib/api';
+import { createApi, downloadFile } from '../../lib/api';
 import { normalizePageResponse } from '../../lib/pagination';
 import { useAuth } from "../../context/AuthContext";
 import { PLATFORM_ROLES } from '../../lib/platformRoles';
 import ConfirmModal from '../../components/ConfirmModal';
 import Modal from '../../components/Modal';
 import { useToast } from '../../components/ToastProvider';
+import { useI18n } from '../../i18n/I18nContext';
 import TenantImportModal from './TenantImportModal';
 
 function ActionMenu({ tenant, onAction }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const buttonRef = useRef(null);
   const [position, setPosition] = useState({ top: 0, left: 0 });
@@ -68,32 +70,23 @@ function ActionMenu({ tenant, onAction }) {
             to={`/dashboard/tenants/${tenant.id}`}
             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition"
           >
-            <i className="bi bi-eye" /> Ver detalle
+            <i className="bi bi-eye" /> {t('tenants.common.viewDetail')}
           </Link>
           <Link
             to={`/dashboard/tenants/${tenant.id}/members`}
             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition"
           >
-            <i className="bi bi-people" /> Ver miembros
+            <i className="bi bi-people" /> {t('tenants.list.members')}
           </Link>
           <Link
-            to={`/dashboard/audit?tenant_id=${tenant.id}`}
+            to={`/dashboard/audit?company_id=${tenant.id}`}
             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition"
           >
-            <i className="bi bi-clock-history" /> Ver auditoría
+            <i className="bi bi-clock-history" /> {t('tenants.list.audit')}
           </Link>
           
           {!isSupport && (
             <>
-              <button
-                onClick={() => {
-                  setOpen(false);
-                  onAction('impersonate', tenant);
-                }}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition"
-              >
-                <i className="bi bi-incognito" /> Vista soporte
-              </button>
               <div className="my-1 border-t border-slate-100" />
               <button
                 onClick={() => {
@@ -102,7 +95,7 @@ function ActionMenu({ tenant, onAction }) {
                 }}
                 className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition"
               >
-                <i className="bi bi-pencil" /> Editar
+                <i className="bi bi-pencil" /> {t('tenants.common.edit')}
               </button>
               <button
                 onClick={() => {
@@ -117,11 +110,11 @@ function ActionMenu({ tenant, onAction }) {
               >
                 {tenant.status === 'active' ? (
                   <>
-                    <i className="bi bi-pause-circle" /> Suspender
+                    <i className="bi bi-pause-circle" /> {t('tenants.list.suspend')}
                   </>
                 ) : (
                   <>
-                    <i className="bi bi-play-circle" /> Reactivar
+                    <i className="bi bi-play-circle" /> {t('tenants.list.reactivate')}
                   </>
                 )}
               </button>
@@ -133,7 +126,7 @@ function ActionMenu({ tenant, onAction }) {
                 }}
                 className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition"
               >
-                <i className="bi bi-trash" /> Eliminar
+                <i className="bi bi-trash" /> {t('tenants.common.delete')}
               </button>
             </>
           )}
@@ -146,6 +139,8 @@ function ActionMenu({ tenant, onAction }) {
 
 export default function TenantsListPage({ apiUrl, token }) {
   const { user } = useAuth();
+  const { t, language } = useI18n();
+  const locale = language === 'en' ? 'en-US' : 'es-ES';
   const isSupport = user?.platform_role === PLATFORM_ROLES.SUPPORT;
   const api = useMemo(() => createApi({ baseUrl: apiUrl, token }), [apiUrl, token]);
   const toast = useToast();
@@ -201,11 +196,16 @@ export default function TenantsListPage({ apiUrl, token }) {
 
   const timezonesById = useMemo(() => {
     const m = new Map();
-    for (const t of timezones) m.set(String(t.id), t);
+    for (const tz of timezones) m.set(String(tz.id), tz);
     return m;
   }, [timezones]);
 
+  // Cada carga recibe un número; solo se aplica la respuesta de la más reciente,
+  // para que una petición lenta anterior no pise el resultado de un filtro nuevo.
+  const loadSeq = useRef(0);
+
   async function load(nextPage = page) {
+    const seq = ++loadSeq.current;
     setLoading(true);
     setErr('');
     try {
@@ -218,13 +218,15 @@ export default function TenantsListPage({ apiUrl, token }) {
       if (date) params.set('date', date);
 
       const data = await api.get(`/api/tenants?${params.toString()}`);
+      if (seq !== loadSeq.current) return; // respuesta obsoleta
       const out = normalizePageResponse(data);
       setRows(out.items);
       setMeta(out.meta);
     } catch (e) {
+      if (seq !== loadSeq.current) return;
       setErr(e.message);
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }
 
@@ -263,57 +265,14 @@ export default function TenantsListPage({ apiUrl, token }) {
   }, []);
 
   function applyFilters() {
-    setPage(1);
-    load(1);
+    if (page !== 1) {
+      setPage(1); // el efecto de [page] dispara la carga
+    } else {
+      load(1);
+    }
   }
 
   async function handleAction(type, tenant) {
-    if (type === 'impersonate') {
-      setActionLoading(tenant.id);
-      try {
-        const res = await api.post(`/api/tenants/${tenant.id}/impersonate`, { 
-          reason: 'Soporte Técnico',
-          duration_minutes: 60 
-        });
-        
-        const { token } = res.data;
-        
-        // Construct impersonated session
-        const impersonatedSession = {
-          token,
-          user: {
-            id: 'impersonated',
-            full_name: `Soporte @ ${tenant.legal_name}`,
-            email: 'support@spectra.internal',
-            platform_role: 'company_admin',
-            is_impersonated: true,
-            company_id: tenant.id
-          }
-        };
-
-        // Save original session if not already saved (to avoid overwriting with another impersonated session)
-        const currentSession = localStorage.getItem('spectra_session');
-        if (currentSession) {
-          const parsed = JSON.parse(currentSession);
-          if (!parsed.user.is_impersonated) {
-            localStorage.setItem('spectra_original_session', currentSession);
-          }
-        }
-
-        // Persist and redirect
-        localStorage.setItem('spectra_session', JSON.stringify(impersonatedSession));
-        toast.success(`Iniciando sesión como admin en ${tenant.legal_name}...`);
-        
-        // Force reload to apply new session
-        window.location.href = '/dashboard';
-
-      } catch (e) {
-        toast.error(e.message || 'Error al iniciar impersonación');
-      } finally {
-        setActionLoading(null);
-      }
-      return;
-    }
     if (type === 'toggle_status') {
       setReason('');
       setConfirmAction({
@@ -346,11 +305,11 @@ export default function TenantsListPage({ apiUrl, token }) {
     setActionLoading(editForm.id);
     try {
       await api.put(`/api/tenants/${editForm.id}`, editForm);
-      toast.success('Empresa actualizada correctamente');
+      toast.success(t('tenants.list.updateSuccess'));
       setOpenEdit(false);
       load();
     } catch (err) {
-      toast.error(err.message || 'Error al actualizar');
+      toast.error(err.message || t('tenants.list.updateError'));
     } finally {
       setActionLoading(null);
     }
@@ -361,7 +320,11 @@ export default function TenantsListPage({ apiUrl, token }) {
     const { type, tenant } = confirmAction;
     
     if (type === 'suspend' && !reason.trim()) {
-      toast.error('El motivo es requerido para suspender una empresa');
+      toast.error(t('tenants.list.suspendReasonRequired'));
+      return;
+    }
+    if (type === 'delete' && reason.trim() !== String(tenant.legal_name || '').trim()) {
+      toast.error(t('tenants.list.deleteConfirmMismatch'));
       return;
     }
 
@@ -369,17 +332,17 @@ export default function TenantsListPage({ apiUrl, token }) {
     try {
       if (type === 'delete') {
         await api.del(`/api/tenants/${tenant.id}`);
-        toast.success('Empresa eliminada correctamente');
+        toast.success(t('tenants.list.deleteSuccess'));
       } else {
         const endpoint = type === 'suspend' ? 'suspend' : 'activate'; 
         await api.post(`/api/tenants/${tenant.id}/${endpoint}`, { reason });
-        toast.success(`Empresa ${type === 'suspend' ? 'suspendida' : 'reactivada'} correctamente`);
+        toast.success(t(type === 'suspend' ? 'tenants.list.suspendSuccess' : 'tenants.list.activateSuccess'));
       }
       
       setConfirmAction(null);
       await load();
     } catch (e) {
-      toast.error(e.message || 'Error al ejecutar acción');
+      toast.error(e.message || t('tenants.list.actionError'));
     } finally {
       setActionLoading(null);
     }
@@ -392,57 +355,65 @@ export default function TenantsListPage({ apiUrl, token }) {
     if (countryId) params.set('country_id', countryId);
     if (date) params.set('date', date);
     
-    const url = `${apiUrl}/api/tenants/export?${params.toString()}`;
-    window.open(url, '_blank');
+    downloadFile(apiUrl, `/api/tenants/export?${params.toString()}`, 'empresas.csv')
+      .catch((e) => toast.error(e.message || t('tenants.list.actionError')));
+  }
+
+  function statusLabel(value) {
+    if (value === 'active') return t('tenants.common.active');
+    if (value === 'suspended') return t('tenants.common.suspended');
+    if (value === 'pending') return t('tenants.common.pending');
+    if (value === 'inactive') return t('tenants.common.inactive');
+    return value || t('tenants.common.notAvailable');
   }
 
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="text-xs font-semibold tracking-widest text-slate-500 uppercase">Empresas</div>
-          <h1 className="text-xl font-bold">Lista de Empresas</h1>
-          <p className="text-sm text-slate-600">Gestión centralizada de tenants, estados y accesos.</p>
+          <div className="text-xs font-semibold tracking-widest text-slate-500 uppercase">{t('tenants.list.eyebrow')}</div>
+          <h1 className="text-xl font-bold">{t('tenants.list.title')}</h1>
+          <p className="text-sm text-slate-600">{t('tenants.list.subtitle')}</p>
         </div>
       </div>
 
       <div className="rounded-2xl bg-white border border-slate-200 p-5 shadow-sm">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-5 items-end">
           <div className="md:col-span-2">
-            <label className="text-xs font-semibold text-slate-600">Buscar</label>
+            <label className="text-xs font-semibold text-slate-600">{t('tenants.common.search')}</label>
             <div className="relative mt-1">
               <i className="bi bi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Razón social, nombre comercial..."
+                placeholder={t('tenants.list.searchPlaceholder')}
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 py-2.5 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand transition"
               />
             </div>
           </div>
           
           <div>
-            <label className="text-xs font-semibold text-slate-600">Estado</label>
+            <label className="text-xs font-semibold text-slate-600">{t('tenants.common.status')}</label>
             <select
               value={status}
               onChange={(e) => setStatus(e.target.value)}
               className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand transition"
             >
-              <option value="">Todos</option>
-              <option value="active">Activo</option>
-              <option value="suspended">Suspendido</option>
-              <option value="pending">Pendiente</option>
+              <option value="">{t('tenants.common.all')}</option>
+              <option value="active">{t('tenants.common.active')}</option>
+              <option value="suspended">{t('tenants.common.suspended')}</option>
+              <option value="pending">{t('tenants.common.pending')}</option>
             </select>
           </div>
 
           <div>
-            <label className="text-xs font-semibold text-slate-600">País</label>
+            <label className="text-xs font-semibold text-slate-600">{t('tenants.list.country')}</label>
             <select
               value={countryId}
               onChange={(e) => setCountryId(e.target.value)}
               className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand transition"
             >
-              <option value="">Todos</option>
+              <option value="">{t('tenants.common.all')}</option>
               {countries.map(c => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
@@ -450,7 +421,7 @@ export default function TenantsListPage({ apiUrl, token }) {
           </div>
 
           <div>
-            <label className="text-xs font-semibold text-slate-600">Fecha creación</label>
+            <label className="text-xs font-semibold text-slate-600">{t('tenants.list.createdDate')}</label>
             <input
               type="date"
               value={date}
@@ -466,7 +437,7 @@ export default function TenantsListPage({ apiUrl, token }) {
               className="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-60 transition shadow-sm"
               type="button"
             >
-              Filtrar
+              {t('tenants.common.filter')}
             </button>
             
             {!isSupport && (
@@ -475,7 +446,8 @@ export default function TenantsListPage({ apiUrl, token }) {
               disabled={loading}
               className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-60 transition shadow-sm"
               type="button"
-              title="Importar CSV"
+              title={t('tenants.list.importCsv')}
+              aria-label={t('tenants.list.importCsv')}
             >
               <i className="bi bi-upload" />
             </button>
@@ -486,7 +458,8 @@ export default function TenantsListPage({ apiUrl, token }) {
               disabled={loading}
               className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-60 transition shadow-sm"
               type="button"
-              title="Exportar CSV"
+              title={t('tenants.list.exportCsv')}
+              aria-label={t('tenants.list.exportCsv')}
             >
               <i className="bi bi-download" />
             </button>
@@ -510,7 +483,7 @@ export default function TenantsListPage({ apiUrl, token }) {
               <div key={r.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex items-start justify-between">
                   <div>
-                    <div className="font-bold text-slate-900">{r.legal_name}</div>
+                    <Link to={`/dashboard/tenants/${r.id}`} className="font-bold text-slate-900 hover:text-brand hover:underline">{r.legal_name}</Link>
                     <div className="text-xs text-slate-500">{r.trade_name || '—'}</div>
                   </div>
                   <ActionMenu tenant={r} onAction={handleAction} />
@@ -518,7 +491,7 @@ export default function TenantsListPage({ apiUrl, token }) {
                 
                 <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
                   <div>
-                    <span className="text-xs font-semibold text-slate-500 block">Ubicación</span>
+                    <span className="text-xs font-semibold text-slate-500 block">{t('tenants.list.location')}</span>
                     <div className="flex items-center gap-1 mt-1">
                       {country && <span className="text-slate-700">{country.iso2}</span>}
                       {tz && <span className="text-xs text-slate-400">({tz.name})</span>}
@@ -526,7 +499,7 @@ export default function TenantsListPage({ apiUrl, token }) {
                   </div>
                   
                   <div>
-                    <span className="text-xs font-semibold text-slate-500 block">Estado</span>
+                    <span className="text-xs font-semibold text-slate-500 block">{t('tenants.common.status')}</span>
                     <span
                         className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold mt-1 border ${
                           r.status === 'active'
@@ -536,19 +509,19 @@ export default function TenantsListPage({ apiUrl, token }) {
                             : 'bg-slate-50 text-slate-600 border-slate-200'
                         }`}
                       >
-                        {r.status === 'active' ? 'Activo' : r.status === 'suspended' ? 'Suspendido' : r.status}
+                        {statusLabel(r.status)}
                       </span>
                   </div>
 
                   <div>
-                    <span className="text-xs font-semibold text-slate-500 block">Usuarios</span>
+                    <span className="text-xs font-semibold text-slate-500 block">{t('tenants.list.users')}</span>
                     <div className="flex items-center gap-1 mt-1 text-slate-700">
                        <i className="bi bi-people-fill text-slate-400" /> {r.stats?.users_count ?? 0}
                     </div>
                   </div>
 
                   <div>
-                    <span className="text-xs font-semibold text-slate-500 block">Freelancers</span>
+                    <span className="text-xs font-semibold text-slate-500 block">{t('tenants.list.freelancers')}</span>
                     <div className="flex items-center gap-1 mt-1 text-slate-700">
                        <i className="bi bi-briefcase-fill text-slate-400" /> {r.stats?.freelancers_count ?? 0}
                     </div>
@@ -556,8 +529,8 @@ export default function TenantsListPage({ apiUrl, token }) {
                 </div>
 
                 <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
-                    <span>Creado: {r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'}</span>
-                    <span>Actividad: {r.last_activity_at ? new Date(r.last_activity_at).toLocaleDateString() : '—'}</span>
+                    <span>{t('tenants.list.createdLabel', { date: r.created_at ? new Date(r.created_at).toLocaleDateString(locale) : '—' })}</span>
+                    <span>{t('tenants.list.activityLabel', { date: r.last_activity_at ? new Date(r.last_activity_at).toLocaleDateString(locale) : '—' })}</span>
                 </div>
               </div>
             );
@@ -565,7 +538,7 @@ export default function TenantsListPage({ apiUrl, token }) {
           
           {!rows.length && !loading && (
              <div className="text-center py-10 text-slate-500 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                No se encontraron empresas.
+                {t('tenants.list.emptyMobile')}
              </div>
           )}
         </div>
@@ -575,12 +548,12 @@ export default function TenantsListPage({ apiUrl, token }) {
           <table className="w-full text-sm text-left">
             <thead>
               <tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-500 bg-slate-50/50">
-                <th className="py-3 px-3 font-semibold rounded-tl-xl">Empresa / Contacto</th>
-                <th className="py-3 px-3 font-semibold">Ubicación</th>
-                <th className="py-3 px-3 font-semibold">Estadísticas</th>
-                <th className="py-3 px-3 font-semibold">Estado</th>
-                <th className="py-3 px-3 font-semibold">Creado</th>
-                <th className="py-3 px-3 font-semibold text-right rounded-tr-xl">Acciones</th>
+                <th className="py-3 px-3 font-semibold rounded-tl-xl">{t('tenants.list.companyContact')}</th>
+                <th className="py-3 px-3 font-semibold">{t('tenants.list.location')}</th>
+                <th className="py-3 px-3 font-semibold">{t('tenants.list.stats')}</th>
+                <th className="py-3 px-3 font-semibold">{t('tenants.common.status')}</th>
+                <th className="py-3 px-3 font-semibold">{t('tenants.common.createdAt')}</th>
+                <th className="py-3 px-3 font-semibold text-right rounded-tr-xl">{t('tenants.common.actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -592,7 +565,7 @@ export default function TenantsListPage({ apiUrl, token }) {
                 return (
                   <tr key={r.id} className="group hover:bg-slate-50/80 transition">
                     <td className="py-3 px-3">
-                      <div className="font-bold text-slate-900">{r.legal_name}</div>
+                      <Link to={`/dashboard/tenants/${r.id}`} className="font-bold text-slate-900 hover:text-brand hover:underline">{r.legal_name}</Link>
                       <div className="text-xs text-slate-500">{r.trade_name || '—'}</div>
                       {/* Placeholder for owner if available */}
                       {r.owner && (
@@ -620,18 +593,18 @@ export default function TenantsListPage({ apiUrl, token }) {
 
                     <td className="py-3 px-3">
                       <div className="flex gap-3 text-xs">
-                        <div className="text-slate-600" title="Usuarios internos">
+                        <div className="text-slate-600" title={t('tenants.list.internalUsers')}>
                           <i className="bi bi-people-fill mr-1 text-slate-400" />
                           <span className="font-semibold">{r.stats?.users_count ?? '—'}</span>
                         </div>
-                        <div className="text-slate-600" title="Freelancers activos">
+                        <div className="text-slate-600" title={t('tenants.list.activeFreelancers')}>
                           <i className="bi bi-briefcase-fill mr-1 text-slate-400" />
                           <span className="font-semibold">{r.stats?.freelancers_count ?? '—'}</span>
                         </div>
                       </div>
                       {/* Last activity placeholder */}
                       <div className="mt-1 text-[10px] text-slate-400">
-                        Actividad: {r.last_activity_at ? new Date(r.last_activity_at).toLocaleDateString() : '—'}
+                        {t('tenants.list.activityLabel', { date: r.last_activity_at ? new Date(r.last_activity_at).toLocaleDateString(locale) : '—' })}
                       </div>
                     </td>
 
@@ -645,12 +618,12 @@ export default function TenantsListPage({ apiUrl, token }) {
                             : 'bg-slate-50 text-slate-600 border-slate-200'
                         }`}
                       >
-                        {r.status === 'active' ? 'Activo' : r.status === 'suspended' ? 'Suspendido' : r.status}
+                        {statusLabel(r.status)}
                       </span>
                     </td>
 
                     <td className="py-3 px-3 text-xs text-slate-500">
-                      {r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'}
+                      {r.created_at ? new Date(r.created_at).toLocaleDateString(locale) : '—'}
                     </td>
 
                     <td className="py-3 px-3 text-right relative">
@@ -660,13 +633,22 @@ export default function TenantsListPage({ apiUrl, token }) {
                 );
               })}
 
+              {!rows.length && loading ? (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-slate-500" role="status" aria-live="polite">
+                    <span className="inline-block w-4 h-4 mr-2 align-middle border-2 border-slate-300 border-t-brand rounded-full animate-spin" />
+                    {t('tenants.common.loading')}
+                  </td>
+                </tr>
+              ) : null}
+
               {!rows.length && !loading ? (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-slate-500">
                     <div className="mx-auto h-12 w-12 rounded-full bg-slate-50 flex items-center justify-center mb-3 text-slate-400 text-xl">
                       <i className="bi bi-search" />
                     </div>
-                    No se encontraron empresas con los filtros seleccionados.
+                    {t('tenants.list.emptyFiltered')}
                   </td>
                 </tr>
               ) : null}
@@ -676,7 +658,7 @@ export default function TenantsListPage({ apiUrl, token }) {
 
         <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4">
           <div className="text-xs text-slate-500">
-            Mostrando <span className="font-semibold text-slate-700">{rows.length}</span> de <span className="font-semibold text-slate-700">{meta.total}</span> resultados
+            {loading ? t('tenants.common.loading') : t('tenants.common.showing', { count: rows.length, total: meta.total })}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -685,10 +667,10 @@ export default function TenantsListPage({ apiUrl, token }) {
               className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition"
               type="button"
             >
-              Anterior
+              {t('tenants.common.previous')}
             </button>
             <div className="text-sm font-medium text-slate-700 min-w-[3rem] text-center">
-              {meta.page} / {meta.totalPages}
+              {t('tenants.common.pageOf', { page: meta.page, total: meta.totalPages })}
             </div>
             <button
               onClick={() => setPage((p) => Math.min(meta.totalPages, p + 1))}
@@ -696,7 +678,7 @@ export default function TenantsListPage({ apiUrl, token }) {
               className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition"
               type="button"
             >
-              Siguiente
+              {t('tenants.common.next')}
             </button>
           </div>
         </div>
@@ -704,12 +686,12 @@ export default function TenantsListPage({ apiUrl, token }) {
 
       <Modal
         open={openEdit}
-        title="Editar Empresa"
+        title={t('tenants.list.editTitle')}
         onClose={() => setOpenEdit(false)}
       >
         <form onSubmit={submitEdit} className="space-y-4">
           <div>
-            <label className="block text-sm font-semibold text-slate-700">Razón Social</label>
+            <label className="block text-sm font-semibold text-slate-700">{t('tenants.list.legalName')}</label>
             <input
               required
               className="mt-1 w-full rounded-xl border border-slate-300 p-2.5 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/10"
@@ -718,7 +700,7 @@ export default function TenantsListPage({ apiUrl, token }) {
             />
           </div>
           <div>
-            <label className="block text-sm font-semibold text-slate-700">Nombre Comercial</label>
+            <label className="block text-sm font-semibold text-slate-700">{t('tenants.list.tradeName')}</label>
             <input
               className="mt-1 w-full rounded-xl border border-slate-300 p-2.5 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/10"
               value={editForm.trade_name}
@@ -727,13 +709,13 @@ export default function TenantsListPage({ apiUrl, token }) {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-semibold text-slate-700">País</label>
+              <label className="block text-sm font-semibold text-slate-700">{t('tenants.list.country')}</label>
               <select
                 className="mt-1 w-full rounded-xl border border-slate-300 p-2.5 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/10"
                 value={editForm.country_id}
                 onChange={(e) => setEditForm({ ...editForm, country_id: e.target.value })}
               >
-                <option value="">Seleccionar...</option>
+                <option value="">{t('tenants.common.select')}</option>
                 {countries.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
@@ -742,13 +724,13 @@ export default function TenantsListPage({ apiUrl, token }) {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-semibold text-slate-700">Moneda</label>
+              <label className="block text-sm font-semibold text-slate-700">{t('tenants.common.currency')}</label>
               <select
                 className="mt-1 w-full rounded-xl border border-slate-300 p-2.5 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/10"
                 value={editForm.default_currency_id}
                 onChange={(e) => setEditForm({ ...editForm, default_currency_id: e.target.value })}
               >
-                <option value="">Seleccionar...</option>
+                <option value="">{t('tenants.common.select')}</option>
                 {currencies.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.code} - {c.name}
@@ -758,16 +740,16 @@ export default function TenantsListPage({ apiUrl, token }) {
             </div>
           </div>
           <div>
-            <label className="block text-sm font-semibold text-slate-700">Zona Horaria</label>
+            <label className="block text-sm font-semibold text-slate-700">{t('tenants.list.timezone')}</label>
             <select
               className="mt-1 w-full rounded-xl border border-slate-300 p-2.5 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/10"
               value={editForm.timezone_id}
               onChange={(e) => setEditForm({ ...editForm, timezone_id: e.target.value })}
             >
-              <option value="">Seleccionar...</option>
-              {timezones.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
+              <option value="">{t('tenants.common.select')}</option>
+              {timezones.map((tz) => (
+                <option key={tz.id} value={tz.id}>
+                  {tz.name}
                 </option>
               ))}
             </select>
@@ -778,14 +760,14 @@ export default function TenantsListPage({ apiUrl, token }) {
               onClick={() => setOpenEdit(false)}
               className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
-              Cancelar
+              {t('tenants.common.cancel')}
             </button>
             <button
               type="submit"
               disabled={actionLoading === editForm.id}
               className="rounded-xl bg-brand px-4 py-2 text-sm font-bold text-white hover:bg-brand/90 disabled:opacity-70"
             >
-              {actionLoading === editForm.id ? 'Guardando...' : 'Guardar Cambios'}
+              {actionLoading === editForm.id ? t('tenants.common.saving') : t('tenants.list.saveChanges')}
             </button>
           </div>
         </form>
@@ -794,19 +776,19 @@ export default function TenantsListPage({ apiUrl, token }) {
       <ConfirmModal
         open={!!confirmAction}
         title={
-          confirmAction?.type === 'delete' ? 'Eliminar Empresa' :
-          confirmAction?.type === 'suspend' ? 'Suspender Empresa' : 'Reactivar Empresa'
+          confirmAction?.type === 'delete' ? t('tenants.list.deleteTitle') :
+          confirmAction?.type === 'suspend' ? t('tenants.list.suspendTitle') : t('tenants.list.activateTitle')
         }
         message={
           confirmAction?.type === 'delete'
-            ? `¿Estás seguro de que deseas eliminar a ${confirmAction?.tenant?.legal_name}? Esta acción no se puede deshacer.` :
+            ? t('tenants.list.deleteMessage', { name: confirmAction?.tenant?.legal_name }) :
           confirmAction?.type === 'suspend'
-            ? `¿Estás seguro de que deseas suspender a ${confirmAction?.tenant?.legal_name}? Los usuarios no podrán acceder.`
-            : `¿Deseas reactivar el acceso para ${confirmAction?.tenant?.legal_name}?`
+            ? t('tenants.list.suspendMessage', { name: confirmAction?.tenant?.legal_name })
+            : t('tenants.list.activateMessage', { name: confirmAction?.tenant?.legal_name })
         }
         confirmText={
-          confirmAction?.type === 'delete' ? 'Eliminar' :
-          confirmAction?.type === 'suspend' ? 'Suspender' : 'Reactivar'
+          confirmAction?.type === 'delete' ? t('tenants.common.delete') :
+          confirmAction?.type === 'suspend' ? t('tenants.list.suspend') : t('tenants.list.reactivate')
         }
         onClose={() => setConfirmAction(null)}
         onConfirm={executeStatusChange}
@@ -815,25 +797,40 @@ export default function TenantsListPage({ apiUrl, token }) {
       >
         {confirmAction?.type === 'suspend' && (
           <div className="mt-4">
-            <label className="block text-sm font-medium text-slate-700 mb-1">Motivo de suspensión <span className="text-red-600">*</span></label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">{t('tenants.list.suspendReasonLabel')} <span className="text-red-600">*</span></label>
             <textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               className="w-full rounded-xl border border-slate-300 shadow-sm focus:border-brand focus:ring-brand/10 p-2.5 text-sm"
-              placeholder="Indica el motivo por el cual se suspende esta empresa..."
+              placeholder={t('tenants.list.suspendReasonPlaceholder')}
               rows={3}
               required
             />
           </div>
         )}
+        {confirmAction?.type === 'delete' && (
+          <div className="mt-4">
+            <label htmlFor="tenant-delete-confirm" className="block text-sm font-medium text-slate-700 mb-1">
+              {t('tenants.list.deleteConfirmLabel', { name: confirmAction?.tenant?.legal_name })} <span className="text-red-600">*</span>
+            </label>
+            <input
+              id="tenant-delete-confirm"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              autoComplete="off"
+              className="w-full rounded-xl border border-slate-300 shadow-sm focus:border-red-500 focus:ring-red-500/10 p-2.5 text-sm"
+              placeholder={confirmAction?.tenant?.legal_name}
+            />
+          </div>
+        )}
         {confirmAction?.type === 'activate' && (
           <div className="mt-4">
-            <label className="block text-sm font-medium text-slate-700 mb-1">Motivo (opcional)</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">{t('tenants.list.reasonOptional')}</label>
             <textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               className="w-full rounded-xl border border-slate-300 shadow-sm focus:border-brand focus:ring-brand/10 p-2.5 text-sm"
-              placeholder="Nota opcional sobre la reactivación..."
+              placeholder={t('tenants.list.activateReasonPlaceholder')}
               rows={2}
             />
           </div>

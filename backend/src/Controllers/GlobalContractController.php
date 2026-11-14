@@ -76,6 +76,18 @@ class GlobalContractController
         $this->index(); // Reuse index logic for now, but strict role check passed
     }
 
+    /**
+     * Roles autorizados a ver contratos de cualquier freelancer.
+     * Alineado con hasAccess() del frontend para la sección 'contracts'.
+     */
+    private const CONTRACT_VIEWER_ROLES = ['super_admin', 'admin', 'legal', 'finance', 'company_admin'];
+
+    private function isContractViewer(): bool
+    {
+        $role = Auth::user()['platform_role'] ?? '';
+        return in_array($role, self::CONTRACT_VIEWER_ROLES, true);
+    }
+
     private function index(): void
     {
         try {
@@ -109,19 +121,34 @@ class GlobalContractController
                 $where[] = 'c.deleted_at IS NULL';
             }
 
-            if (!empty($_GET['status'])) {
-                $where[] = 'c.status = :status';
-                $params[':status'] = $_GET['status'];
-            }
+            if ($this->isContractViewer()) {
+                if (!empty($_GET['status'])) {
+                    $where[] = 'c.status = :status';
+                    $params[':status'] = $_GET['status'];
+                }
 
-            if (!empty($_GET['freelancer_id'])) {
+                if (!empty($_GET['freelancer_id'])) {
+                    $where[] = 'c.freelancer_id = :fid';
+                    $params[':fid'] = $_GET['freelancer_id'];
+                }
+            } else {
+                // Un freelancer solo puede ver sus propios contratos: el
+                // freelancer_id lo impone el servidor e ignora el query string,
+                // que de lo contrario era controlable por el cliente.
+                // El filtro por estado sí se respeta, ya no puede escapar del
+                // ámbito una vez que la consulta está acotada a su propio id.
                 $where[] = 'c.freelancer_id = :fid';
-                $params[':fid'] = $_GET['freelancer_id'];
+                $params[':fid'] = (string)Auth::userId();
+
+                if (!empty($_GET['status'])) {
+                    $where[] = 'c.status = :status';
+                    $params[':status'] = $_GET['status'];
+                }
             }
 
-            if ($q !== '') {
-                $where[] = '(c.title LIKE :q OR comp.legal_name LIKE :q)';
-                $params[':q'] = "%$q%";
+            if ($q !== '' && $this->isContractViewer()) {
+                $where[] = '(c.title LIKE :q_1 OR comp.legal_name LIKE :q_2)';
+                $params[':q_1'] = $params[':q_2'] = "%$q%";
             }
 
             $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
@@ -233,7 +260,7 @@ class GlobalContractController
             // Get a company
             $companyId = $this->pdo->query("SELECT id FROM companies ORDER BY created_at ASC LIMIT 1")->fetchColumn();
             if (!$companyId) {
-                Response::error('No hay tenants disponibles. Crea un tenant primero.', 409);
+                Response::error('No hay empresas disponibles. Crea una empresa primero.', 409);
                 return;
             }
 
@@ -327,7 +354,7 @@ class GlobalContractController
             $company = $companyStmt->fetch(PDO::FETCH_ASSOC);
 
             if (!$company) {
-                Response::error('No hay tenants peruanos disponibles. Crea un tenant de Perú primero.', 409);
+                Response::error('No hay empresas peruanas disponibles. Crea una empresa de Perú primero.', 409);
                 return;
             }
 
@@ -362,7 +389,7 @@ class GlobalContractController
             $existingId = $existsStmt->fetchColumn();
 
             if ($existingId) {
-                Response::json(['message' => 'Ya existe un contrato para este tenant peruano y freelancer', 'id' => $existingId]);
+                Response::json(['message' => 'Ya existe un contrato para esta empresa peruana y freelancer', 'id' => $existingId]);
                 return;
             }
 

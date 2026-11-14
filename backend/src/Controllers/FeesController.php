@@ -5,6 +5,7 @@ namespace App\Controllers;
 use App\Database;
 use App\Support\Response;
 use App\Support\AuditLogger;
+use App\Support\FeeRuleResolver;
 use PDO;
 use Exception;
 
@@ -18,6 +19,7 @@ class FeesController
         $this->pdo = $database->pdo();
         $this->audit = new AuditLogger($this->pdo);
         $this->ensureInvoicesTable(); // Ensure invoices table supports what we need
+        FeeRuleResolver::ensureSchema($this->pdo);
     }
 
     private function ensureInvoicesTable(): void
@@ -65,9 +67,8 @@ class FeesController
             try {
                 $currencyId = (int)($company['default_currency_id'] ?? 1);
 
-                // 2. Determine per-freelancer unit price
-                // Prefer explicit 'per_freelancer_fee'; fallback to 'platform_fee' for compatibility
-                $rule = null;
+                // 2. Legacy per-freelancer rule (fallback if no contract rules)
+                $legacyRule = null;
                 $stmtRule = $this->pdo->prepare("
                     SELECT * FROM company_fee_rules 
                     WHERE company_id = :cid 
@@ -77,50 +78,92 @@ class FeesController
                     LIMIT 1
                 ");
                 $stmtRule->execute([':cid' => $company['id']]);
-                $rule = $stmtRule->fetch(PDO::FETCH_ASSOC);
+                $legacyRule = $stmtRule->fetch(PDO::FETCH_ASSOC);
 
-                $unitPrice = $rule ? (float)$rule['value'] : 0.0;
-                if ($rule && !empty($rule['currency_id'])) {
-                    $currencyId = (int)$rule['currency_id'];
+                $legacyUnitPrice = $legacyRule ? (float)$legacyRule['value'] : 0.0;
+                if ($legacyRule && !empty($legacyRule['currency_id'])) {
+                    $currencyId = (int)$legacyRule['currency_id'];
                 }
 
-                // Optional default if no rule configured
-                if ($unitPrice <= 0) {
-                    // If no configured price, skip billing for this tenant (explicit policy)
+                // Active contracts overlapping the billing period
+                $stmtContracts = $this->pdo->prepare("
+                    SELECT c.id, c.title, c.freelancer_id, u.full_name AS freelancer_name
+                    FROM contracts c
+                    LEFT JOIN users u ON u.id = c.freelancer_id
+                    WHERE c.company_id = :cid
+                      AND c.status = 'active'
+                      AND (c.start_date IS NULL OR c.start_date <= :pend)
+                      AND (c.end_date IS NULL OR c.end_date >= :pstart)
+                    ORDER BY c.created_at ASC
+                ");
+                $stmtContracts->execute([
+                    ':cid' => $company['id'],
+                    ':pstart' => $periodStart,
+                    ':pend' => $periodEnd
+                ]);
+                $contracts = $stmtContracts->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+                if (empty($contracts)) {
                     continue;
                 }
 
-                // 3. Count active freelancers (distinct) with contracts overlapping the month
-                // Status filter: active contracts only
-                // Overlap condition: start_date <= periodEnd AND (end_date IS NULL OR end_date >= periodStart)
-                try {
-                    $stmtCount = $this->pdo->prepare("
-                        SELECT COUNT(DISTINCT c.freelancer_id) AS cnt
-                        FROM contracts c
-                        WHERE c.company_id = :cid
-                          AND c.status = 'active'
-                          AND (c.start_date IS NULL OR c.start_date <= :pend)
-                          AND (c.end_date IS NULL OR c.end_date >= :pstart)
-                    ");
-                    $stmtCount->execute([
-                        ':cid' => $company['id'],
-                        ':pstart' => $periodStart,
-                        ':pend' => $periodEnd
-                    ]);
-                    $activeFreelancers = (int)$stmtCount->fetchColumn();
-                } catch (\Throwable $e) {
-                    $activeFreelancers = 0;
+                $activeFreelancers = count(array_unique(array_filter(array_column($contracts, 'freelancer_id'))));
+                $hasContractRules = FeeRuleResolver::hasContractFeeRules($this->pdo, (string)$company['id']);
+
+                $items = [];
+                $totalAmount = 0.0;
+                $currencySet = [];
+
+                if ($hasContractRules) {
+                    foreach ($contracts as $contract) {
+                        $rule = FeeRuleResolver::resolveContractFee(
+                            $this->pdo,
+                            (string)$company['id'],
+                            (string)($contract['title'] ?? ''),
+                            $activeFreelancers
+                        );
+
+                        if (!$rule) {
+                            continue;
+                        }
+
+                        $fee = (float)($rule['value'] ?? 0);
+                        if ($fee <= 0) continue;
+
+                        $ruleCurrency = !empty($rule['currency_id']) ? (int)$rule['currency_id'] : $currencyId;
+                        $currencySet[$ruleCurrency] = true;
+
+                        $title = trim((string)($contract['title'] ?? 'Contrato'));
+                        $freelancer = trim((string)($contract['freelancer_name'] ?? ''));
+                        $concept = 'Tarifa contrato: ' . $title;
+                        if ($freelancer !== '') $concept .= ' - ' . $freelancer;
+
+                        $items[] = ['concept' => $concept, 'price' => $fee];
+                        $totalAmount += $fee;
+                    }
+                } else {
+                    if ($legacyUnitPrice <= 0 || $activeFreelancers <= 0) {
+                        continue;
+                    }
+
+                    $totalAmount = $legacyUnitPrice * $activeFreelancers;
+                    $items = [[
+                        'concept' => "Platform per-freelancer fee ($activeFreelancers) - $targetMonth",
+                        'price' => $totalAmount
+                    ]];
                 }
 
-                if ($activeFreelancers <= 0) {
-                    continue; // Nothing to bill this month
+                if (empty($items) || $totalAmount <= 0) {
+                    continue;
                 }
 
-                $totalAmount = $unitPrice * $activeFreelancers;
-                $items = [[
-                    'concept' => "Platform per-freelancer fee ($activeFreelancers) - $targetMonth",
-                    'price' => $totalAmount
-                ]];
+                if (count($currencySet) > 1) {
+                    $errors[] = "Company {$company['id']}: las reglas de tarifa usan monedas distintas. Unifica la moneda de las reglas.";
+                    continue;
+                }
+                if (count($currencySet) === 1) {
+                    $currencyId = (int)array_key_first($currencySet);
+                }
 
                 // 3. Check if invoice already exists for this month
                 $description = "Monthly Invoice " . $targetMonth;

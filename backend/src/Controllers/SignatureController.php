@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Database;
+use App\Support\HtmlSanitizer;
 use App\Support\Response;
 use Dompdf\Dompdf;
 use PDO;
@@ -500,6 +501,7 @@ class SignatureController
 
     private function sanitizeBody(string $body): string
     {
+        $body = HtmlSanitizer::stripCss($body);
         $body = str_ireplace(['<div>', '</div>'], ['<p>', '</p>'], $body);
         $allowed = '<p><br><b><strong><i><em><u><s><strike><ul><ol><li><h1><h2><h3><h4><blockquote><hr>';
         $body = strip_tags($body, $allowed);

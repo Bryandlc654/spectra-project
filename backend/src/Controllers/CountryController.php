@@ -122,8 +122,8 @@ final class CountryController
             return;
         }
 
-        $where[] = '(name LIKE :q OR iso2 LIKE :q)';
-        $params[':q'] = "%$q%";
+        $where[] = '(name LIKE :q_1 OR iso2 LIKE :q_2)';
+        $params[':q_1'] = $params[':q_2'] = "%$q%";
 
         $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
 

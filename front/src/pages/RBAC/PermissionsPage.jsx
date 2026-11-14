@@ -5,7 +5,7 @@ import RBACTabs from './RBACTabs';
 export const SYSTEM_PERMISSIONS = [
   {
     id: 'tenants',
-    name: 'Empresas (Tenants)',
+    name: 'Empresas',
     module: 'Core',
     description: 'Gestión del ciclo de vida de empresas, onboarding, validación y configuración de cuentas empresariales.'
   },
@@ -74,6 +74,330 @@ export const SYSTEM_PERMISSIONS = [
     name: 'Comunicados',
     module: 'Comunicación',
     description: 'Herramienta para el envío de notificaciones masivas, alertas de mantenimiento y novedades a los usuarios.'
+  },
+  {
+    id: 'dashboard',
+    name: 'Dashboard',
+    module: 'Core',
+    description: 'Panel principal con resumen de actividad y accesos rápidos.'
+  },
+  {
+    id: 'profile',
+    name: 'Mi Perfil',
+    module: 'Core',
+    description: 'Datos personales, seguridad de la cuenta y preferencias.'
+  },
+  {
+    id: 'integrations',
+    name: 'Integraciones',
+    module: 'Core',
+    description: 'Conexiones con servicios externos y configuración de APIs.'
+  },
+  {
+    id: 'company_tenant_management',
+    name: 'Gestión de Empresa',
+    module: 'Empresa',
+    description: 'Datos generales, configuración y estado de la empresa.'
+  },
+  {
+    id: 'company_internal_users',
+    name: 'Usuarios Internos',
+    module: 'Empresa',
+    description: 'Empleados y usuarios internos de la empresa.'
+  },
+  {
+    id: 'company_talent',
+    name: 'Talento / Freelancers',
+    module: 'Empresa',
+    description: 'Freelancers vinculados a la empresa y su gestión.'
+  },
+  {
+    id: 'company_contracts',
+    name: 'Contratos de Empresa',
+    module: 'Empresa',
+    description: 'Contratos de la empresa y seguimiento de firmas.'
+  },
+  {
+    id: 'company_onboarding',
+    name: 'Onboarding Operativo',
+    module: 'Empresa',
+    description: 'Procesos de incorporación operativa de la empresa.'
+  },
+  {
+    id: 'company_projects',
+    name: 'Proyectos de Empresa',
+    module: 'Empresa',
+    description: 'Proyectos, entregables y registro de tiempos.'
+  },
+  {
+    id: 'company_procurement',
+    name: 'Compras de Empresa',
+    module: 'Empresa',
+    description: 'Requisiciones y proveedores de la empresa.'
+  },
+  {
+    id: 'company_payroll',
+    name: 'Pagos y Nómina',
+    module: 'Empresa',
+    description: 'Nómina, pagos, billetera y adelantos de sueldo.'
+  },
+  {
+    id: 'company_billing',
+    name: 'Facturación de Empresa',
+    module: 'Empresa',
+    description: 'Facturas, cobros y documentos de facturación.'
+  },
+  {
+    id: 'company_reports',
+    name: 'Reportes de Empresa',
+    module: 'Empresa',
+    description: 'Reportes operativos y financieros de la empresa.'
+  },
+  {
+    id: 'company_audit',
+    name: 'Auditoría de Empresa',
+    module: 'Empresa',
+    description: 'Historial de acciones y trazabilidad de la empresa.'
+  },
+  {
+    id: 'payroll',
+    name: 'Nómina',
+    module: 'Empresa',
+    description: 'Ejecución de nómina, planillas y deducciones.'
+  },
+  {
+    id: 'payslips',
+    name: 'Recibos de Nómina',
+    module: 'Empleado',
+    description: 'Consulta de recibos y boletas de pago.'
+  },
+  {
+    id: 'benefits',
+    name: 'Beneficios',
+    module: 'Empleado',
+    description: 'Planes de beneficios y cobertura del empleado.'
+  },
+  {
+    id: 'documents',
+    name: 'Documentos',
+    module: 'Empleado',
+    description: 'Documentos personales y laborales del empleado.'
+  },
+  {
+    id: 'employee_documents',
+    name: 'Documentos de Empleado',
+    module: 'Empresa',
+    description: 'Gestión documental de los empleados de la empresa.'
+  },
+  {
+    id: 'time_off',
+    name: 'Permisos y Vacaciones',
+    module: 'Empleado',
+    description: 'Solicitudes de vacaciones, permisos y ausencias.'
+  },
+  {
+    id: 'expenses',
+    name: 'Gastos',
+    module: 'Empleado',
+    description: 'Registro, aprobación y reembolso de gastos.'
+  },
+  {
+    id: 'team',
+    name: 'Equipo',
+    module: 'Empresa',
+    description: 'Miembros del equipo, asignaciones y jerarquía directa.'
+  },
+  {
+    id: 'projects',
+    name: 'Proyectos',
+    module: 'Empresa',
+    description: 'Proyectos y seguimiento de tareas y entregables.'
+  },
+  {
+    id: 'timesheets',
+    name: 'Hojas de Tiempo',
+    module: 'Empresa',
+    description: 'Registro de horas trabajadas y entregables.'
+  },
+  {
+    id: 'procurement',
+    name: 'Compras',
+    module: 'Empresa',
+    description: 'Requisiciones, proveedores y órdenes de compra.'
+  },
+  {
+    id: 'reports',
+    name: 'Reportes',
+    module: 'Empresa',
+    description: 'Reportes operativos y financieros.'
+  },
+  {
+    id: 'org_chart',
+    name: 'Organigrama',
+    module: 'Empresa',
+    description: 'Estructura organizacional y relaciones del equipo.'
+  },
+  {
+    id: 'compliance',
+    name: 'Compliance',
+    module: 'Empleado',
+    description: 'Requisitos, documentos y formularios fiscales.'
+  },
+  {
+    id: 'onboarding',
+    name: 'Onboarding',
+    module: 'Empleado',
+    description: 'Proceso de incorporación del empleado.'
+  },
+  {
+    id: 'onboarding_admin',
+    name: 'Onboarding (Admin)',
+    module: 'Empresa',
+    description: 'Seguimiento de las incorporaciones del equipo.'
+  },
+  {
+    id: 'offboarding',
+    name: 'Offboarding',
+    module: 'Empleado',
+    description: 'Proceso de salida del empleado.'
+  },
+  {
+    id: 'offboarding_admin',
+    name: 'Offboarding (Admin)',
+    module: 'Empresa',
+    description: 'Seguimiento de las salidas del equipo.'
+  },
+  {
+    id: 'performance',
+    name: 'Desempeño',
+    module: 'Empresa',
+    description: 'Evaluaciones de desempeño y objetivos.'
+  },
+  {
+    id: 'advances',
+    name: 'Adelantos de Sueldo',
+    module: 'Empleado',
+    description: 'Solicitudes y gestión de adelantos de sueldo.'
+  },
+  {
+    id: 'cards',
+    name: 'Tarjetas',
+    module: 'Empleado',
+    description: 'Tarjetas corporativas y control de consumos.'
+  },
+  {
+    id: 'withdrawal_methods',
+    name: 'Métodos de Retiro',
+    module: 'Empleado',
+    description: 'Cuentas bancarias y métodos de pago del usuario.'
+  },
+  {
+    id: 'equipment',
+    name: 'Equipos',
+    module: 'Empresa',
+    description: 'Asignación de equipos y activos de la empresa.'
+  },
+  {
+    id: 'legal_entities',
+    name: 'Entidades Legales',
+    module: 'Legal',
+    description: 'Personas jurídicas y datos fiscales de la empresa.'
+  },
+  {
+    id: 'immigration',
+    name: 'Migración',
+    module: 'Legal',
+    description: 'Trámites migratorios, visados y documentación.'
+  },
+  {
+    id: 'background_checks',
+    name: 'Background Checks',
+    module: 'Legal',
+    description: 'Verificaciones de antecedentes y estudios de seguridad.'
+  },
+  {
+    id: 'contracts_templates',
+    name: 'Plantillas de Contratos',
+    module: 'Legal',
+    description: 'Plantillas globales para la generación de contratos.'
+  },
+  {
+    id: 'contracts_envelopes',
+    name: 'Firmas / Sobres',
+    module: 'Legal',
+    description: 'Envío, firma y seguimiento de documentos contractuales.'
+  },
+  {
+    id: 'freelancer',
+    name: 'Área Freelancer',
+    module: 'Freelancer',
+    description: 'Proyectos, pagos y perfil del freelancer.'
+  },
+  {
+    id: 'freelancer_projects',
+    name: 'Proyectos Freelancer',
+    module: 'Freelancer',
+    description: 'Proyectos y entregables asignados al freelancer.'
+  },
+  {
+    id: 'nps_survey',
+    name: 'Encuesta NPS',
+    module: 'Empleado',
+    description: 'Encuestas de satisfacción y clima laboral.'
+  },
+  {
+    id: 'nps_dashboard',
+    name: 'Dashboard NPS',
+    module: 'Empresa',
+    description: 'Resultados y métricas de satisfacción del equipo.'
+  },
+  {
+    id: 'support_tickets',
+    name: 'Tickets de Soporte',
+    module: 'Soporte',
+    description: 'Gestión de tickets e incidencias de soporte.'
+  },
+  {
+    id: 'support_companies',
+    name: 'Vista de Empresas (Soporte)',
+    module: 'Soporte',
+    description: 'Consulta de empresas en modo solo lectura.'
+  },
+  {
+    id: 'support_users',
+    name: 'Vista de Usuarios (Soporte)',
+    module: 'Soporte',
+    description: 'Consulta de usuarios en modo solo lectura.'
+  },
+  {
+    id: 'support_onboarding',
+    name: 'Onboarding (Soporte)',
+    module: 'Soporte',
+    description: 'Seguimiento de incorporaciones desde soporte.'
+  },
+  {
+    id: 'support_payments',
+    name: 'Incidencias de Pagos',
+    module: 'Soporte',
+    description: 'Consulta y gestión de incidencias de pagos.'
+  },
+  {
+    id: 'support_contracts',
+    name: 'Visor de Contratos (Soporte)',
+    module: 'Soporte',
+    description: 'Consulta de contratos desde soporte.'
+  },
+  {
+    id: 'support_moderation',
+    name: 'Moderación',
+    module: 'Soporte',
+    description: 'Moderación de cuentas y contenido reportado.'
+  },
+  {
+    id: 'support_audit',
+    name: 'Auditoría (Soporte)',
+    module: 'Soporte',
+    description: 'Historial de acciones visible para soporte.'
   }
 ];
 

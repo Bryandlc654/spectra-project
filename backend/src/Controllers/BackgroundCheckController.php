@@ -78,16 +78,16 @@ class BackgroundCheckController
 
         if (!$isSuperAdmin) {
             if ($isCompanyAdmin && $companyId) {
-                $sql .= " AND EXISTS (SELECT 1 FROM company_users cu WHERE cu.user_id = users.id AND cu.company_id LIKE ? AND cu.status = 'active')";
+                $sql .= " AND EXISTS (SELECT 1 FROM company_users cu WHERE cu.user_id = users.id AND cu.company_id = ? AND cu.status = 'active')";
                 $params[] = $companyId;
             } else {
-                $sql .= " AND id LIKE ?";
+                $sql .= " AND id = ?";
                 $params[] = $currentUser['id'];
             }
         }
 
         if ($q !== '') {
-            $sql .= " AND (full_name LIKE ? OR email LIKE ?)";
+            $sql .= " AND (full_name LIKE ? OR email = ?)";
             $params[] = "%$q%";
             $params[] = "%$q%";
         }
@@ -125,11 +125,11 @@ class BackgroundCheckController
         if (!$isSuperAdmin) {
              // If company admin, filter by company users
              if ($isCompanyAdmin && isset($currentUser['company_id'])) {
-                 $baseSql .= " AND bc.user_id IN (SELECT id FROM users WHERE company_id LIKE ?)";
+                 $baseSql .= " AND bc.user_id IN (SELECT id FROM users WHERE company_id = ?)";
                  $params[] = $currentUser['company_id'];
              } else {
                  // Regular user, only see own
-                 $baseSql .= " AND bc.user_id LIKE ?";
+                 $baseSql .= " AND bc.user_id = ?";
                  $params[] = $currentUser['id'];
              }
         }
@@ -169,7 +169,7 @@ class BackgroundCheckController
 
     private function show(string $id): void
     {
-        $stmt = $this->pdo->prepare("SELECT * FROM background_checks WHERE id LIKE ?");
+        $stmt = $this->pdo->prepare("SELECT * FROM background_checks WHERE id = ?");
         $stmt->execute([$id]);
         $check = $stmt->fetch(PDO::FETCH_ASSOC);
         
@@ -230,7 +230,7 @@ class BackgroundCheckController
         $stmt = $this->pdo->prepare("
             UPDATE background_checks 
             SET status = ?, report_url = ? 
-            WHERE id LIKE ?
+            WHERE id = ?
         ");
         $stmt->execute([$newStatus, $reportUrl, $checkId]);
 

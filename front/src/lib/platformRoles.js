@@ -36,8 +36,11 @@ export function setDynamicPermissions(permissionsMap) {
 }
 
 export function hasAccess(role, section, tenantRoles = []) {
-  // Explicitly deny 'onboarding' (doing it) for SUPER_ADMIN, as they don't need to be onboarded
-  if (role === PLATFORM_ROLES.SUPER_ADMIN && section === 'onboarding') return false;
+  // El onboarding propio es solo para Admin de Empresa y Freelancer.
+  // Los usuarios internos de la plataforma no pasan por onboarding.
+  if (section === 'onboarding') {
+    return [PLATFORM_ROLES.COMPANY_ADMIN, PLATFORM_ROLES.FREELANCER, 'freelance'].includes(role);
+  }
 
   // Explicitly deny 'support' section for SUPER_ADMIN as per requirements
   if (role === PLATFORM_ROLES.SUPER_ADMIN && section === 'support') return false;
@@ -66,8 +69,9 @@ export function hasAccess(role, section, tenantRoles = []) {
 
   // If dynamic permissions are loaded, use them
   if (DYNAMIC_PERMISSIONS && DYNAMIC_PERMISSIONS[role]) {
-      if (role === PLATFORM_ROLES.COMPANY_ADMIN && (section === 'company_tenant_management' || section === 'company_payroll')) return true;
-      
+      if (role === PLATFORM_ROLES.COMPANY_ADMIN && ['company_tenant_management', 'company_payroll', 'advances'].includes(section)) return true;
+      if (role === PLATFORM_ROLES.FREELANCER && section === 'advances') return true;
+
       return DYNAMIC_PERMISSIONS[role].includes(section);
   }
 
@@ -104,7 +108,7 @@ export function hasAccess(role, section, tenantRoles = []) {
               'documents', 'projects', 'timesheets',
               'benefits', 'payslips',
               // Permitir acceso a calculadora de sueldo (ruta usa sección 'freelancer')
-              'freelancer'
+              'freelancer', 'advances'
           ];
           if (adminAllowed.includes(section)) return true;
       }
@@ -128,7 +132,8 @@ export function hasAccess(role, section, tenantRoles = []) {
             'company_payroll',           // 2.8
             'company_billing',           // 2.9
             'company_reports',           // 2.10
-            'company_audit'              // 2.11
+            'company_audit',             // 2.11
+            'advances'
         ];
 
         if (companyPermissions.includes(section)) return true;
@@ -168,7 +173,7 @@ export function hasAccess(role, section, tenantRoles = []) {
   }
 
   if (role === PLATFORM_ROLES.FREELANCER || role === 'freelance') {
-    return ['dashboard', 'onboarding', 'offboarding', 'org_chart', 'expenses', 'compliance', 'freelancer_projects', 'freelancer'].includes(section);
+    return ['dashboard', 'onboarding', 'offboarding', 'org_chart', 'expenses', 'compliance', 'freelancer_projects', 'freelancer', 'advances'].includes(section);
   }
 
   // Always allow basic access for internal roles

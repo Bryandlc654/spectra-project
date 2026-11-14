@@ -42,6 +42,7 @@ class Auth
 
             self::$user = $user;
             self::checkReadOnly();
+            self::checkKybGate();
         } catch (\Throwable $e) {
             // Ignore
         }
@@ -91,10 +92,13 @@ class Auth
             $stmt = $pdo->prepare('
                 SELECT u.id, u.full_name, u.email, u.status, u.platform_role, u.global_permissions,
                        c.id as company_id, c.status as company_status,
+                       c.kyb_required,
+                       kr.status as kyb_status,
                        cs.read_only_mode
                 FROM users u
                 LEFT JOIN company_users cu ON cu.user_id = u.id AND cu.deleted_at IS NULL
                 LEFT JOIN companies c ON c.id = cu.company_id AND c.deleted_at IS NULL
+                LEFT JOIN kyb_requests kr ON kr.company_id = c.id
                 LEFT JOIN company_settings cs ON cs.company_id = c.id
                 WHERE u.id = :id 
                 LIMIT 1
@@ -140,6 +144,9 @@ class Auth
             self::$user = $user;
             self::checkReadOnly();
 
+            // Gate central de verificación KYB de la empresa
+            self::checkKybGate();
+
             // Gate central de módulos por rol (matriz de la plataforma)
             ModuleAccess::guard($pdo);
         } catch (\Throwable $e) {
@@ -159,12 +166,104 @@ class Auth
 
         // Check Read Only
         if (!empty($user['read_only_mode'])) {
+             $companyId = (string)($user['company_id'] ?? '');
+             // La verificación KYB siempre debe poder completarse, incluso en solo lectura.
+             if ($companyId !== '' && self::isKybVerificationRequest($companyId)) return;
+
              $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
              if (in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'])) {
                  Response::error('La empresa está en modo de solo lectura.', 403);
                  exit;
              }
         }
+    }
+
+    /**
+     * Bloquea toda la plataforma para usuarios de una empresa que aún no ha
+     * completado su verificación KYB. Solo se permite el flujo de verificación.
+     */
+    public static function checkKybGate(): void
+    {
+        $user = self::$user;
+        if (!$user || self::kybGateBypassed($user)) return;
+
+        $companyId = (string)($user['company_id'] ?? '');
+        if ($companyId !== '' && self::isKybVerificationRequest($companyId)) return;
+
+        Response::error(
+            'Tu empresa debe completar la verificación KYB antes de usar la plataforma.',
+            423,
+            [
+                'code' => 'kyb_required',
+                'status' => (string)($user['kyb_status'] ?? 'not_started'),
+                'company_id' => $companyId,
+            ]
+        );
+        exit;
+    }
+
+    private static function kybGateBypassed(array $user): bool
+    {
+        $role = (string)($user['platform_role'] ?? '');
+
+        // Roles internos de la plataforma no se ven afectados por el KYB del tenant.
+        if (in_array($role, ['super_admin', 'admin', 'support', 'finance', 'legal', 'security'], true)) {
+            return true;
+        }
+
+        // Solo aplica a empleados de una empresa. Freelancers no heredan el gate.
+        if (!in_array($role, ['company_admin', 'user', 'it_admin'], true)) {
+            return true;
+        }
+
+        if (empty($user['company_id'])) return true;
+        if (empty($user['kyb_required']) || (int)$user['kyb_required'] !== 1) return true;
+        if (($user['kyb_status'] ?? '') === 'approved') return true;
+
+        return false;
+    }
+
+    /**
+     * Rutas mínimas que siguen disponibles mientras la empresa está bloqueada.
+     */
+    public static function isKybVerificationRequest(string $companyId): bool
+    {
+        $segments = self::requestSegments();
+        $table = strtolower($segments[1] ?? '');
+        $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+
+        if ($table === 'notifications' && $method === 'GET') return true;
+
+        if ($table !== 'tenants' && $table !== 'companies') return false;
+
+        $tenantId = (string)($segments[2] ?? '');
+        if ($tenantId !== $companyId) return false;
+
+        $sub = strtolower($segments[3] ?? '');
+
+        // Datos básicos de la propia empresa (la pantalla de verificación los usa).
+        if ($sub === '') return $method === 'GET';
+
+        if ($sub === 'kyb') {
+            $action = strtolower($segments[4] ?? '');
+
+            if ($method === 'GET' && $action === '') return true;
+            if ($method === 'GET' && $action === 'documents') return true;
+            if ($method === 'POST' && in_array($action, ['documents', 'submit'], true)) return true;
+        }
+
+        return false;
+    }
+
+    private static function requestSegments(): array
+    {
+        $path = trim(parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH), '/');
+        $segments = array_values(array_filter(explode('/', $path), fn($s) => $s !== ''));
+        $apiIndex = array_search('api', $segments, true);
+
+        if ($apiIndex === false) return [];
+
+        return array_slice($segments, $apiIndex);
     }
 
     private static function bumpActivity(PDO $pdo, array $session): void
@@ -206,6 +305,13 @@ class Auth
         $data[6] = chr((ord($data[6]) & 0x0f) | 0x40);
         $data[8] = chr((ord($data[8]) & 0x3f) | 0x80);
         return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
+    }
+
+    /** Hash sha256 del token de la petición actual (identifica su fila en user_sessions). */
+    public static function currentTokenHash(): ?string
+    {
+        $token = self::bearerToken();
+        return $token ? hash('sha256', $token) : null;
     }
 
     private static function bearerToken(): ?string

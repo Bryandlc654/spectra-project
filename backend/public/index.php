@@ -13,8 +13,21 @@ if (empty($allowedOrigins)) {
     ];
 }
 
-$requestOrigin = $_SERVER['HTTP_ORIGIN'] ?? '';
-$isAllowedOrigin = $requestOrigin !== '' && in_array(rtrim($requestOrigin, '/'), $allowedOrigins, true);
+$expandedOrigins = [];
+foreach ($allowedOrigins as $origin) {
+    $origin = rtrim($origin, '/');
+    if ($origin === '') continue;
+    $expandedOrigins[] = $origin;
+    if (stripos($origin, 'https://') === 0) {
+        $expandedOrigins[] = 'http://' . substr($origin, 8);
+    } elseif (stripos($origin, 'http://') === 0) {
+        $expandedOrigins[] = 'https://' . substr($origin, 7);
+    }
+}
+$allowedOrigins = array_values(array_unique($expandedOrigins));
+
+$requestOrigin = rtrim($_SERVER['HTTP_ORIGIN'] ?? '', '/');
+$isAllowedOrigin = $requestOrigin !== '' && in_array($requestOrigin, $allowedOrigins, true);
 
 if ($isAllowedOrigin) {
     header('Access-Control-Allow-Origin: ' . $requestOrigin);
@@ -26,6 +39,7 @@ if ($isAllowedOrigin) {
 }
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, Accept, Origin');
 header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
+header('Access-Control-Expose-Headers: Content-Disposition');
 header('Access-Control-Max-Age: 86400');
 header('Content-Type: application/json; charset=utf-8');
 
@@ -264,6 +278,9 @@ $laborLawAlertController = new \App\Support\Lazy(fn() => new \App\Controllers\La
 $fiscalParameterController = new \App\Support\Lazy(fn() => new \App\Controllers\FiscalParameterController($database->pdo()));
 debug_log("Controllers initialized: Notification=" . (isset($notificationController) ? 'YES' : 'NO'));
 
+// Lazy migration for company-level KYB gating (safe for existing databases).
+\App\Support\Schema::ensureCompanyKybColumn($database->pdo());
+
 // =====================================================
 // Router: soporta /api/... y /public/api/... y cualquier prefijo
 // =====================================================
@@ -375,6 +392,7 @@ if ($table === '_debug') {
 // Payroll Settings (Company specific)
 // =====================================================
 if ($table === 'companies' && isset($segments[3]) && $segments[3] === 'payroll-settings') {
+    Auth::require($database->pdo(), $config['jwt']);
     $controller = new \App\Controllers\PayrollSettingsController($database->pdo());
     $companyId = $segments[2];
     

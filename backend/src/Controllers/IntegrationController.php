@@ -114,7 +114,7 @@ class IntegrationController
         ];
 
         // Fetch installed
-        $stmt = $this->pdo->prepare("SELECT * FROM tenant_integrations WHERE company_id LIKE :company_id");
+        $stmt = $this->pdo->prepare("SELECT * FROM tenant_integrations WHERE company_id = :company_id");
         $stmt->execute([':company_id' => $companyId]);
         $installed = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $installedMap = [];
@@ -204,7 +204,7 @@ class IntegrationController
         // Simulate Sync
         sleep(1); // Fake delay
 
-        $stmt = $this->pdo->prepare("UPDATE tenant_integrations SET last_sync_at = NOW() WHERE company_id LIKE :c AND provider = :p");
+        $stmt = $this->pdo->prepare("UPDATE tenant_integrations SET last_sync_at = NOW() WHERE company_id = :c AND provider = :p");
         $stmt->execute([':c' => $companyId, ':p' => $provider]);
 
         AuditLogger::log('Sincronizar Integración', "Sincronización manual: $provider", Auth::userId(), $companyId, 'integration', null);

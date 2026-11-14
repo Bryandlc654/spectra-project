@@ -84,7 +84,7 @@ class BenefitsController
     {
         if ($method === 'GET') {
             if ($id) {
-                $stmt = $this->pdo->prepare("SELECT * FROM benefits_plans WHERE id LIKE :id");
+                $stmt = $this->pdo->prepare("SELECT * FROM benefits_plans WHERE id = :id");
                 $stmt->execute([':id' => $id]);
                 $plan = $stmt->fetch(PDO::FETCH_ASSOC);
                 $plan ? Response::json($plan) : Response::error('Plan no encontrado', 404);
@@ -101,8 +101,8 @@ class BenefitsController
                 $params = [];
                 
                 if ($companyId) {
-                    $sql .= " AND company_id LIKE :cid";
-                    $countSql .= " AND company_id LIKE :cid";
+                    $sql .= " AND company_id = :cid";
+                    $countSql .= " AND company_id = :cid";
                     $params[':cid'] = $companyId;
                 }
                 if ($countryId) {
@@ -212,7 +212,7 @@ class BenefitsController
             Response::json(['message' => 'Inscripción realizada'], 201);
         } elseif ($method === 'PATCH' && $id) {
             $data = json_decode(file_get_contents('php://input'), true);
-            $this->pdo->prepare("UPDATE employee_benefits SET status = :status WHERE id LIKE :id")
+            $this->pdo->prepare("UPDATE employee_benefits SET status = :status WHERE id = :id")
                  ->execute([':status' => $data['status'], ':id' => $id]);
             Response::json(['message' => 'Estado actualizado']);
         }

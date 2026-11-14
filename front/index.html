@@ -1,10 +1,36 @@
 <!doctype html>
-<html lang="es">
+<html lang="es" translate="no" class="notranslate">
 
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Spectra</title>
+  <meta name="google" content="notranslate" />
+  <title>Grupo Spectra</title>
+  <meta name="theme-color" content="#006d71" />
+
+  <script>
+    // Protección ante traductores/extensions que mueven nodos gestionados por React.
+    (function () {
+      if (typeof Node === 'undefined' || !Node.prototype) return;
+      var removeChild = Node.prototype.removeChild;
+      Node.prototype.removeChild = function (child) {
+        if (child && child.parentNode !== this) return child;
+        return removeChild.apply(this, arguments);
+      };
+      var insertBefore = Node.prototype.insertBefore;
+      Node.prototype.insertBefore = function (newNode, referenceNode) {
+        if (referenceNode && referenceNode.parentNode !== this) {
+          return this.appendChild(newNode);
+        }
+        return insertBefore.apply(this, arguments);
+      };
+    })();
+  </script>
+
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192x192.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

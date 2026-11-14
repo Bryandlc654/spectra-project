@@ -61,10 +61,14 @@ export default function CompanyFreelancersPage({ apiUrl, token }) {
         };
     }, [apiUrl, token]);
 
-    // --- My Freelancers Logic ---
     const [contracts, setContracts] = useState([]);
     const [loadingContracts, setLoadingContracts] = useState(false);
+    const [currencies, setCurrencies] = useState([]);
     
+    useEffect(() => {
+        api.get('/api/currencies').then(res => setCurrencies(Array.isArray(res) ? res : res.data || [])).catch(() => {});
+    }, [api]);
+
     async function loadContracts() {
         if (!companyId) return;
         setLoadingContracts(true);
@@ -407,9 +411,9 @@ export default function CompanyFreelancersPage({ apiUrl, token }) {
                         <div>
                             <label className="block text-sm font-medium text-slate-700">Moneda</label>
                             <select name="currency_id" className="mt-1 w-full rounded-lg border-slate-300">
-                                <option value="USD">USD</option>
-                                <option value="EUR">EUR</option>
-                                <option value="MXN">MXN</option>
+                                {currencies.map(c => (
+                                    <option key={c.id} value={c.id}>{c.code}</option>
+                                ))}
                             </select>
                         </div>
                     </div>

@@ -1,14 +1,29 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { createApi } from '../../lib/api';
 import { normalizePageResponse } from '../../lib/pagination';
 import { useToast } from '../../components/ToastProvider';
+import { useAuth } from '../../context/AuthContext';
+import { PLATFORM_ROLES } from '../../lib/platformRoles';
 import ConfirmModal from '../../components/ConfirmModal';
 import Modal from '../../components/Modal';
+import FreelancerAreasManager from './FreelancerAreasManager';
+import FreelancerProfileModal from './FreelancerProfileModal';
+
+const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_MAX_LENGTH = 128;
+const PASSWORD_UPPER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const PASSWORD_LOWER = 'abcdefghijklmnopqrstuvwxyz';
+const PASSWORD_DIGITS = '0123456789';
+const PASSWORD_SYMBOLS = '!@#$%^&*()-_=+[]{}<>?';
+const PASSWORD_ALPHABET = PASSWORD_UPPER + PASSWORD_LOWER + PASSWORD_DIGITS + PASSWORD_SYMBOLS;
 
 export default function FreelancersListPage({ apiUrl, token }) {
   const api = useMemo(() => createApi({ baseUrl: apiUrl, token }), [apiUrl, token]);
   const toast = useToast();
+  const { user: currentUser } = useAuth();
+  const canSetPasswords =
+    currentUser?.platform_role === PLATFORM_ROLES.SUPER_ADMIN ||
+    currentUser?.platform_role === PLATFORM_ROLES.ADMIN;
 
   const [page, setPage] = useState(1);
   const perPage = 20;
@@ -50,15 +65,74 @@ export default function FreelancersListPage({ apiUrl, token }) {
   const [confirmAction, setConfirmAction] = useState(null); // { type: 'block' | 'unblock' | 'reset_password' | 'delete', user: ... }
   const [actionLoading, setActionLoading] = useState(false);
 
+  // Password change (admin only). Kept out of createForm so it is never
+  // sent inside the freelancer profile payload.
+  const [showPasswordPanel, setShowPasswordPanel] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [revealPassword, setRevealPassword] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
+
+  const passwordChecks = useMemo(() => {
+    const value = newPassword;
+    const confirmed = confirmPassword.length > 0 && confirmPassword === value;
+    const length = value.length;
+    return {
+      length,
+      minLength: length >= PASSWORD_MIN_LENGTH,
+      withinMax: length <= PASSWORD_MAX_LENGTH,
+      mixedCase: /[a-z]/.test(value) && /[A-Z]/.test(value),
+      hasNumber: /\d/.test(value),
+      hasSymbol: /[^A-Za-z0-9]/.test(value),
+      noLeadingOrTrailingSpace: length > 0 && value === value.trim(),
+      confirmed
+    };
+  }, [newPassword, confirmPassword]);
+
+  const passwordStrength = useMemo(() => {
+    const { minLength, withinMax, mixedCase, hasNumber, hasSymbol, noLeadingOrTrailingSpace } = passwordChecks;
+    if (!noLeadingOrTrailingSpace) return { level: 0, label: 'Inválida', bar: 'bg-red-500', text: 'text-red-600' };
+    let score = 0;
+    if (minLength && withinMax) score += 1;
+    if (minLength && passwordChecks.length >= 12) score += 1;
+    if (mixedCase) score += 1;
+    if (hasNumber) score += 1;
+    if (hasSymbol) score += 1;
+    if (score <= 1) return { level: 0, label: 'Débil', bar: 'bg-red-500', text: 'text-red-600' };
+    if (score === 2) return { level: 1, label: 'Regular', bar: 'bg-amber-500', text: 'text-amber-600' };
+    if (score === 3) return { level: 2, label: 'Buena', bar: 'bg-yellow-500', text: 'text-yellow-600' };
+    if (score === 4) return { level: 3, label: 'Fuerte', bar: 'bg-emerald-500', text: 'text-emerald-600' };
+    return { level: 4, label: 'Muy fuerte', bar: 'bg-emerald-600', text: 'text-emerald-700' };
+  }, [passwordChecks]);
+
+  const passwordReady =
+    newPassword.length > 0 &&
+    passwordChecks.minLength &&
+    passwordChecks.withinMax &&
+    passwordChecks.noLeadingOrTrailingSpace &&
+    passwordChecks.mixedCase &&
+    passwordChecks.hasNumber &&
+    passwordChecks.hasSymbol &&
+    passwordChecks.confirmed;
+
   // Areas & Countries
   const [areas, setAreas] = useState([]);
   const [countries, setCountries] = useState([]);
+  const [openAreas, setOpenAreas] = useState(false);
+  const [profileId, setProfileId] = useState(null);
+
+  async function loadAreas() {
+    try {
+      const data = await api.get('/api/freelancer-areas');
+      setAreas(Array.isArray(data) ? data : (data?.data || []));
+    } catch (err) {
+      console.error('Error loading areas', err);
+    }
+  }
 
   useEffect(() => {
     // Load Areas
-    api.get('/api/freelancer-areas')
-       .then(data => setAreas(data || []))
-       .catch(err => console.error('Error loading areas', err));
+    loadAreas();
 
     // Load Countries
     api.get('/api/countries?per_page=100')
@@ -194,6 +268,7 @@ export default function FreelancersListPage({ apiUrl, token }) {
     });
     setSkillInput('');
     setEditingId(null);
+    resetPasswordPanel();
   }
 
   function handleEdit(user) {
@@ -210,6 +285,7 @@ export default function FreelancersListPage({ apiUrl, token }) {
       skills: user.skills || ''
     });
     setEditingId(user.id);
+    resetPasswordPanel();
     setOpenCreate(true);
   }
 
@@ -230,6 +306,68 @@ export default function FreelancersListPage({ apiUrl, token }) {
   function handleRemoveSkill(skillToRemove) {
     const current = createForm.skills ? createForm.skills.split(',').map(s => s.trim()).filter(Boolean) : [];
     setCreateForm({ ...createForm, skills: current.filter(s => s !== skillToRemove).join(', ') });
+  }
+
+  function resetPasswordPanel() {
+    setNewPassword('');
+    setConfirmPassword('');
+    setRevealPassword(false);
+    setShowPasswordPanel(false);
+  }
+
+  function generateStrongPassword() {
+    const length = 20;
+    const required = [PASSWORD_UPPER, PASSWORD_LOWER, PASSWORD_DIGITS, PASSWORD_SYMBOLS];
+    const chars = [];
+    required.forEach(set => {
+      const random = secureRandomIndex(set.length);
+      chars.push(set[random]);
+    });
+    while (chars.length < length) {
+      const random = secureRandomIndex(PASSWORD_ALPHABET.length);
+      chars.push(PASSWORD_ALPHABET[random]);
+    }
+    // Fisher-Yates with a CSPRNG so the guaranteed characters are not positionally predictable
+    for (let i = chars.length - 1; i > 0; i--) {
+      const j = secureRandomIndex(i + 1);
+      [chars[i], chars[j]] = [chars[j], chars[i]];
+    }
+    const value = chars.join('');
+    setNewPassword(value);
+    setConfirmPassword(value);
+    setRevealPassword(false);
+  }
+
+  async function handleSavePassword() {
+    if (!editingId || savingPassword) return;
+
+    if (!passwordChecks.minLength) {
+      toast.error(`La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres`);
+      return;
+    }
+    if (!passwordChecks.withinMax) {
+      toast.error(`La contraseña no puede superar ${PASSWORD_MAX_LENGTH} caracteres`);
+      return;
+    }
+    if (!passwordChecks.noLeadingOrTrailingSpace) {
+      toast.error('La contraseña no puede empezar ni terminar con espacios');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error('Las contraseñas no coinciden');
+      return;
+    }
+
+    setSavingPassword(true);
+    try {
+      await api.post(`/api/users/${editingId}/set-password`, { password: newPassword });
+      toast.success('Contraseña actualizada. Se cerraron las sesiones activas del usuario.');
+      resetPasswordPanel();
+    } catch (e) {
+      toast.error(e.message || 'Error al actualizar la contraseña');
+    } finally {
+      setSavingPassword(false);
+    }
   }
 
   async function handleExport() {
@@ -322,13 +460,13 @@ export default function FreelancersListPage({ apiUrl, token }) {
             <span className="hidden sm:inline">Importar</span>
             <input type="file" accept=".csv" className="hidden" onChange={handleImport} />
           </label>
-          <Link
-            to="areas"
+          <button
+            onClick={() => setOpenAreas(true)}
             className="bg-white border border-slate-300 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-all shadow-sm flex items-center gap-2"
           >
             <i className="bi bi-gear"></i>
             <span className="hidden sm:inline">Gestionar Áreas</span>
-          </Link>
+          </button>
           <button
             onClick={() => setOpenCreate(true)}
             className="bg-brand text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-dark transition-all shadow-sm flex items-center gap-2"
@@ -454,9 +592,13 @@ export default function FreelancersListPage({ apiUrl, token }) {
                           {r.full_name.charAt(0).toUpperCase()}
                         </div>
                         <div>
-                          <Link to={`/dashboard/freelancers/${r.id}`} className="font-semibold text-slate-900 hover:text-brand hover:underline flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setProfileId(r.id)}
+                            className="font-semibold text-slate-900 hover:text-brand hover:underline flex items-center gap-1"
+                          >
                             {r.full_name}
-                          </Link>
+                          </button>
                           <div className="text-xs text-slate-500">Reg: {new Date(r.created_at).toLocaleDateString()}</div>
                         </div>
                       </div>
@@ -495,13 +637,14 @@ export default function FreelancersListPage({ apiUrl, token }) {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Link 
-                            to={String(r.id)}
+                          <button
+                            type="button"
+                            onClick={() => setProfileId(r.id)}
                             className="p-1.5 text-slate-500 hover:text-brand hover:bg-brand/5 rounded transition-colors"
                             title="Ver perfil"
                           >
                             <i className="bi bi-eye"></i>
-                          </Link>
+                          </button>
                           <button 
                             onClick={() => handleEdit(r)}
                             className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
@@ -584,9 +727,13 @@ export default function FreelancersListPage({ apiUrl, token }) {
                     {r.full_name.charAt(0).toUpperCase()}
                   </div>
                   <div className="overflow-hidden">
-                    <Link to={`/dashboard/freelancers/${r.id}`} className="font-semibold text-slate-900 block truncate">
+                    <button
+                      type="button"
+                      onClick={() => setProfileId(r.id)}
+                      className="font-semibold text-slate-900 block truncate text-left"
+                    >
                       {r.full_name}
-                    </Link>
+                    </button>
                     <div className="text-xs text-slate-500 truncate">{r.area || 'Sin área definida'}</div>
                     <div className="text-[10px] text-slate-400 mt-0.5">Código: {r.freelancer_code || '—'}</div>
                   </div>
@@ -614,13 +761,21 @@ export default function FreelancersListPage({ apiUrl, token }) {
               </div>
 
               <div className="pt-3 flex items-center justify-between gap-2">
-                <Link 
-                  to={`/dashboard/freelancers/${r.id}`}
+                <button
+                  type="button"
+                  onClick={() => setProfileId(r.id)}
                   className="flex-1 bg-slate-50 text-slate-700 py-2 rounded-lg text-sm font-medium text-center hover:bg-slate-100 transition-colors"
                 >
                   Ver Perfil
-                </Link>
+                </button>
                 <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => handleEdit(r)}
+                    className="px-3 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors"
+                    title="Editar"
+                  >
+                    <i className="bi bi-pencil"></i>
+                  </button>
                   <button 
                     onClick={() => setConfirmAction({ type: 'reset_password', user: r })}
                     className="px-3 py-2 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition-colors"
@@ -673,6 +828,25 @@ export default function FreelancersListPage({ apiUrl, token }) {
         </div>
       )}
 
+      {/* Modal Gestionar Áreas */}
+      <Modal
+        open={openAreas}
+        title="Áreas y Especialidades"
+        onClose={() => setOpenAreas(false)}
+        size="3xl"
+      >
+        <FreelancerAreasManager apiUrl={apiUrl} onChanged={loadAreas} />
+      </Modal>
+
+      {/* Modal Ver Perfil */}
+      <FreelancerProfileModal
+        open={!!profileId}
+        freelancerId={profileId}
+        apiUrl={apiUrl}
+        onClose={() => setProfileId(null)}
+        onEdit={(u) => { setProfileId(null); handleEdit(u); }}
+      />
+
       {/* Modal */}
       <Modal
         open={openCreate}
@@ -681,9 +855,9 @@ export default function FreelancersListPage({ apiUrl, token }) {
       >
         <form 
           onSubmit={handleCreate} 
-          className="space-y-4 flex flex-col max-h-[80vh]"
+          className="space-y-4 flex flex-col"
         >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-slate-700 mb-1">Nombre Completo</label>
               <input
@@ -813,6 +987,135 @@ export default function FreelancersListPage({ apiUrl, token }) {
                 onChange={e => setCreateForm({...createForm, bio: e.target.value})}
               ></textarea>
             </div>
+
+            {editingId && canSetPasswords && (
+              <div className="md:col-span-2 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                      <i className="bi bi-shield-lock text-amber-600" aria-hidden="true" />
+                      Seguridad
+                    </div>
+                    <p className="text-xs text-slate-600 mt-1">
+                      Credenciales de acceso de <span className="font-medium text-slate-800">{createForm.email || 'este freelancer'}</span>
+                    </p>
+                  </div>
+                  {!showPasswordPanel && (
+                    <button
+                      type="button"
+                      onClick={() => setShowPasswordPanel(true)}
+                      className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-amber-800 bg-white border border-amber-300 rounded-lg hover:bg-amber-100"
+                    >
+                      <i className="bi bi-key" aria-hidden="true" />
+                      Cambiar contraseña
+                    </button>
+                  )}
+                </div>
+
+                {showPasswordPanel && (
+                  <div className="mt-4 space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1" htmlFor="freelancer-new-password">Nueva contraseña</label>
+                      <div className="relative">
+                        <input
+                          id="freelancer-new-password"
+                          type={revealPassword ? 'text' : 'password'}
+                          autoComplete="new-password"
+                          value={newPassword}
+                          maxLength={PASSWORD_MAX_LENGTH}
+                          onChange={e => setNewPassword(e.target.value)}
+                          className="w-full px-3 py-2 pr-11 border border-slate-300 rounded-lg bg-white focus:ring-brand focus:border-brand"
+                          placeholder="Mínimo 8 caracteres"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setRevealPassword(v => !v)}
+                          className="absolute inset-y-0 right-0 px-3 grid place-items-center text-slate-500 hover:text-slate-800"
+                          aria-label={revealPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                        >
+                          <i className={`bi ${revealPassword ? 'bi-eye-slash' : 'bi-eye'}`} aria-hidden="true" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1" htmlFor="freelancer-confirm-password">Confirmar contraseña</label>
+                      <input
+                        id="freelancer-confirm-password"
+                        type={revealPassword ? 'text' : 'password'}
+                        autoComplete="new-password"
+                        value={confirmPassword}
+                        maxLength={PASSWORD_MAX_LENGTH}
+                        onChange={e => setConfirmPassword(e.target.value)}
+                        className={`w-full px-3 py-2 border rounded-lg bg-white focus:ring-brand focus:border-brand ${confirmPassword && !passwordChecks.confirmed ? 'border-red-300 focus:border-red-400' : 'border-slate-300'}`}
+                        placeholder="Repite la contraseña"
+                      />
+                      {confirmPassword && !passwordChecks.confirmed && (
+                        <p className="text-xs text-red-600 mt-1">Las contraseñas no coinciden</p>
+                      )}
+                    </div>
+
+                    {newPassword.length > 0 && (
+                      <div>
+                        <div className="h-1.5 w-full rounded-full bg-slate-200 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${passwordStrength.bar}`}
+                            style={{ width: `${((passwordStrength.level + 1) / 5) * 100}%` }}
+                          />
+                        </div>
+                        <div className={`text-xs font-medium mt-1 ${passwordStrength.text}`}>
+                          Seguridad de la contraseña: {passwordStrength.label}
+                        </div>
+                      </div>
+                    )}
+
+                    <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-600">
+                      <PasswordRequirement ok={passwordChecks.minLength} label={`Mínimo ${PASSWORD_MIN_LENGTH} caracteres`} />
+                      <PasswordRequirement ok={passwordChecks.mixedCase} label="Letras mayúsculas y minúsculas" />
+                      <PasswordRequirement ok={passwordChecks.hasNumber} label="Al menos un número" />
+                      <PasswordRequirement ok={passwordChecks.hasSymbol} label="Al menos un símbolo" />
+                      <PasswordRequirement ok={passwordChecks.noLeadingOrTrailingSpace} label="Sin espacios al inicio o final" />
+                      <PasswordRequirement ok={passwordChecks.confirmed} label="Coincide con la confirmación" />
+                    </ul>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={generateStrongPassword}
+                        disabled={savingPassword}
+                        className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        <i className="bi bi-shuffle" aria-hidden="true" />
+                        Generar contraseña segura
+                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => resetPasswordPanel()}
+                          disabled={savingPassword}
+                          className="px-3 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSavePassword}
+                          disabled={!passwordReady || savingPassword}
+                          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-brand rounded-lg hover:bg-brand-dark disabled:opacity-50"
+                        >
+                          {savingPassword ? 'Guardando...' : 'Guardar contraseña'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-amber-800 bg-amber-100/70 rounded-lg px-3 py-2">
+                      <i className="bi bi-exclamation-triangle mr-1" aria-hidden="true" />
+                      Al guardar se_invalidarán los tokens de recuperación y se cerrarán todas las sesiones activas del usuario.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           
           <div className="flex flex-col-reverse sm:flex-row sm:justify-end pt-4 gap-2">
@@ -869,4 +1172,27 @@ function getConfirmTitle(type) {
   if (type === 'reset_password') return 'Forzar cambio de contraseña';
   if (type === 'delete') return 'Eliminar Freelancer';
   return 'Confirmar acción';
+}
+
+// Rejection sampling on top of crypto.getRandomValues so generated passwords are
+// uniformly distributed (no modulo bias) and come from the platform CSPRNG.
+function secureRandomIndex(bound) {
+  if (bound <= 0) return 0;
+  const limit = Math.floor(0xFFFFFFFF / bound) * bound;
+  const buffer = new Uint32Array(1);
+  let value;
+  do {
+    crypto.getRandomValues(buffer);
+    value = buffer[0];
+  } while (value >= limit);
+  return value % bound;
+}
+
+function PasswordRequirement({ ok, label }) {
+  return (
+    <li className={`flex items-center gap-1.5 ${ok ? 'text-emerald-700' : 'text-slate-500'}`}>
+      <i className={`bi ${ok ? 'bi-check-circle-fill' : 'bi-circle'}`} aria-hidden="true" />
+      {label}
+    </li>
+  );
 }

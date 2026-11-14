@@ -2,8 +2,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { normalizePageResponse } from '../../../lib/pagination';
 import CriticalActionModal from '../../../components/CriticalActionModal';
+import { useI18n } from '../../../i18n/I18nContext';
 
 export default function TenantFeesTab({ companyId, api }) {
+  const { t } = useI18n();
   // Protege contra "api undefined" (causa del error .get)
   const safeApi = useMemo(() => api, [api]);
 
@@ -11,11 +13,16 @@ export default function TenantFeesTab({ companyId, api }) {
   const [err, setErr] = useState('');
 
   const [form, setForm] = useState({
-    type: 'per_freelancer_fee',
+    type: 'contract_fee',
+    position: '',
+    min_collaborators: 0,
+    max_collaborators: '',
+    priority: 0,
     value: 0,
     currency_id: '',
     active: true,
   });
+  const [editingId, setEditingId] = useState(null);
 
   const [loading, setLoading] = useState(false);
   
@@ -31,6 +38,20 @@ export default function TenantFeesTab({ companyId, api }) {
   const [currencies, setCurrencies] = useState([]);
   const [lookupsLoading, setLookupsLoading] = useState(false);
   const [lookupsErr, setLookupsErr] = useState('');
+
+  const feeTypeLabelKeys = {
+    contract_fee: 'tenants.operations.fees.feeTypeContract',
+    per_freelancer_fee: 'tenants.operations.fees.feeTypePerFreelancer',
+    platform_fee: 'tenants.operations.fees.feeTypePlatform',
+    payroll_fee: 'tenants.operations.fees.feeTypePayroll',
+    invoice_fee: 'tenants.operations.fees.feeTypeInvoice',
+  };
+
+  const getFeeTypeLabel = (type) => {
+    const key = feeTypeLabelKeys[type];
+    const label = key ? t(key) : null;
+    return label && label !== key ? label : type;
+  };
 
   const currenciesById = useMemo(() => {
     const m = new Map();
@@ -51,7 +72,7 @@ export default function TenantFeesTab({ companyId, api }) {
       const filtered = Array.isArray(items) ? items.filter(i => String(i.company_id) === String(companyId)) : [];
       setRules(filtered);
     } catch (e) {
-      setErr(e?.message || 'No se pudieron cargar las reglas');
+      setErr(e?.message || t('tenants.operations.fees.loadRulesError'));
     }
   }
 
@@ -65,7 +86,7 @@ export default function TenantFeesTab({ companyId, api }) {
       const out = normalizePageResponse(res);
       setCurrencies(out.items || []);
     } catch (e) {
-      setLookupsErr(e?.message || 'No se pudieron cargar las monedas');
+      setLookupsErr(e?.message || t('tenants.operations.fees.currenciesLoadError'));
     } finally {
       setLookupsLoading(false);
     }
@@ -74,7 +95,7 @@ export default function TenantFeesTab({ companyId, api }) {
   useEffect(() => {
     // Si api aún no está listo, muestra un error claro y evita crash
     if (!safeApi?.get) {
-      setErr('API no inicializada. Verifica que TenantDetailPage esté pasando la prop "api" al tab.');
+      setErr(t('tenants.operations.fees.apiNotReady'));
       return;
     }
     loadCurrencies();
@@ -91,29 +112,76 @@ export default function TenantFeesTab({ companyId, api }) {
     e.preventDefault();
     if (!safeApi?.post) return;
     if (!companyId) {
-      setErr('Company ID no está definido.');
+      setErr(t('tenants.operations.fees.companyIdMissing'));
       return;
     }
 
     setLoading(true);
     setErr('');
     try {
-      // Nota: Enviamos company_id tal cual (sin Number()) para evitar NaN si fuera UUID
-      await safeApi.post(`/api/company_fee_rules`, {
+      const payload = {
         company_id: companyId,
         type: String(form.type || '').trim(),
+        position: form.type === 'contract_fee' ? String(form.position || '').trim() : null,
+        min_collaborators: form.type === 'contract_fee' ? Number(form.min_collaborators || 0) : 0,
+        max_collaborators: form.type === 'contract_fee' && form.max_collaborators !== '' ? Number(form.max_collaborators) : null,
+        priority: form.type === 'contract_fee' ? Number(form.priority || 0) : 0,
         value: Number(form.value || 0),
         currency_id: form.currency_id ? Number(form.currency_id) : null,
         active: !!form.active,
-      });
+      };
 
-      setForm({ type: 'per_freelancer_fee', value: 0, currency_id: '', active: true });
+      if (editingId) {
+        await safeApi.put(`/api/company_fee_rules/${editingId}`, payload);
+      } else {
+        await safeApi.post(`/api/company_fee_rules`, payload);
+      }
+
+      setForm({
+        type: 'contract_fee',
+        position: '',
+        min_collaborators: 0,
+        max_collaborators: '',
+        priority: 0,
+        value: 0,
+        currency_id: '',
+        active: true,
+      });
+      setEditingId(null);
       await loadRules();
     } catch (e2) {
-      setErr(e2?.message || 'No se pudo crear la regla');
+      setErr(e2?.message || t('tenants.operations.fees.saveRuleError'));
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleEdit(rule) {
+    setEditingId(rule.id);
+    setForm({
+      type: rule.type || 'contract_fee',
+      position: rule.position || '',
+      min_collaborators: rule.min_collaborators ?? 0,
+      max_collaborators: rule.max_collaborators ?? '',
+      priority: rule.priority ?? 0,
+      value: rule.value ?? 0,
+      currency_id: rule.currency_id ? String(rule.currency_id) : '',
+      active: !!rule.active,
+    });
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setForm({
+      type: 'contract_fee',
+      position: '',
+      min_collaborators: 0,
+      max_collaborators: '',
+      priority: 0,
+      value: 0,
+      currency_id: '',
+      active: true,
+    });
   }
 
   function openToggle(rule) {
@@ -155,7 +223,7 @@ export default function TenantFeesTab({ companyId, api }) {
       }
       setActionModal(prev => ({ ...prev, open: false }));
     } catch (e) {
-      setErr(e?.message || 'Error ejecutando acción');
+      setErr(e?.message || t('tenants.operations.fees.actionError'));
       setActionModal(prev => ({ ...prev, loading: false }));
     }
   }
@@ -168,13 +236,13 @@ export default function TenantFeesTab({ companyId, api }) {
 
       {lookupsErr ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          No se pudieron cargar las monedas.{' '}
+          {t('tenants.operations.fees.currenciesLoadError')}.{' '}
           <button
             type="button"
             onClick={loadCurrencies}
             className="font-semibold underline decoration-amber-400 underline-offset-2"
           >
-            Reintentar
+            {t('tenants.operations.fees.retry')}
           </button>
           <div className="mt-1 text-xs text-amber-800">{lookupsErr}</div>
         </div>
@@ -184,21 +252,76 @@ export default function TenantFeesTab({ companyId, api }) {
         onSubmit={add}
         className="rounded-2xl border border-slate-200 bg-white p-4 grid grid-cols-1 gap-3 md:grid-cols-4"
       >
+        {editingId && (
+          <div className="md:col-span-4 flex items-center justify-between rounded-xl border border-brand/20 bg-brand/5 px-3 py-2">
+            <span className="text-xs font-semibold text-brand">{t('tenants.operations.fees.editingRule')}</span>
+            <button type="button" onClick={cancelEdit} className="text-xs font-semibold text-slate-600 underline">
+              {t('tenants.operations.fees.cancelEdit')}
+            </button>
+          </div>
+        )}
         <div>
-          <label className="text-xs font-semibold text-slate-600">Tipo</label>
+          <label className="text-xs font-semibold text-slate-600">{t('tenants.common.type')}</label>
           <select
             value={form.type}
             onChange={(e) => setForm((p) => ({ ...p, type: e.target.value }))}
             className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand"
           >
-            <option value="platform_fee">Platform fee</option>
-            <option value="payroll_fee">Payroll fee</option>
-            <option value="invoice_fee">Invoice fee</option>
+            <option value="contract_fee">{t('tenants.operations.fees.feeTypeContract')}</option>
+            <option value="per_freelancer_fee">{t('tenants.operations.fees.feeTypePerFreelancer')}</option>
+            <option value="platform_fee">{t('tenants.operations.fees.feeTypePlatform')}</option>
+            <option value="payroll_fee">{t('tenants.operations.fees.feeTypePayroll')}</option>
+            <option value="invoice_fee">{t('tenants.operations.fees.feeTypeInvoice')}</option>
           </select>
         </div>
 
+        {form.type === 'contract_fee' && (
+          <>
+            <div>
+              <label className="text-xs font-semibold text-slate-600">{t('tenants.operations.fees.position')}</label>
+              <input
+                type="text"
+                value={form.position || ''}
+                onChange={(e) => setForm((p) => ({ ...p, position: e.target.value }))}
+                placeholder={t('tenants.common.allPositions')}
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600">{t('tenants.operations.fees.minCollaborators')}</label>
+              <input
+                type="number"
+                min="0"
+                value={form.min_collaborators}
+                onChange={(e) => setForm((p) => ({ ...p, min_collaborators: e.target.value }))}
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600">{t('tenants.operations.fees.maxCollaborators')}</label>
+              <input
+                type="number"
+                min="0"
+                value={form.max_collaborators}
+                onChange={(e) => setForm((p) => ({ ...p, max_collaborators: e.target.value }))}
+                placeholder={t('tenants.common.unlimited')}
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600">{t('tenants.operations.fees.priority')}</label>
+              <input
+                type="number"
+                value={form.priority}
+                onChange={(e) => setForm((p) => ({ ...p, priority: e.target.value }))}
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand"
+              />
+            </div>
+          </>
+        )}
+
         <div>
-          <label className="text-xs font-semibold text-slate-600">Valor</label>
+          <label className="text-xs font-semibold text-slate-600">{t('tenants.operations.fees.value')}</label>
           <input
             type="number"
             value={form.value}
@@ -208,7 +331,7 @@ export default function TenantFeesTab({ companyId, api }) {
         </div>
 
         <div>
-          <label className="text-xs font-semibold text-slate-600">Moneda</label>
+          <label className="text-xs font-semibold text-slate-600">{t('tenants.common.currency')}</label>
           <div className="relative">
             <select
               value={form.currency_id}
@@ -217,7 +340,7 @@ export default function TenantFeesTab({ companyId, api }) {
               className="mt-1 w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 pr-10 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand disabled:opacity-60"
             >
               <option value="">
-                {lookupsLoading ? 'Cargando monedas…' : currencies.length ? 'Sin moneda (null)' : 'Sin monedas'}
+                {lookupsLoading ? t('tenants.operations.fees.loadingCurrencies') : currencies.length ? t('tenants.operations.fees.noCurrencyNull') : t('tenants.operations.fees.noCurrencies')}
               </option>
               {currencies.map((c) => (
                 <option key={c.id} value={String(c.id)}>
@@ -239,7 +362,7 @@ export default function TenantFeesTab({ companyId, api }) {
             className="w-full rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white hover:bg-brand/90 disabled:opacity-60"
             type="submit"
           >
-            {loading ? 'Guardando…' : 'Agregar regla'}
+            {loading ? t('tenants.common.saving') : (editingId ? t('tenants.operations.fees.updateRule') : t('tenants.operations.fees.addRule'))}
           </button>
         </div>
       </form>
@@ -248,11 +371,13 @@ export default function TenantFeesTab({ companyId, api }) {
         <table className="w-full text-sm bg-white">
           <thead>
             <tr className="text-left text-xs uppercase tracking-widest text-slate-500">
-              <th className="px-4 py-3">Tipo</th>
-              <th className="px-4 py-3">Valor</th>
-              <th className="px-4 py-3">Moneda</th>
-              <th className="px-4 py-3">Activo</th>
-              <th className="px-4 py-3 text-right">Acción</th>
+              <th className="px-4 py-3">{t('tenants.common.type')}</th>
+              <th className="px-4 py-3">{t('tenants.operations.fees.position')}</th>
+              <th className="px-4 py-3">{t('tenants.operations.fees.collaboratorRange')}</th>
+              <th className="px-4 py-3">{t('tenants.operations.fees.value')}</th>
+              <th className="px-4 py-3">{t('tenants.common.currency')}</th>
+              <th className="px-4 py-3">{t('tenants.common.active')}</th>
+              <th className="px-4 py-3 text-right">{t('tenants.common.actions')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -261,7 +386,13 @@ export default function TenantFeesTab({ companyId, api }) {
 
               return (
                 <tr key={r.id} className="hover:bg-slate-50/60">
-                  <td className="px-4 py-3 font-semibold">{r.type}</td>
+                  <td className="px-4 py-3 font-semibold">{getFeeTypeLabel(r.type)}</td>
+                  <td className="px-4 py-3">{r.position || t('tenants.common.all')}</td>
+                  <td className="px-4 py-3">
+                    {r.type === 'contract_fee'
+                      ? `${r.min_collaborators ?? 0} - ${r.max_collaborators ?? '∞'}`
+                      : '—'}
+                  </td>
                   <td className="px-4 py-3">{r.value}</td>
                   <td className="px-4 py-3">
                     {cur ? (
@@ -285,7 +416,7 @@ export default function TenantFeesTab({ companyId, api }) {
                           : 'bg-slate-50 text-slate-700 border border-slate-200'
                         }`}
                     >
-                      {r.active ? 'Sí' : 'No'}
+                      {r.active ? t('tenants.common.yes') : t('tenants.common.no')}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
@@ -293,10 +424,18 @@ export default function TenantFeesTab({ companyId, api }) {
                       <button
                         type="button"
                         disabled={loading || !safeApi?.put}
+                        onClick={() => handleEdit(r)}
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-60"
+                      >
+                        {t('tenants.common.edit')}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={loading || !safeApi?.put}
                         onClick={() => openToggle(r)}
                         className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-60"
                       >
-                        {r.active ? 'Desactivar' : 'Activar'}
+                        {r.active ? t('tenants.common.disable') : t('tenants.common.enable')}
                       </button>
                       <button
                         type="button"
@@ -314,8 +453,8 @@ export default function TenantFeesTab({ companyId, api }) {
 
             {!rules.length ? (
               <tr>
-                <td colSpan={5} className="px-4 py-10 text-center text-slate-500">
-                  Sin reglas.
+                <td colSpan={7} className="px-4 py-10 text-center text-slate-500">
+                  {t('tenants.operations.fees.noRules')}
                 </td>
               </tr>
             ) : null}
@@ -325,14 +464,14 @@ export default function TenantFeesTab({ companyId, api }) {
 
       <CriticalActionModal
         open={actionModal.open}
-        title={actionModal.type === 'delete' ? 'Eliminar regla' : (actionModal.data?.active ? 'Desactivar regla' : 'Activar regla')}
+        title={actionModal.type === 'delete' ? t('tenants.operations.fees.deleteRuleTitle') : (actionModal.data?.active ? t('tenants.operations.fees.disableRuleTitle') : t('tenants.operations.fees.enableRuleTitle'))}
         message={
           actionModal.type === 'delete' 
-            ? `¿Estás seguro de que deseas eliminar la regla de tipo "${actionModal.data?.type}"? Esta acción no se puede deshacer.`
-            : `Estás a punto de ${actionModal.data?.active ? 'desactivar' : 'activar'} la regla "${actionModal.data?.type}".`
+            ? t('tenants.operations.fees.deleteRuleMessage', { type: getFeeTypeLabel(actionModal.data?.type) })
+            : t(actionModal.data?.active ? 'tenants.operations.fees.deactivateRuleMessage' : 'tenants.operations.fees.activateRuleMessage', { type: getFeeTypeLabel(actionModal.data?.type) })
         }
         danger={actionModal.type === 'delete' || actionModal.data?.active}
-        confirmText={actionModal.type === 'delete' ? 'Eliminar' : (actionModal.data?.active ? 'Desactivar' : 'Activar')}
+        confirmText={actionModal.type === 'delete' ? t('tenants.common.delete') : (actionModal.data?.active ? t('tenants.common.disable') : t('tenants.common.enable'))}
         loading={actionModal.loading}
         requireReason={true}
         onClose={() => setActionModal(prev => ({ ...prev, open: false }))}

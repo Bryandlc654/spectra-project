@@ -299,7 +299,7 @@ class SupportTicketController
             return;
         }
 
-        $sql = "UPDATE support_tickets SET " . implode(', ', $fields) . " WHERE id LIKE :id";
+        $sql = "UPDATE support_tickets SET " . implode(', ', $fields) . " WHERE id = :id";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
 
@@ -329,7 +329,7 @@ class SupportTicketController
             SELECT m.*, u.full_name as user_name 
             FROM support_ticket_messages m
             JOIN users u ON m.user_id = u.id
-            WHERE m.ticket_id LIKE :tid
+            WHERE m.ticket_id = :tid
             ORDER BY m.created_at ASC
         ");
         $stmt->execute([':tid' => $ticketId]);

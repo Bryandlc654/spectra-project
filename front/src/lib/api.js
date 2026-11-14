@@ -60,11 +60,15 @@ export function createApi({ baseUrl, token }) {
 
         if (!res.ok) {
             if (res.status === 423) {
-                const msg = data?.message || data?.error || 'Acción inhabilitada por Modo Solo Lectura';
+                const details = data?.details || {};
+                const msg = details.message || data?.message || data?.error || 'Acción inhabilitada por Modo Solo Lectura';
                 const err = new Error(msg);
                 err.status = 423;
-                err.code = data?.code || 'read_only';
+                err.code = details.code || data?.code || 'read_only';
                 err.data = data;
+                if (err.code === 'kyb_required') {
+                    window.dispatchEvent(new CustomEvent('spectra:kyb-required', { detail: details }));
+                }
                 throw err;
             }
             if (res.status === 401) {
@@ -132,11 +136,15 @@ export async function apiFetch(apiUrl, path, { token, method = 'GET', body, para
 
   if (!res.ok) {
     if (res.status === 423) {
-      const msg = data?.message || data?.error || 'Acción inhabilitada por Modo Solo Lectura';
+      const details = data?.details || {};
+      const msg = details.message || data?.message || data?.error || 'Acción inhabilitada por Modo Solo Lectura';
       const err = new Error(msg);
       err.status = 423;
-      err.code = data?.code || 'read_only';
+      err.code = details.code || data?.code || 'read_only';
       err.data = data;
+      if (err.code === 'kyb_required') {
+        window.dispatchEvent(new CustomEvent('spectra:kyb-required', { detail: details }));
+      }
       throw err;
     }
     if (res.status === 401) {
@@ -164,4 +172,38 @@ export function resolveApiUrl() {
       return import.meta.env.VITE_API_URL.replace(/\/$/, '');
   }
   return 'https://apispectraerp.nextboostperu.com/public';
+}
+
+/**
+ * Descarga un archivo de la API enviando el token de sesión.
+ * window.open() no envía la cabecera Authorization, así que las exportaciones
+ * abrían una pestaña con {"message":"No autenticado"}.
+ */
+export async function downloadFile(baseUrl, path, fallbackName = 'export.csv') {
+  const url = String(baseUrl || resolveApiUrl()).replace(/\/$/, '') + path;
+  const doFetch = (bearer) => fetch(url, { headers: bearer ? { Authorization: `Bearer ${bearer}` } : {} });
+  const current = getStoredSession();
+  let res = await doFetch(current?.token);
+  if (res.status === 401) {
+    const newToken = await tryRefreshToken(baseUrl || resolveApiUrl(), current?.token).catch(() => null);
+    if (newToken) res = await doFetch(newToken);
+    else window.dispatchEvent(new CustomEvent('spectra:session-expired'));
+  }
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try { const js = await res.json(); msg = js?.message || js?.error || msg; } catch {}
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  const cd = res.headers.get('Content-Disposition') || '';
+  const m = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+  const name = m ? decodeURIComponent(m[1]) : fallbackName;
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 1000);
 }

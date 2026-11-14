@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../../context/AuthContext';
 import { PLATFORM_ROLES } from '../../../lib/platformRoles';
+import { useI18n } from '../../../i18n/I18nContext';
 
 export default function TenantOverviewTab({
   api,
@@ -12,6 +13,8 @@ export default function TenantOverviewTab({
   currenciesById,
 }) {
   const { user } = useAuth();
+  const { t, language } = useI18n();
+  const locale = language === 'en' ? 'en-US' : 'es-ES';
   const isSupport = user?.platform_role === PLATFORM_ROLES.SUPPORT;
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -61,20 +64,22 @@ export default function TenantOverviewTab({
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="text-xs font-semibold tracking-widest text-slate-500 uppercase">
-              Resumen
+              {t('tenants.operations.overview.summary')}
             </div>
             <div className="mt-1 text-lg font-extrabold text-slate-900">
-              Información general del tenant
+              {t('tenants.operations.overview.title')}
             </div>
             <p className="mt-1 text-sm text-slate-600 max-w-xl">
-              Visión rápida de la empresa, su configuración principal y estado operativo.
+              {t('tenants.operations.overview.subtitle')}
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
               <span className="mr-1.5 h-2 w-2 rounded-full bg-emerald-500" />
-              {company?.status || 'Estado no definido'}
+              {company?.status
+                ? ({ active: t('tenants.common.active'), suspended: t('tenants.common.suspended'), pending: t('tenants.common.pending'), inactive: t('tenants.common.inactive') }[company.status] || company.status)
+                : t('tenants.operations.overview.statusUndefined')}
             </span>
             <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
               <i className="bi bi-geo-alt text-slate-500 mr-1.5" />
@@ -89,47 +94,47 @@ export default function TenantOverviewTab({
 
         <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="text-xs font-semibold text-slate-500">Razón social</div>
+            <div className="text-xs font-semibold text-slate-500">{t('tenants.operations.overview.legalName')}</div>
             <div className="mt-1 text-sm font-extrabold text-slate-900">
               {company?.legal_name || '—'}
             </div>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="text-xs font-semibold text-slate-500">Nombre comercial</div>
+            <div className="text-xs font-semibold text-slate-500">{t('tenants.operations.overview.tradeName')}</div>
             <div className="mt-1 text-sm font-extrabold text-slate-900">
               {company?.trade_name || '—'}
             </div>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="text-xs font-semibold text-slate-500">Idioma principal</div>
+            <div className="text-xs font-semibold text-slate-500">{t('tenants.operations.overview.mainLanguage')}</div>
             <div className="mt-1 text-sm font-extrabold text-slate-900">
               {settings?.default_language || '—'}
             </div>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="text-xs font-semibold text-slate-500">País</div>
+            <div className="text-xs font-semibold text-slate-500">{t('tenants.operations.overview.country')}</div>
             <div className="mt-1 text-sm font-extrabold text-slate-900">
               {getCountryName(company?.country_id)}
             </div>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="text-xs font-semibold text-slate-500">Moneda base</div>
+            <div className="text-xs font-semibold text-slate-500">{t('tenants.operations.overview.baseCurrency')}</div>
             <div className="mt-1 text-sm font-extrabold text-slate-900">
               {getCurrencyName(company?.default_currency_id)}
             </div>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="text-xs font-semibold text-slate-500">Wallet</div>
+            <div className="text-xs font-semibold text-slate-500">{t('tenants.operations.overview.wallet')}</div>
             <div className="mt-2 flex items-baseline justify-between gap-3">
               <div className="text-sm font-extrabold text-slate-900">
                 {isSupport ? (
                   <span className="text-slate-500 font-normal italic">
-                    Vista restringida (Rol Support)
+                    {t('tenants.operations.overview.restrictedView')}
                   </span>
                 ) : (
                   <>
@@ -141,7 +146,7 @@ export default function TenantOverviewTab({
               {!isSupport && (
                 <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
                   <span className="mr-1 h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                  Operativa
+                  {t('tenants.operations.overview.operational')}
                 </span>
               )}
             </div>
@@ -152,18 +157,18 @@ export default function TenantOverviewTab({
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-extrabold text-slate-900">Métricas internas</h3>
+            <h3 className="text-sm font-extrabold text-slate-900">{t('tenants.operations.overview.internalMetrics')}</h3>
             <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-              Última captura
+              {t('tenants.operations.overview.lastSnapshot')}
             </span>
           </div>
           {loading && !stats ? (
-            <div className="mt-3 text-sm text-slate-500">Cargando métricas...</div>
+            <div className="mt-3 text-sm text-slate-500">{t('tenants.operations.overview.loadingMetrics')}</div>
           ) : (
             <div className="mt-4 grid grid-cols-2 gap-4">
               <div className="p-4 rounded-xl bg-blue-50 border border-blue-100">
                 <div className="text-xs font-semibold text-blue-600 uppercase">
-                  Usuarios activos
+                  {t('tenants.operations.overview.activeUsers')}
                 </div>
                 <div className="mt-1 text-2xl font-bold text-blue-900">
                   {stats?.active_users ?? 0}
@@ -171,7 +176,7 @@ export default function TenantOverviewTab({
               </div>
               <div className="p-4 rounded-xl bg-purple-50 border border-purple-100">
                 <div className="text-xs font-semibold text-purple-600 uppercase">
-                  Proyectos activos
+                  {t('tenants.operations.overview.activeProjects')}
                 </div>
                 <div className="mt-1 text-2xl font-bold text-purple-900">
                   {stats?.active_projects ?? 0}
@@ -179,7 +184,7 @@ export default function TenantOverviewTab({
               </div>
               <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-100">
                 <div className="text-xs font-semibold text-emerald-600 uppercase">
-                  Aprobaciones pendientes
+                  {t('tenants.operations.overview.pendingApprovals')}
                 </div>
                 <div className="mt-1 text-2xl font-bold text-emerald-900">
                   {stats?.pending_requisitions ?? 0}
@@ -187,7 +192,7 @@ export default function TenantOverviewTab({
               </div>
               <div className="p-4 rounded-xl bg-amber-50 border border-amber-100">
                 <div className="text-xs font-semibold text-amber-600 uppercase">
-                  Tickets
+                  {t('tenants.operations.overview.tickets')}
                 </div>
                 <div className="mt-1 text-2xl font-bold text-amber-900">—</div>
               </div>
@@ -197,13 +202,13 @@ export default function TenantOverviewTab({
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-extrabold text-slate-900">Actividad reciente</h3>
+            <h3 className="text-sm font-extrabold text-slate-900">{t('tenants.operations.overview.recentActivity')}</h3>
             <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-              Últimos eventos
+              {t('tenants.operations.overview.latestEvents')}
             </span>
           </div>
           {loading && !stats ? (
-            <div className="mt-3 text-sm text-slate-500">Cargando actividad...</div>
+            <div className="mt-3 text-sm text-slate-500">{t('tenants.operations.overview.loadingActivity')}</div>
           ) : (
             <div className="mt-4 space-y-4">
               {stats?.recent_activity?.length > 0 ? (
@@ -218,13 +223,13 @@ export default function TenantOverviewTab({
                     <div>
                       <div className="text-sm font-semibold text-slate-900">{act.action}</div>
                       <div className="text-xs text-slate-500">
-                        {new Date(act.created_at).toLocaleString()}
+                        {new Date(act.created_at).toLocaleString(locale)}
                       </div>
                     </div>
                   </div>
                 ))
               ) : (
-                <div className="text-sm text-slate-500 italic">No hay actividad reciente.</div>
+                <div className="text-sm text-slate-500 italic">{t('tenants.operations.overview.noRecentActivity')}</div>
               )}
             </div>
           )}

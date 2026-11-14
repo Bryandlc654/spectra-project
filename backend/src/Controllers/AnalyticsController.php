@@ -99,8 +99,9 @@ class AnalyticsController
         }
 
         if ($q !== '') {
-            $where[] = '(c.legal_name LIKE :q OR c.trade_name LIKE :q)';
-            $paramsWhere[':q'] = '%' . $q . '%';
+            $where[] = '(c.legal_name LIKE :q_1 OR c.trade_name LIKE :q_2)';
+            $paramsWhere[':q_1'] = '%' . $q . '%';
+            $paramsWhere[':q_2'] = '%' . $q . '%';
         }
 
         $whereSql = $where ? implode(' AND ', $where) : '1=1';
@@ -322,7 +323,7 @@ class AnalyticsController
 
         $stmt = $this->pdo->prepare("
             SELECT * FROM monthly_costs_snapshots 
-            WHERE company_id LIKE :cid 
+            WHERE company_id = :cid 
             AND month >= :start 
             AND month <= :end
             ORDER BY month ASC
@@ -413,7 +414,7 @@ class AnalyticsController
                 SUM(CASE WHEN pi.type = 'tax' THEN pi.amount ELSE 0 END) as taxes
             FROM payroll_items pi
             JOIN company_users cu ON cu.user_id = pi.user_id
-            WHERE cu.company_id LIKE :cid
+            WHERE cu.company_id = :cid
             AND pi.created_at >= :start_date AND pi.created_at <= :end_date
         ");
         

@@ -24,6 +24,11 @@ class ModuleAccess
         // Roles de empresa/empleados: fuera del alcance de la matriz de la plataforma
         if (in_array($role, ['user', 'company_admin', 'freelancer', 'freelance'], true)) return;
 
+        // IT Admin de una empresa debe poder completar la verificación KYB aunque
+        // su rol tenga un whitelist más restrictivo.
+        if ($role === 'it_admin' && !empty($user['company_id'])
+            && Auth::isKybVerificationRequest((string)$user['company_id'])) return;
+
         $module = self::moduleForRequest();
         if ($module === null) return; // tabla no mapeada -> mantener comportamiento actual (fail-open)
 
@@ -35,6 +40,12 @@ class ModuleAccess
 
     private static function allowedForRole(string $role, string $module, PDO $pdo): bool
     {
+        // Onboarding: lo realizan Admin de Empresa y Freelancer; los roles internos
+        // (admin/super_admin/legal/support) solo gestionan/consultan el progreso.
+        if ($module === 'onboarding') {
+            return in_array($role, ['super_admin', 'admin', 'company_admin', 'freelancer', 'freelance', 'legal', 'support'], true);
+        }
+
         // Support: whitelist estricta (espejo de platformRoles.js)
         if ($role === 'support') {
             return in_array($module, [
@@ -72,7 +83,7 @@ class ModuleAccess
             case 'freelancers':
                 return $role === 'legal';
             case 'onboarding':
-                return $role === 'legal';
+                return in_array($role, ['super_admin', 'admin', 'company_admin', 'freelancer', 'freelance', 'legal', 'support'], true);
             case 'contracts':
             case 'contracts_templates':
             case 'contracts_envelopes':

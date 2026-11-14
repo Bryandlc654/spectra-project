@@ -1,6 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
+import LanguageSelector from '../components/LanguageSelector';
+import KybGatePage from '../pages/Verification/KybGatePage';
+import { useI18n } from '../i18n/I18nContext';
+
+// Cambia a false para ocultar por completo la barra lateral.
+const SHOW_SIDEBAR = true;
 
 
 
@@ -12,12 +18,58 @@ function activeFromPath(pathname) {
 export default function DashboardLayout({ user, onLogout, token, apiUrl }) {
     const navigate = useNavigate();
     const { pathname } = useLocation();
+    const { t } = useI18n();
     const [unreadCount, setUnreadCount] = useState(0);
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [isMobile, setIsMobile] = useState(false);
 
+    const role = user?.platform_role || user?.role;
+    const isCompanyScoped = !!user?.company_id && ['company_admin', 'user', 'it_admin'].includes(role);
+    const [kybGate, setKybGate] = useState({
+        checking: isCompanyScoped,
+        required: false,
+        status: 'not_started',
+        companyName: '',
+    });
+
+    const refreshKybGate = useCallback(async () => {
+        if (!isCompanyScoped || !token || !apiUrl) {
+            setKybGate({ checking: false, required: false, status: 'not_started', companyName: '' });
+            return;
+        }
+
+        try {
+            const res = await fetch(`${apiUrl}/api/tenants/${user.company_id}/kyb`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error('kyb_gate_unavailable');
+            const data = await res.json();
+            setKybGate({
+                checking: false,
+                required: !!data?.required,
+                status: data?.request?.status || 'not_started',
+                companyName: data?.company_name || '',
+            });
+        } catch {
+            // Fail-open: the backend still enforces the gate on every request.
+            setKybGate({ checking: false, required: false, status: 'not_started', companyName: '' });
+        }
+    }, [apiUrl, isCompanyScoped, token, user?.company_id]);
+
     useEffect(() => {
-        if (!token || !apiUrl) return;
+        refreshKybGate();
+    }, [refreshKybGate]);
+
+    useEffect(() => {
+        const handleKybRequired = () => refreshKybGate();
+        window.addEventListener('spectra:kyb-required', handleKybRequired);
+        return () => window.removeEventListener('spectra:kyb-required', handleKybRequired);
+    }, [refreshKybGate]);
+
+    const kybBlocked = isCompanyScoped && (kybGate.checking || (kybGate.required && kybGate.status !== 'approved'));
+
+    useEffect(() => {
+        if (!token || !apiUrl || kybBlocked) return;
 
         const fetchUnread = () => {
             fetch(`${apiUrl}/api/notifications`, {
@@ -36,7 +88,7 @@ export default function DashboardLayout({ user, onLogout, token, apiUrl }) {
         // Poll every 60 seconds
         const interval = setInterval(fetchUnread, 60000);
         return () => clearInterval(interval);
-    }, [token, apiUrl]);
+    }, [token, apiUrl, kybBlocked]);
 
     // Responsive sidebar behavior
     useEffect(() => {
@@ -89,16 +141,41 @@ export default function DashboardLayout({ user, onLogout, token, apiUrl }) {
         }
     };
 
+    if (isCompanyScoped && kybGate.checking) {
+        return (
+            <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
+                <div className="text-center">
+                    <img src="/logo-spectra.webp" alt="Grupo Spectra" className="mx-auto mb-5 h-10 w-auto object-contain" />
+                    <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-brand border-t-transparent" />
+                    <p className="text-sm text-slate-500">{t('tenants.verification.loading')}</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (isCompanyScoped && kybGate.required && kybGate.status !== 'approved') {
+        return (
+            <KybGatePage
+                user={user}
+                token={token}
+                apiUrl={apiUrl}
+                onLogout={onLogout}
+            />
+        );
+    }
+
     return (
         <div className="min-h-screen flex bg-slate-50">
-            <Sidebar
-               user={user}
-               onLogout={onLogout}
-               open={isMobile ? sidebarOpen : true}
-               collapsed={!isMobile && !sidebarOpen}
-               isMobile={isMobile}
-               onClose={isMobile ? () => setSidebarOpen(false) : undefined}
-            />
+            {SHOW_SIDEBAR && (
+                <Sidebar
+                   user={user}
+                   onLogout={onLogout}
+                   open={isMobile ? sidebarOpen : true}
+                   collapsed={!isMobile && !sidebarOpen}
+                   isMobile={isMobile}
+                   onClose={isMobile ? () => setSidebarOpen(false) : undefined}
+                />
+            )}
 
             <main className="flex-1 flex flex-col">
                 {user?.is_impersonated && (
@@ -109,9 +186,9 @@ export default function DashboardLayout({ user, onLogout, token, apiUrl }) {
                                     <i className="bi bi-incognito text-xl" />
                                 </div>
                                 <div>
-                                    <p className="font-bold">Modo Impersonación Activo</p>
+                                    <p className="font-bold">{t('common.impersonationActive')}</p>
                                     <p className="text-xs opacity-90">
-                                        Estás viendo la plataforma como <span className="font-mono font-bold">Admin de Empresa</span>.
+                                        {t('common.impersonationDescription', { role: t('common.companyAdmin') })}
                                     </p>
                                 </div>
                             </div>
@@ -120,7 +197,7 @@ export default function DashboardLayout({ user, onLogout, token, apiUrl }) {
                                 className="rounded-lg bg-white px-4 py-2 text-sm font-bold text-amber-700 shadow-sm transition hover:bg-amber-50"
                             >
                                 <i className="bi bi-x-circle-fill mr-2" />
-                                Salir de Impersonación
+                                {t('common.stopImpersonation')}
                             </button>
                         </div>
                     </div>
@@ -129,26 +206,31 @@ export default function DashboardLayout({ user, onLogout, token, apiUrl }) {
                 <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/80 backdrop-blur">
                     <div className="mx-auto max-w-6xl px-5 py-4 flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                            <button
-                                onClick={toggleSidebar}
-                                className="rounded-lg border border-slate-200 p-2 text-slate-700 hover:bg-slate-50"
-                                aria-label="Alternar menú"
-                            >
-                                <i className="bi bi-list text-xl" />
-                            </button>
+                            {SHOW_SIDEBAR && (
+                                <button
+                                    onClick={toggleSidebar}
+                                    className="rounded-lg border border-slate-200 p-2 text-slate-700 hover:bg-slate-50"
+                                    aria-label={t('common.toggleMenu')}
+                                >
+                                    <i className="bi bi-list text-xl" />
+                                </button>
+                            )}
                             <div className="text-xs font-semibold tracking-widest text-slate-500 uppercase">
-                                Panel global
+                                {t('common.globalPanel')}
                             </div>
                             <div className="text-lg font-bold text-slate-900">
-                                {user?.full_name ? `Hola, ${user.full_name}` : 'Hola'}
+                                {user?.full_name ? t('common.hello', { name: user.full_name }) : t('common.helloShort')}
                             </div>
                         </div>
-                        <button
-                            onClick={onLogout}
-                            className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                        >
-                            Cerrar sesión
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <LanguageSelector />
+                            <button
+                                onClick={onLogout}
+                                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                            >
+                                {t('common.logout')}
+                            </button>
+                        </div>
                     </div>
                 </header>
 

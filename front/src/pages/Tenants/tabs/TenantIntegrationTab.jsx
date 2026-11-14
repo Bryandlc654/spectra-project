@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useToast } from '../../../components/ToastProvider';
+import { useI18n } from '../../../i18n/I18nContext';
 
 export default function TenantIntegrationTab({ companyId, api }) {
     const toast = useToast();
+    const { t, language } = useI18n();
+    const locale = language === 'en' ? 'en-US' : 'es-ES';
     const [integrations, setIntegrations] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -20,7 +23,7 @@ export default function TenantIntegrationTab({ companyId, api }) {
             setError(null);
         } catch (e) {
             console.error(e);
-            setError('Error al cargar integraciones');
+            setError(t('tenants.legacy.integration.loadError'));
         } finally {
             setLoading(false);
         }
@@ -30,7 +33,7 @@ export default function TenantIntegrationTab({ companyId, api }) {
         return (
             <div className="p-12 text-center text-slate-400">
                 <i className="bi bi-arrow-repeat animate-spin text-2xl mb-3 block"></i>
-                Cargando integraciones...
+                {t('tenants.legacy.integration.loading')}
             </div>
         );
     }
@@ -41,7 +44,7 @@ export default function TenantIntegrationTab({ companyId, api }) {
                 <i className="bi bi-exclamation-triangle mr-2"></i>
                 {error}
                 <button onClick={loadIntegrations} className="ml-4 underline hover:no-underline font-medium">
-                    Reintentar
+                    {t('tenants.legacy.integration.retry')}
                 </button>
             </div>
         );
@@ -51,15 +54,15 @@ export default function TenantIntegrationTab({ companyId, api }) {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <div>
-                    <h2 className="text-lg font-bold text-slate-900">Integraciones</h2>
-                    <p className="text-sm text-slate-500">Conecta este tenant con servicios externos (ERP, HRIS, Bancos).</p>
+                    <h2 className="text-lg font-bold text-slate-900">{t('tenants.legacy.integration.title')}</h2>
+                    <p className="text-sm text-slate-500">{t('tenants.legacy.integration.subtitle')}</p>
                 </div>
                 <button 
                     disabled
                     className="px-4 py-2 bg-brand text-white text-sm font-medium rounded-xl shadow-sm hover:bg-brand-dark transition-colors opacity-50 cursor-not-allowed"
                 >
                     <i className="bi bi-plus-lg mr-2"></i>
-                    Nueva Integración
+                    {t('tenants.legacy.integration.newIntegration')}
                 </button>
             </div>
 
@@ -68,9 +71,9 @@ export default function TenantIntegrationTab({ companyId, api }) {
                     <div className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400 mb-4">
                         <i className="bi bi-puzzle text-xl"></i>
                     </div>
-                    <h3 className="text-sm font-bold text-slate-900">Sin integraciones activas</h3>
+                    <h3 className="text-sm font-bold text-slate-900">{t('tenants.legacy.integration.emptyTitle')}</h3>
                     <p className="mt-1 text-sm text-slate-500">
-                        No hay integraciones configuradas para esta empresa.
+                        {t('tenants.legacy.integration.emptyDescription')}
                     </p>
                 </div>
             ) : (
@@ -83,21 +86,21 @@ export default function TenantIntegrationTab({ companyId, api }) {
                                         <i className={`bi bi-${integration.icon || 'hdd-network'} text-xl`}></i>
                                     </div>
                                     <div>
-                                        <h4 className="font-bold text-slate-900 text-sm">{integration.name || 'Sin nombre'}</h4>
+                                        <h4 className="font-bold text-slate-900 text-sm">{integration.name || t('tenants.legacy.integration.noName')}</h4>
                                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium ${
                                             integration.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
                                         }`}>
-                                            {integration.status === 'active' ? 'Activo' : 'Inactivo'}
+                                            {integration.status === 'active' ? t('tenants.common.active') : t('tenants.common.inactive')}
                                         </span>
                                     </div>
                                 </div>
                             </div>
                             <div className="text-xs text-slate-500 line-clamp-2 mb-4">
-                                {integration.description || 'Sin descripción disponible.'}
+                                {integration.description || t('tenants.legacy.integration.noDescription')}
                             </div>
                             <div className="pt-4 border-t border-slate-100 flex justify-end">
                                 <button className="text-xs font-semibold text-brand hover:text-brand-dark">
-                                    Configurar <i className="bi bi-arrow-right ml-1"></i>
+                                    {t('tenants.legacy.integration.configure')} <i className="bi bi-arrow-right ml-1"></i>
                                 </button>
                             </div>
                         </div>

@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import CriticalActionModal from '../../../components/CriticalActionModal';
 import { useToast } from '../../../components/ToastProvider';
+import { useI18n } from '../../../i18n/I18nContext';
 
 export default function TenantFinanceTab({ api, companyId }) {
   const toast = useToast();
+  const { t, language } = useI18n();
+  const locale = language === 'en' ? 'en-US' : 'es-ES';
   const [config, setConfig] = useState({
     invoice_number_next: '',
     invoice_prefix: '',
@@ -42,7 +45,7 @@ export default function TenantFinanceTab({ api, companyId }) {
         });
     } catch (e) {
         console.error(e);
-        toast.error('Error cargando configuración financiera');
+        toast.error(t('tenants.legacy.finance.loadError'));
     } finally {
         setLoading(false);
     }
@@ -62,24 +65,24 @@ export default function TenantFinanceTab({ api, companyId }) {
             base_currency_validation: config.base_currency_validation ? 1 : 0,
             reason // Audit log reason
         });
-        toast.success('Configuración financiera guardada');
+        toast.success(t('tenants.legacy.finance.saveSuccess'));
         setConfirmModal({ open: false, reason: '' });
         loadSettings();
     } catch (e) {
-        toast.error(e.message || 'Error guardando configuración');
+        toast.error(e.message || t('tenants.legacy.finance.saveError'));
     } finally {
         setSaving(false);
     }
   }
 
-  if (loading) return <div className="py-8 text-center text-slate-500">Cargando configuración...</div>;
+  if (loading) return <div className="py-8 text-center text-slate-500">{t('tenants.legacy.finance.loading')}</div>;
 
   return (
     <div className="space-y-6">
       <CriticalActionModal
         open={confirmModal.open}
-        title="Confirmar Cambios Financieros"
-        message="Estás a punto de modificar la configuración de facturación/finanzas. Esto puede afectar la generación de documentos y validaciones."
+        title={t('tenants.legacy.finance.confirmTitle')}
+        message={t('tenants.legacy.finance.confirmMessage')}
         danger={true}
         onClose={() => setConfirmModal({ ...confirmModal, open: false })}
         onConfirm={confirmSave}
@@ -88,10 +91,10 @@ export default function TenantFinanceTab({ api, companyId }) {
 
       {/* Configuración de Facturación */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6">
-        <h3 className="font-bold text-slate-800 mb-4">Configuración Financiera</h3>
+        <h3 className="font-bold text-slate-800 mb-4">{t('tenants.legacy.finance.title')}</h3>
         <form onSubmit={handleSaveClick} className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1">Próximo Número de Factura</label>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">{t('tenants.legacy.finance.nextInvoiceNumber')}</label>
             <input 
               type="number"
               value={config.invoice_number_next}
@@ -100,13 +103,13 @@ export default function TenantFinanceTab({ api, companyId }) {
             />
           </div>
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1">Prefijo de Factura (Serie)</label>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">{t('tenants.legacy.finance.invoicePrefix')}</label>
             <input 
               type="text"
               value={config.invoice_prefix}
               onChange={e => setConfig({...config, invoice_prefix: e.target.value})}
               className="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand"
-              placeholder="Ej. INV-"
+              placeholder={t('tenants.legacy.finance.invoicePrefixPlaceholder')}
             />
           </div>
           <div className="md:col-span-2 flex items-center gap-3">
@@ -117,7 +120,7 @@ export default function TenantFinanceTab({ api, companyId }) {
               onChange={e => setConfig({...config, base_currency_validation: e.target.checked})}
               className="h-5 w-5 rounded border-slate-300 text-brand focus:ring-brand"
             />
-            <label htmlFor="curr_val" className="text-sm font-medium text-slate-700">Validar transacciones en moneda base estricta</label>
+            <label htmlFor="curr_val" className="text-sm font-medium text-slate-700">{t('tenants.legacy.finance.baseCurrencyValidation')}</label>
           </div>
           <div className="md:col-span-2 pt-2">
             <button 
@@ -125,7 +128,7 @@ export default function TenantFinanceTab({ api, companyId }) {
                 disabled={saving} 
                 className="rounded-xl bg-brand px-6 py-2.5 text-sm font-bold text-white hover:bg-brand/90 disabled:opacity-70"
             >
-              {saving ? 'Guardando...' : 'Guardar Configuración'}
+              {saving ? t('tenants.common.saving') : t('tenants.legacy.finance.saveButton')}
             </button>
           </div>
         </form>
@@ -134,15 +137,15 @@ export default function TenantFinanceTab({ api, companyId }) {
       {/* Historial de Exportaciones */}
       <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100">
-          <h3 className="font-bold text-slate-800">Historial de Exportaciones y Reportes</h3>
+          <h3 className="font-bold text-slate-800">{t('tenants.legacy.finance.exportsTitle')}</h3>
         </div>
         <table className="w-full text-sm text-left">
           <thead className="bg-slate-50 text-slate-500 font-semibold">
             <tr>
-              <th className="px-6 py-3">Tipo de Reporte</th>
-              <th className="px-6 py-3">Fecha Generación</th>
-              <th className="px-6 py-3">Estado</th>
-              <th className="px-6 py-3 text-right">Acción</th>
+              <th className="px-6 py-3">{t('tenants.legacy.finance.reportType')}</th>
+              <th className="px-6 py-3">{t('tenants.legacy.finance.generatedAt')}</th>
+              <th className="px-6 py-3">{t('tenants.common.status')}</th>
+              <th className="px-6 py-3 text-right">{t('tenants.legacy.finance.action')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -153,17 +156,17 @@ export default function TenantFinanceTab({ api, companyId }) {
                 <td className="px-6 py-3">
                   {ex.status === 'completed' ? (
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold">
-                      <i className="bi bi-check-circle-fill"/> Completado
+                      <i className="bi bi-check-circle-fill"/> {t('tenants.legacy.finance.completed')}
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-50 text-red-700 text-xs font-bold" title={ex.error}>
-                      <i className="bi bi-x-circle-fill"/> Fallido
+                      <i className="bi bi-x-circle-fill"/> {t('tenants.legacy.finance.failed')}
                     </span>
                   )}
                 </td>
                 <td className="px-6 py-3 text-right">
                   {ex.status === 'completed' && (
-                    <a href={ex.url} className="text-brand font-semibold hover:underline">Descargar</a>
+                    <a href={ex.url} className="text-brand font-semibold hover:underline">{t('tenants.common.download')}</a>
                   )}
                 </td>
               </tr>

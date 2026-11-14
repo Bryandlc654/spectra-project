@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createApi } from '../../../lib/api';
 import { useToast } from '../../../components/ToastProvider';
+import { useI18n } from '../../../i18n/I18nContext';
 
 export default function TenantRolesTab({ companyId, apiUrl, token }) {
   const api = useMemo(() => createApi({ baseUrl: apiUrl, token }), [apiUrl, token]);
   const toast = useToast();
+  const { t } = useI18n();
 
   const [roles, setRoles] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -40,22 +42,22 @@ export default function TenantRolesTab({ companyId, apiUrl, token }) {
       const data = res.data || res || [];
       setRoles(Array.isArray(data) ? data : []);
     } catch (e) {
-      setErr(e.message || 'Error cargando roles de la empresa');
+      setErr(e.message || t('tenants.admin.roles.loadError'));
     } finally {
       setLoading(false);
     }
   }
 
   async function restoreDefaults() {
-      if (!window.confirm('¿Estás seguro de restaurar los roles por defecto? Esto podría duplicar roles si ya existen con el mismo nombre.')) return;
+      if (!window.confirm(t('tenants.admin.roles.restoreConfirm'))) return;
       
       setRestoring(true);
       try {
           await api.post(`/api/companies/${companyId}/roles/restore-defaults`);
-          toast.success('Roles restaurados correctamente');
+          toast.success(t('tenants.admin.roles.restoreSuccess'));
           load();
       } catch (e) {
-          toast.error(e.message || 'Error restaurando roles');
+          toast.error(e.message || t('tenants.admin.roles.restoreError'));
       } finally {
           setRestoring(false);
       }
@@ -70,7 +72,7 @@ export default function TenantRolesTab({ companyId, apiUrl, token }) {
       const data = await api.get('/api/roles/templates');
       setTemplates(data || []);
     } catch (e) {
-      toast.error('Error cargando plantillas: ' + e.message);
+      toast.error(t('tenants.admin.roles.templatesLoadError', { message: e.message }));
     } finally {
       setTemplatesLoading(false);
     }
@@ -87,10 +89,10 @@ export default function TenantRolesTab({ companyId, apiUrl, token }) {
       });
       setOpenTemplate(false);
       setSelectedTemplate('');
-      toast.success('Plantilla aplicada correctamente');
+      toast.success(t('tenants.admin.roles.templateApplied'));
       await load();
     } catch (e) {
-      toast.error(e.message || 'Error aplicando plantilla');
+      toast.error(e.message || t('tenants.admin.roles.templateApplyError'));
     } finally {
       setCreatingTemplate(false);
     }
@@ -110,7 +112,7 @@ export default function TenantRolesTab({ companyId, apiUrl, token }) {
               const res = await api.get('/api/permissions');
               setAllPermissions(res.data || res || {});
           } catch (e) {
-              toast.error('Error cargando permisos del sistema');
+              toast.error(t('tenants.admin.roles.permissionsLoadError'));
           } finally {
               setEditorLoading(false);
           }
@@ -129,32 +131,32 @@ export default function TenantRolesTab({ companyId, apiUrl, token }) {
                   name: roleName,
                   permissions: rolePermissions
               });
-              toast.success('Rol actualizado correctamente');
+              toast.success(t('tenants.admin.roles.roleUpdated'));
           } else {
               // Create
               await api.post(`/api/companies/${companyId}/roles`, {
                   name: roleName,
                   permissions: rolePermissions
               });
-              toast.success('Rol creado correctamente');
+              toast.success(t('tenants.admin.roles.roleCreated'));
           }
           setOpenEditor(false);
           load();
       } catch (e) {
-          toast.error(e.message || 'Error guardando rol');
+          toast.error(e.message || t('tenants.admin.roles.saveError'));
       } finally {
           setSaving(false);
       }
   }
 
   async function handleDelete(role) {
-      if (!window.confirm(`¿Eliminar rol "${role.name}"? Esta acción no se puede deshacer.`)) return;
+      if (!window.confirm(t('tenants.admin.roles.deleteConfirm', { name: role.name }))) return;
       try {
           await api.delete(`/api/companies/${companyId}/roles/${role.id}`);
-          toast.success('Rol eliminado');
+          toast.success(t('tenants.admin.roles.deleted'));
           load();
       } catch (e) {
-          toast.error(e.message || 'Error eliminando rol');
+          toast.error(e.message || t('tenants.admin.roles.deleteError'));
       }
   }
 
@@ -177,21 +179,21 @@ export default function TenantRolesTab({ companyId, apiUrl, token }) {
       }
   };
 
-  if (loading && !roles.length && !err) return <div className="py-8 text-center text-slate-500">Cargando roles...</div>;
+  if (loading && !roles.length && !err) return <div className="py-8 text-center text-slate-500">{t('tenants.admin.roles.loadingRoles')}</div>;
   if (err) return <div className="py-8 text-center text-red-500">{err}</div>;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-            <h3 className="text-lg font-bold text-slate-800">Roles y Permisos</h3>
-            <p className="text-xs text-slate-500">Gestiona el acceso de los usuarios a la empresa.</p>
+            <h3 className="text-lg font-bold text-slate-800">{t('tenants.admin.roles.title')}</h3>
+            <p className="text-xs text-slate-500">{t('tenants.admin.roles.subtitle')}</p>
         </div>
         <div className="flex flex-wrap gap-2">
             <button 
                 onClick={load}
                 className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                title="Recargar"
+                title={t('tenants.common.reload')}
             >
                 <i className="bi bi-arrow-repeat" />
             </button>
@@ -201,28 +203,28 @@ export default function TenantRolesTab({ companyId, apiUrl, token }) {
                 className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
             >
                 {restoring ? <i className="bi bi-arrow-clockwise animate-spin"/> : <i className="bi bi-magic"/>}
-                <span className="hidden sm:inline">Restaurar Defaults</span>
+                <span className="hidden sm:inline">{t('tenants.admin.roles.restoreDefaults')}</span>
             </button>
             <button
                 onClick={openTemplateModal}
                 className="inline-flex items-center gap-2 rounded-xl border border-brand/20 bg-brand/5 px-3 py-2 text-sm font-semibold text-brand hover:bg-brand/10"
             >
                 <i className="bi bi-collection" />
-                <span className="hidden sm:inline">Usar Plantilla</span>
+                <span className="hidden sm:inline">{t('tenants.admin.roles.useTemplate')}</span>
             </button>
             <button
                 onClick={() => openRoleEditor(null)}
                 className="inline-flex items-center gap-2 rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white hover:bg-brand/90 shadow-sm shadow-brand-500/20"
             >
                 <i className="bi bi-plus-lg" />
-                Nuevo Rol
+                {t('tenants.admin.roles.newRole')}
             </button>
         </div>
       </div>
 
       {!roles.length && (
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center text-slate-500">
-              No hay roles configurados. Puedes restaurar los valores por defecto o crear uno nuevo.
+              {t('tenants.admin.roles.empty')}
           </div>
       )}
 
@@ -233,13 +235,13 @@ export default function TenantRolesTab({ companyId, apiUrl, token }) {
                       <div className="flex items-start justify-between mb-2">
                           <h4 className="font-bold text-slate-800 line-clamp-1" title={role.name}>{role.name}</h4>
                           {role.is_system ? (
-                              <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">Sistema</span>
+                              <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{t('tenants.admin.roles.system')}</span>
                           ) : (
                               <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <button onClick={() => openRoleEditor(role)} className="p-1 text-slate-400 hover:text-brand" title="Editar">
+                                  <button onClick={() => openRoleEditor(role)} className="p-1 text-slate-400 hover:text-brand" title={t('tenants.common.edit')}>
                                       <i className="bi bi-pencil-square" />
                                   </button>
-                                  <button onClick={() => handleDelete(role)} className="p-1 text-slate-400 hover:text-red-600" title="Eliminar">
+                                  <button onClick={() => handleDelete(role)} className="p-1 text-slate-400 hover:text-red-600" title={t('tenants.common.delete')}>
                                       <i className="bi bi-trash" />
                                   </button>
                               </div>
@@ -248,12 +250,12 @@ export default function TenantRolesTab({ companyId, apiUrl, token }) {
                       
                       <div className="text-xs text-slate-500 mb-3 flex items-center gap-1.5">
                           <i className="bi bi-people-fill text-slate-400" />
-                          {role.user_count || 0} usuarios
+                          {t('tenants.admin.roles.usersCount', { count: role.user_count || 0 })}
                       </div>
 
                       <div className="border-t border-slate-100 pt-3">
                           <div className="flex items-center justify-between mb-2">
-                              <span className="text-xs font-semibold text-slate-400">Permisos</span>
+                              <span className="text-xs font-semibold text-slate-400">{t('tenants.admin.roles.permissions')}</span>
                               <span className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded-full text-slate-500 font-mono">
                                   {role.permissions?.length || 0}
                               </span>
@@ -282,7 +284,7 @@ export default function TenantRolesTab({ companyId, apiUrl, token }) {
           <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setOpenTemplate(false)} />
           <div className="relative w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 shrink-0">
-              <h3 className="text-lg font-bold text-slate-900">Aplicar Plantilla</h3>
+              <h3 className="text-lg font-bold text-slate-900">{t('tenants.admin.roles.applyTemplateTitle')}</h3>
               <button onClick={() => setOpenTemplate(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-600">
                 <i className="bi bi-x-lg" />
               </button>
@@ -290,7 +292,7 @@ export default function TenantRolesTab({ companyId, apiUrl, token }) {
             
             <div className="overflow-y-auto p-6">
                 {templatesLoading ? (
-                    <div className="py-8 text-center text-slate-500">Cargando plantillas...</div>
+                    <div className="py-8 text-center text-slate-500">{t('tenants.admin.roles.loadingTemplates')}</div>
                 ) : (
                     <div className="space-y-3">
                         {templates.map(tpl => (
@@ -313,7 +315,7 @@ export default function TenantRolesTab({ companyId, apiUrl, token }) {
                                 <div>
                                     <div className="font-semibold text-slate-900">{tpl.name}</div>
                                     <div className="text-xs text-slate-500">{tpl.description}</div>
-                                    <div className="mt-1 text-[10px] text-slate-400">{tpl.permissions_count} permisos</div>
+                                    <div className="mt-1 text-[10px] text-slate-400">{t('tenants.admin.roles.permissionsCount', { count: tpl.permissions_count })}</div>
                                 </div>
                             </label>
                         ))}
@@ -327,7 +329,7 @@ export default function TenantRolesTab({ companyId, apiUrl, token }) {
                 disabled={creatingTemplate || !selectedTemplate}
                 className="w-full rounded-xl bg-brand px-4 py-3 font-semibold text-white hover:bg-brand/90 disabled:opacity-70 shadow-sm shadow-brand-500/20"
               >
-                {creatingTemplate ? 'Creando Rol...' : 'Crear Rol desde Plantilla'}
+                {creatingTemplate ? t('tenants.admin.roles.creatingRole') : t('tenants.admin.roles.createFromTemplate')}
               </button>
             </div>
           </div>
@@ -340,7 +342,7 @@ export default function TenantRolesTab({ companyId, apiUrl, token }) {
           <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setOpenEditor(false)} />
           <div className="relative w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 shrink-0">
-              <h3 className="text-lg font-bold text-slate-900">{editingRole ? 'Editar Rol' : 'Nuevo Rol Personalizado'}</h3>
+              <h3 className="text-lg font-bold text-slate-900">{editingRole ? t('tenants.admin.roles.editRole') : t('tenants.admin.roles.newCustomRole')}</h3>
               <button onClick={() => setOpenEditor(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-600">
                 <i className="bi bi-x-lg" />
               </button>
@@ -349,23 +351,23 @@ export default function TenantRolesTab({ companyId, apiUrl, token }) {
             <form onSubmit={saveRole} className="flex flex-col flex-1 overflow-hidden">
                 <div className="flex-1 overflow-y-auto p-6 space-y-6">
                     <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-1">Nombre del Rol</label>
+                        <label className="block text-sm font-semibold text-slate-700 mb-1">{t('tenants.admin.roles.roleName')}</label>
                         <input 
                             type="text" 
                             value={roleName}
                             onChange={(e) => setRoleName(e.target.value)}
                             className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:ring-brand"
-                            placeholder="Ej. Supervisor de Ventas"
+                            placeholder={t('tenants.admin.roles.roleNamePlaceholder')}
                             required
                         />
                     </div>
 
                     <div>
-                        <h4 className="text-sm font-semibold text-slate-700 mb-3">Permisos</h4>
+                        <h4 className="text-sm font-semibold text-slate-700 mb-3">{t('tenants.admin.roles.permissions')}</h4>
                         {editorLoading ? (
-                            <div className="text-center py-8 text-slate-500">Cargando permisos...</div>
+                            <div className="text-center py-8 text-slate-500">{t('tenants.admin.roles.loadingPermissions')}</div>
                         ) : !allPermissions ? (
-                            <div className="text-center py-8 text-red-500">No se pudieron cargar los permisos</div>
+                            <div className="text-center py-8 text-red-500">{t('tenants.admin.roles.permissionsLoadFailed')}</div>
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 {Object.entries(allPermissions).map(([module, perms]) => {
@@ -382,7 +384,7 @@ export default function TenantRolesTab({ companyId, apiUrl, token }) {
                                                     onClick={() => toggleModule(module, modulePerms)}
                                                     className="text-[10px] font-semibold text-brand hover:underline"
                                                 >
-                                                    {allSelected ? 'Ninguno' : 'Todos'}
+                                                    {allSelected ? t('tenants.common.none') : t('tenants.common.all')}
                                                 </button>
                                             </div>
                                             <div className="space-y-2">
@@ -414,14 +416,14 @@ export default function TenantRolesTab({ companyId, apiUrl, token }) {
                         onClick={() => setOpenEditor(false)}
                         className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                     >
-                        Cancelar
+                        {t('tenants.common.cancel')}
                     </button>
                     <button
                         type="submit"
                         disabled={saving || !roleName.trim()}
                         className="rounded-xl bg-brand px-6 py-2 text-sm font-semibold text-white hover:bg-brand/90 disabled:opacity-70 shadow-sm shadow-brand-500/20"
                     >
-                        {saving ? 'Guardando...' : (editingRole ? 'Actualizar Rol' : 'Crear Rol')}
+                        {saving ? t('tenants.common.saving') : (editingRole ? t('tenants.admin.roles.updateRole') : t('tenants.admin.roles.createRole'))}
                     </button>
                 </div>
             </form>

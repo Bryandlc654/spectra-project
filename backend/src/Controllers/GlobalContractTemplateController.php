@@ -6,6 +6,7 @@ use App\Database;
 use App\Support\Response;
 use App\Support\AuditLogger;
 use App\Support\Auth;
+use App\Support\HtmlSanitizer;
 use Dompdf\Dompdf;
 use PDO;
 
@@ -93,8 +94,8 @@ class GlobalContractTemplateController
         }
 
         if ($q !== '') {
-            $where[] = '(title LIKE :q OR language_code LIKE :q)';
-            $params[':q'] = "%$q%";
+            $where[] = '(title LIKE :q_1 OR language_code LIKE :q_2)';
+            $params[':q_1'] = $params[':q_2'] = "%$q%";
         }
 
         $whereSql = implode(' AND ', $where);
@@ -142,6 +143,7 @@ class GlobalContractTemplateController
 
     private function sanitizeBody(string $body): string
     {
+        $body = HtmlSanitizer::stripCss($body);
         $body = str_ireplace(['<div>', '</div>'], ['<p>', '</p>'], $body);
         $allowed = '<p><br><b><strong><i><em><u><s><strike><ul><ol><li><h1><h2><h3><h4><blockquote><hr>';
         $body = strip_tags($body, $allowed);

@@ -49,15 +49,22 @@ function NavItem({ to, icon, label, end, onClick, collapsed }) {
   );
 }
 
-function NavGroup({ icon, label, children, basePath, collapsed }) {
+function NavGroup({ icon, label, children, basePath, collapsed, excludePaths = [], extraPaths = [] }) {
   const location = useLocation();
   const [open, setOpen] = useState(false);
 
-  // Auto-expand if current path starts with basePath
+  // Auto-expand if current path matches this group, excluding paths owned by another group
   useEffect(() => {
-    if (basePath && location.pathname.startsWith(basePath)) {
+    const pathname = location.pathname;
+    const matches = (p) => pathname === p || pathname.startsWith(`${p}/`);
+    const isExcluded = excludePaths.some(matches);
+    const isBaseMatch = basePath && matches(basePath);
+    const isExtraMatch = extraPaths.some(matches);
+
+    if (!isExcluded && (isBaseMatch || isExtraMatch)) {
       setOpen(true);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname, basePath]);
 
   return (
@@ -116,13 +123,20 @@ export default function Sidebar({ user, onLogout, open = true, onClose, collapse
            Debug: {user?.email} | CID: {user?.company_id} | URL: {urlTenantId}
         </div>
         <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-3'}`}>
-          <div className="grid h-10 w-10 place-items-center rounded-2xl bg-brand/10 text-brand ring-1 ring-brand/20">
-            <i className="bi bi-layers-fill text-xl" />
-          </div>
-          {!collapsed && (
-            <div className="flex-1 min-w-0">
-              <div className="leading-5 text-sm font-extrabold text-slate-900">Spectra</div>
-              <div className="text-xs font-semibold text-slate-500">
+          {collapsed ? (
+            <img
+              src="/favicon-192x192.webp"
+              alt="Grupo Spectra"
+              className="h-10 w-10 rounded-xl object-contain ring-1 ring-slate-200"
+            />
+          ) : (
+            <div className="min-w-0 flex-1">
+              <img
+                src="/logo-spectra.webp"
+                alt="Grupo Spectra"
+                className="h-10 w-auto max-w-[170px] object-contain"
+              />
+              <div className="mt-1 text-xs font-semibold text-slate-500">
                 {roleLabel}
               </div>
             </div>
@@ -193,6 +207,7 @@ export default function Sidebar({ user, onLogout, open = true, onClose, collapse
                  <NavGroup icon="bi-cash-stack" label="Pagos y Nómina" basePath="/dashboard/payroll" collapsed={collapsed}>
                     <NavItem to="/dashboard/payroll" label="Nómina" collapsed={collapsed} />
                     <NavItem to="/dashboard/billing/payments" label="Billetera / Pagos" collapsed={collapsed} />
+                    <NavItem to="/dashboard/profile/advances" label="Adelantos de sueldo" collapsed={collapsed} />
                     <NavItem to="/dashboard/net-salary" icon="bi-calculator" label="Calculadora de sueldo" collapsed={collapsed} />
                  </NavGroup>
               )}
@@ -236,7 +251,7 @@ export default function Sidebar({ user, onLogout, open = true, onClose, collapse
           )}
 
           {hasAccess(role, 'tenants') && role !== PLATFORM_ROLES.SUPPORT && (!user?.company_id || role === PLATFORM_ROLES.SUPER_ADMIN) && (
-            <NavGroup icon="bi-building" label="Empresas" basePath="/dashboard/tenants" collapsed={collapsed}>
+            <NavGroup icon="bi-building" label="Empresas" basePath="/dashboard/tenants" extraPaths={['/dashboard/admins/company-admins']} collapsed={collapsed}>
               <NavItem to="/dashboard/tenants" label="Lista de empresas" end collapsed={collapsed} />
               <NavItem to="/dashboard/tenants/create" label="Crear empresa" collapsed={collapsed} />
               <NavItem to="/dashboard/tenants/subscription" label="Contratos por empresa" collapsed={collapsed} />
@@ -247,7 +262,7 @@ export default function Sidebar({ user, onLogout, open = true, onClose, collapse
           )}
 
           {hasAccess(role, 'admins') && (
-            <NavGroup icon="bi-people-fill" label="Usuarios de Plataforma" basePath="/dashboard/admins" collapsed={collapsed}>
+            <NavGroup icon="bi-people-fill" label="Usuarios de Plataforma" basePath="/dashboard/admins" excludePaths={['/dashboard/admins/company-admins']} collapsed={collapsed}>
               <NavItem to="/dashboard/admins" label="Usuarios (internos)" collapsed={collapsed} />
               <NavItem to="/dashboard/rbac/roles" label="Roles de plataforma" collapsed={collapsed} />
               <NavItem to="/dashboard/security/sessions" label="Sesiones y seguridad" collapsed={collapsed} />
@@ -264,6 +279,7 @@ export default function Sidebar({ user, onLogout, open = true, onClose, collapse
                <NavItem to="/dashboard/profile" icon="bi-person-badge" label="Mi Perfil" collapsed={collapsed} />
                <NavItem to="/dashboard/projects" icon="bi-kanban" label="Mis Proyectos" collapsed={collapsed} />
                <NavItem to="/dashboard/payment-settings" icon="bi-credit-card" label="Datos de Pago" collapsed={collapsed} />
+               <NavItem to="/dashboard/profile/advances" icon="bi-cash-coin" label="Adelantos de sueldo" collapsed={collapsed} />
                <NavItem to="/dashboard/net-salary" icon="bi-calculator" label="Calculadora de sueldo" collapsed={collapsed} />
              </>
           )}
@@ -292,8 +308,12 @@ export default function Sidebar({ user, onLogout, open = true, onClose, collapse
           {hasAccess(role, 'finance') && role !== PLATFORM_ROLES.COMPANY_ADMIN && (
             <NavGroup icon="bi-cash-stack" label="Finanzas" basePath="/dashboard/finance" collapsed={collapsed}>
               <NavItem to="/dashboard/finance/invoices" label="Facturación / Invoices" collapsed={collapsed} />
+              {[PLATFORM_ROLES.SUPER_ADMIN, PLATFORM_ROLES.FINANCE].includes(role) && (
+                <NavItem to="/dashboard/finance/electronic-invoicing" icon="bi-receipt-cutoff" label="Facturación Electrónica" collapsed={collapsed} />
+              )}
               <NavItem to="/dashboard/finance/wallet" label="Wallet / Ledger" collapsed={collapsed} />
               <NavItem to="/dashboard/finance/reconciliation" label="Conciliación / Ajustes" collapsed={collapsed} />
+              <NavItem to="/dashboard/profile/advances" label="Adelantos de sueldo" collapsed={collapsed} />
             </NavGroup>
           )}
 

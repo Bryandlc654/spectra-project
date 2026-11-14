@@ -6,12 +6,11 @@ export default function AuthPage({ apiUrl, onAuth, existingSession }) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [mode, setMode] = useState('login'); // login | register | reset
+  const [mode, setMode] = useState('login'); // login | reset
   const [resetToken, setResetToken] = useState(null);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState({ tone: 'info', message: '' });
 
-  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -21,7 +20,6 @@ export default function AuthPage({ apiUrl, onAuth, existingSession }) {
 
   const title = useMemo(() => {
     if (mode === 'login') return 'Iniciar sesión';
-    if (mode === 'register') return 'Crear administrador';
     if (mode === 'reset') return 'Restablecer contraseña';
     return '';
   }, [mode]);
@@ -111,7 +109,7 @@ export default function AuthPage({ apiUrl, onAuth, existingSession }) {
     e.preventDefault();
     setStatus({ tone: 'info', message: '' });
 
-    if ((mode === 'register' || mode === 'reset') && password !== confirm) {
+    if (mode === 'reset' && password !== confirm) {
       setStatus({ tone: 'error', message: 'Las contraseñas no coinciden.' });
       return;
     }
@@ -147,17 +145,10 @@ export default function AuthPage({ apiUrl, onAuth, existingSession }) {
         return;
       }
 
-      const endpoint = mode === 'login' ? '/api/login' : '/api/register';
-
-      const payload =
-        mode === 'login'
-          ? { email, password }
-          : { full_name: fullName, email, password };
-
-      const res = await fetch(`${apiUrl}${endpoint}`, {
+      const res = await fetch(`${apiUrl}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ email, password }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -172,29 +163,21 @@ export default function AuthPage({ apiUrl, onAuth, existingSession }) {
         throw new Error(msg);
       }
 
-      if (mode === 'login') {
-        const session = { token: data.token, refreshToken: data.refresh_token, user: data.user };
-        onAuth(session);
-        if (rememberEmail) {
-          try {
-            localStorage.setItem('spectra_remember_email_value', email);
-            localStorage.setItem('spectra_remember_email_flag', '1');
-          } catch {}
-        } else {
-          try {
-            localStorage.removeItem('spectra_remember_email_value');
-            localStorage.removeItem('spectra_remember_email_flag');
-          } catch {}
-        }
-        // Standard redirection to dashboard
-        navigate('/dashboard', { replace: true });
-        return;
+      const session = { token: data.token, refreshToken: data.refresh_token, user: data.user };
+      onAuth(session);
+      if (rememberEmail) {
+        try {
+          localStorage.setItem('spectra_remember_email_value', email);
+          localStorage.setItem('spectra_remember_email_flag', '1');
+        } catch {}
+      } else {
+        try {
+          localStorage.removeItem('spectra_remember_email_value');
+          localStorage.removeItem('spectra_remember_email_flag');
+        } catch {}
       }
-
-      setStatus({ tone: 'success', message: 'Administrador creado. Ahora inicia sesión.' });
-      setMode('login');
-      setPassword('');
-      setConfirm('');
+      // Standard redirection to dashboard
+      navigate('/dashboard', { replace: true });
     } catch (err) {
       setStatus({ tone: 'error', message: err?.message || 'Error inesperado' });
     } finally {
@@ -260,50 +243,20 @@ export default function AuthPage({ apiUrl, onAuth, existingSession }) {
     <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4 py-12">
       <div className="w-full max-w-md">
         <div className="mb-6 text-center">
-          <div className="mx-auto mb-3 h-12 w-12 rounded-2xl bg-brand/10 grid place-items-center">
-            <i className="bi bi-stars text-brand text-xl" aria-hidden="true" />
-          </div>
+          <img
+            src="/logo-spectra.webp"
+            alt="Grupo Spectra"
+            className="mx-auto mb-4 h-16 w-auto max-w-[260px] object-contain"
+          />
           <h1 className="text-2xl font-bold text-slate-900">{title}</h1>
           <p className="mt-1 text-sm text-slate-600">
-            {mode === 'login' ? 'Accede al panel global.' : 'Usa esto solo para el arranque inicial.'}
+            {mode === 'login' ? 'Accede al panel global.' : 'Define tu nueva contraseña.'}
           </p>
         </div>
-
-        {mode !== 'reset' && (
-          <div className="mb-5 flex rounded-2xl bg-white border border-slate-200 p-1 shadow-sm">
-            <button
-              type="button"
-              onClick={() => setMode('login')}
-              className={`flex-1 rounded-xl px-4 py-2 text-sm font-semibold transition ${mode === 'login' ? 'bg-brand text-white' : 'text-slate-700 hover:bg-slate-50'}`}
-            >
-              Login
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('register')}
-              className={`flex-1 rounded-xl px-4 py-2 text-sm font-semibold transition ${mode === 'register' ? 'bg-brand text-white' : 'text-slate-700 hover:bg-slate-50'}`}
-            >
-              Register
-            </button>
-          </div>
-        )}
 
         {status?.message ? <StatusMessage tone={status.tone} message={status.message} /> : null}
 
         <form onSubmit={submit} className="mt-4 space-y-6 rounded-2xl bg-white border border-slate-200 p-6 shadow-sm">
-          {mode === 'register' && (
-            <div>
-              <label className="text-sm font-semibold text-slate-700">Nombre completo</label>
-              <input
-                className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 outline-none focus:bg-white focus:ring-4 focus:ring-brand/15 focus:border-brand"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                placeholder="Nombre y apellido"
-                required
-              />
-            </div>
-          )}
-
           <div>
             <label className="text-sm font-semibold text-slate-700">Correo</label>
             <input
@@ -347,7 +300,7 @@ export default function AuthPage({ apiUrl, onAuth, existingSession }) {
           </div>
 
           {/* Confirm */}
-          {(mode === 'register' || mode === 'reset') && (
+          {mode === 'reset' && (
             <div>
               <label className="text-sm font-semibold text-slate-700">Confirmar contraseña</label>
               <div className="relative mt-1">
@@ -403,9 +356,7 @@ export default function AuthPage({ apiUrl, onAuth, existingSession }) {
               ? 'Procesando...'
               : mode === 'login'
               ? 'Ingresar'
-              : mode === 'reset'
-              ? 'Cambiar contraseña'
-              : 'Crear admin'}
+              : 'Cambiar contraseña'}
           </button>
 
           {mode === 'login' && (

@@ -4,10 +4,12 @@ import CriticalActionModal from '../../../components/CriticalActionModal';
 import { useToast } from "../../../components/ToastProvider";
 import { useAuth } from "../../../context/AuthContext";
 import { PLATFORM_ROLES } from "../../../lib/platformRoles";
+import { useI18n } from '../../../i18n/I18nContext';
 
 export default function TenantSettingsTab({ companyId, api, onUpdate }) {
   const toast = useToast();
   const { user } = useAuth();
+  const { t } = useI18n();
   const [form, setForm] = useState({
     legal_name: '',
     trade_name: '',
@@ -19,6 +21,7 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
     default_payment_cycle: 'monthly',
     status: 'active',
     read_only_mode: false,
+    kyb_required: false,
   });
 
   const [logoFile, setLogoFile] = useState(null);
@@ -59,7 +62,7 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
 
   const timezonesById = useMemo(() => {
     const m = new Map();
-    for (const t of timezones) m.set(Number(t.id), t);
+    for (const tz of timezones) m.set(Number(tz.id), tz);
     return m;
   }, [timezones]);
 
@@ -81,7 +84,7 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
       setCurrencies(outCurrencies.items || []);
       setTimezones(outTimezones.items || []);
     } catch (e) {
-      setLookupsErr(e?.message || 'No se pudieron cargar los catálogos');
+      setLookupsErr(e?.message || t('tenants.admin.settings.lookupsError'));
     } finally {
       setLookupsLoading(false);
     }
@@ -100,6 +103,8 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
       }
 
       setForm({
+        legal_name: company?.legal_name ?? '',
+        trade_name: company?.trade_name ?? '',
         country_id: company?.country_id ?? '',
         default_currency_id: company?.default_currency_id ?? '',
         timezone_id: company?.timezone_id ?? '',
@@ -107,9 +112,10 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
         default_payment_cycle: company?.default_payment_cycle ?? d?.payment_cycle?.type ?? 'monthly',
         status: company?.status || 'active',
         read_only_mode: settings?.read_only_mode === 1 || settings?.read_only_mode === true || settings?.read_only_mode === '1',
+        kyb_required: company?.kyb_required === 1 || company?.kyb_required === true || company?.kyb_required === '1',
       });
     } catch (e) {
-      setErr(e?.message || 'No se pudo cargar la configuración');
+      setErr(e?.message || t('tenants.admin.settings.loadError'));
     }
   }
 
@@ -138,26 +144,27 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
     setErr('');
     try {
       const formData = new FormData();
-      formData.append('legal_name', form.legal_name);
+      if (form.legal_name) formData.append('legal_name', form.legal_name);
       formData.append('trade_name', form.trade_name || '');
       formData.append('country_id', form.country_id);
       formData.append('default_currency_id', form.default_currency_id);
       formData.append('timezone_id', form.timezone_id);
       formData.append('default_language', form.default_language);
       formData.append('default_payment_cycle', form.default_payment_cycle);
+      formData.append('kyb_required', form.kyb_required ? '1' : '0');
 
       if (logoFile) {
         formData.append('logo', logoFile);
       }
 
       await api.post(`/api/tenants/${companyId}/settings?_method=PUT`, formData);
-      setMsg('Configuración guardada correctamente');
+      setMsg(t('tenants.admin.settings.savedSuccess'));
       loadTenant();
       if (typeof onUpdate === 'function') {
         onUpdate();
       }
     } catch (error) {
-      setErr(error.message || 'Error guardando cambios');
+      setErr(error.message || t('tenants.admin.settings.saveError'));
     } finally {
       setSaving(false);
     }
@@ -171,23 +178,23 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
 
     switch (type) {
       case 'suspend':
-        title = 'Suspender Empresa';
-        message = 'La empresa perderá acceso al sistema inmediatamente. Los usuarios no podrán iniciar sesión. ¿Estás seguro?';
+        title = t('tenants.admin.settings.modalSuspendTitle');
+        message = t('tenants.admin.settings.modalSuspendMessage');
         danger = true;
         break;
       case 'activate':
-        title = 'Reactivar Empresa';
-        message = 'La empresa volverá a tener acceso al sistema. ¿Confirmar reactivación?';
+        title = t('tenants.admin.settings.modalActivateTitle');
+        message = t('tenants.admin.settings.modalActivateMessage');
         danger = false;
         break;
       case 'readonly_on':
-        title = 'Activar Modo Solo Lectura';
-        message = 'Se bloqueará la creación de nuevos contratos, pagos y otros registros. Solo se permitirá la consulta de datos. ¿Confirmar?';
+        title = t('tenants.admin.settings.modalReadOnlyOnTitle');
+        message = t('tenants.admin.settings.modalReadOnlyOnMessage');
         danger = true;
         break;
       case 'readonly_off':
-        title = 'Desactivar Modo Solo Lectura';
-        message = 'Se restablecerá la capacidad de crear registros en la empresa. ¿Confirmar?';
+        title = t('tenants.admin.settings.modalReadOnlyOffTitle');
+        message = t('tenants.admin.settings.modalReadOnlyOffMessage');
         danger = false;
         break;
       default: return;
@@ -210,16 +217,16 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
       
       if (type === 'suspend') {
         await api.post(`/api/tenants/${companyId}/suspend`, { reason });
-        toast.success('Empresa suspendida correctamente');
+        toast.success(t('tenants.admin.settings.suspendSuccess'));
       } else if (type === 'activate') {
         await api.post(`/api/tenants/${companyId}/activate`, { reason });
-        toast.success('Empresa reactivada correctamente');
+        toast.success(t('tenants.admin.settings.activateSuccess'));
       } else if (type === 'readonly_on') {
         await api.put(`/api/tenants/${companyId}/settings`, { read_only_mode: 1, reason });
-        toast.success('Modo solo lectura activado');
+        toast.success(t('tenants.admin.settings.readOnlyOnSuccess'));
       } else if (type === 'readonly_off') {
         await api.put(`/api/tenants/${companyId}/settings`, { read_only_mode: 0, reason });
-        toast.success('Modo solo lectura desactivado');
+        toast.success(t('tenants.admin.settings.readOnlyOffSuccess'));
       }
 
       loadTenant();
@@ -228,7 +235,7 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
       }
       setActionModal(prev => ({ ...prev, open: false }));
     } catch (e) {
-      toast.error(e.message || 'Error ejecutando acción');
+      toast.error(e.message || t('tenants.admin.settings.actionError'));
       setActionModal(prev => ({ ...prev, loading: false }));
     }
   }
@@ -245,7 +252,7 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      toast.success('Export generado correctamente');
+      toast.success(t('tenants.admin.settings.exportSuccess'));
     } catch (e) {
       if (e.status === 404) {
         try {
@@ -267,12 +274,12 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
           a.click();
           a.remove();
           URL.revokeObjectURL(url);
-          toast.success('Export generado correctamente');
+          toast.success(t('tenants.admin.settings.exportSuccess'));
         } catch (e2) {
-          toast.error(e2.message || 'No se pudo exportar los datos');
+          toast.error(e2.message || t('tenants.admin.settings.exportError'));
         }
       } else {
-        toast.error(e.message || 'No se pudo exportar los datos');
+        toast.error(e.message || t('tenants.admin.settings.exportError'));
       }
     }
   }
@@ -296,8 +303,8 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
       {/* Configuración General */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200">
         <div className="px-6 py-4 border-b border-slate-100">
-          <h3 className="text-base font-semibold text-slate-900">Configuración General</h3>
-          <p className="text-sm text-slate-500">Ajustes regionales y de localización</p>
+          <h3 className="text-base font-semibold text-slate-900">{t('tenants.admin.settings.generalTitle')}</h3>
+          <p className="text-sm text-slate-500">{t('tenants.admin.settings.generalSubtitle')}</p>
         </div>
         
         <form onSubmit={handleSave} className="p-6 space-y-6">
@@ -315,7 +322,7 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
           {lookupsErr && (
             <div className="p-3 bg-amber-50 text-amber-700 rounded-lg text-sm flex items-center gap-2">
               <i className="bi bi-exclamation-circle" /> {lookupsErr}
-              <button type="button" onClick={loadLookups} className="underline ml-2">Reintentar</button>
+              <button type="button" onClick={loadLookups} className="underline ml-2">{t('tenants.admin.settings.retry')}</button>
             </div>
           )}
 
@@ -325,7 +332,7 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
                 <div className="shrink-0">
                     <div className="h-24 w-24 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center relative group">
                         {logoPreview ? (
-                            <img src={logoPreview} alt="Logo" className="h-full w-full object-cover" />
+                            <img src={logoPreview} alt={t('tenants.admin.settings.logoAlt')} className="h-full w-full object-cover" />
                         ) : (
                             <i className="bi bi-building text-3xl text-slate-300" />
                         )}
@@ -336,10 +343,10 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
                     </div>
                 </div>
                 <div>
-                    <h4 className="text-sm font-semibold text-slate-900">Logotipo de la Empresa</h4>
-                    <p className="text-xs text-slate-500 mb-2">Se recomienda formato PNG o JPG, tamaño mínimo 200x200px.</p>
+                    <h4 className="text-sm font-semibold text-slate-900">{t('tenants.admin.settings.logoTitle')}</h4>
+                    <p className="text-xs text-slate-500 mb-2">{t('tenants.admin.settings.logoHelp')}</p>
                     <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">
-                        <i className="bi bi-upload" /> Subir Logo
+                        <i className="bi bi-upload" /> {t('tenants.admin.settings.uploadLogo')}
                         <input type="file" className="hidden" accept="image/*" onChange={handleLogoChange} />
                     </label>
                 </div>
@@ -347,7 +354,7 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
 
             {/* Datos Legales */}
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Razón Social</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">{t('tenants.admin.settings.legalName')}</label>
               <input
                 type="text"
                 required
@@ -357,7 +364,7 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Nombre Comercial</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">{t('tenants.admin.settings.tradeName')}</label>
               <input
                 type="text"
                 value={form.trade_name}
@@ -368,7 +375,7 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
 
             {/* País */}
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">País</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">{t('tenants.admin.settings.country')}</label>
               <select
                 required
                 value={form.country_id}
@@ -376,7 +383,7 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
                 disabled={lookupsLoading || !countries.length}
                 className="w-full rounded-lg border-slate-300 focus:border-brand focus:ring-brand/10"
               >
-                <option value="">Selecciona un país</option>
+                <option value="">{t('tenants.admin.settings.selectCountry')}</option>
                 {countries.map((c) => (
                   <option key={c.id} value={c.id}>{c.iso2} — {c.name}</option>
                 ))}
@@ -385,7 +392,7 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
 
             {/* Moneda */}
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Moneda Base</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">{t('tenants.admin.settings.baseCurrency')}</label>
               <select
                 required
                 value={form.default_currency_id}
@@ -393,7 +400,7 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
                 disabled={lookupsLoading || !currencies.length}
                 className="w-full rounded-lg border-slate-300 focus:border-brand focus:ring-brand/10"
               >
-                <option value="">Selecciona una moneda</option>
+                <option value="">{t('tenants.admin.settings.selectCurrency')}</option>
                 {currencies.map((c) => (
                   <option key={c.id} value={c.id}>{c.code} — {c.name}</option>
                 ))}
@@ -402,47 +409,64 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
 
             {/* Zona Horaria */}
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Zona Horaria</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">{t('tenants.admin.settings.timezone')}</label>
               <select
-                required
                 value={form.timezone_id}
                 onChange={(e) => setForm({ ...form, timezone_id: e.target.value })}
                 disabled={lookupsLoading || !timezones.length}
                 className="w-full rounded-lg border-slate-300 focus:border-brand focus:ring-brand/10"
               >
-                <option value="">Selecciona una zona</option>
-                {timezones.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
+                <option value="">{t('tenants.admin.settings.selectTimezone')}</option>
+                {timezones.map((tz) => (
+                  <option key={tz.id} value={tz.id}>{tz.name}</option>
                 ))}
               </select>
             </div>
 
             {/* Idioma */}
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Idioma</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">{t('tenants.admin.settings.language')}</label>
               <select
                 value={form.default_language}
                 onChange={(e) => setForm({ ...form, default_language: e.target.value })}
                 className="w-full rounded-lg border-slate-300 focus:border-brand focus:ring-brand/10"
               >
-                <option value="es">Español</option>
-                <option value="en">English</option>
+                <option value="es">{t('tenants.admin.settings.languageSpanish')}</option>
+                <option value="en">{t('tenants.admin.settings.languageEnglish')}</option>
               </select>
             </div>
 
             {/* Ciclo */}
             <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-slate-700 mb-1">Ciclo de pago por defecto</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">{t('tenants.admin.settings.paymentCycle')}</label>
               <select
                 value={form.default_payment_cycle}
                 onChange={(e) => setForm({ ...form, default_payment_cycle: e.target.value })}
                 className="w-full rounded-lg border-slate-300 focus:border-brand focus:ring-brand/10"
               >
-                <option value="weekly">Semanal</option>
-                <option value="biweekly">Quincenal</option>
-                <option value="monthly">Mensual</option>
+                <option value="weekly">{t('tenants.admin.settings.weekly')}</option>
+                <option value="biweekly">{t('tenants.admin.settings.biweekly')}</option>
+                <option value="monthly">{t('tenants.admin.settings.monthly')}</option>
               </select>
             </div>
+
+            {/* Requerimiento KYB */}
+            {showAdminActions && (
+              <div className="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.kyb_required}
+                    onChange={(e) => setForm({ ...form, kyb_required: e.target.checked })}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand focus:ring-brand"
+                  />
+                  <span>
+                    <span className="block text-sm font-semibold text-slate-800">{t('tenants.admin.settings.kybRequiredTitle')}</span>
+                    <span className="block text-xs text-slate-500 mt-1">{t('tenants.admin.settings.kybRequiredDescription')}</span>
+                  </span>
+                </label>
+              </div>
+            )}
           </div>
 
           <div className="pt-4 border-t border-slate-100 flex justify-end">
@@ -451,7 +475,7 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
               disabled={saving}
               className="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand/90 disabled:opacity-50"
             >
-              {saving ? 'Guardando...' : 'Guardar Cambios'}
+              {saving ? t('tenants.common.saving') : t('tenants.admin.settings.saveChanges')}
             </button>
           </div>
         </form>
@@ -461,17 +485,17 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
       {showAdminActions && (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-            <h3 className="text-base font-semibold text-slate-900">Acciones Administrativas</h3>
-            <p className="text-sm text-slate-500">Gestión avanzada y zonas de peligro</p>
+            <h3 className="text-base font-semibold text-slate-900">{t('tenants.admin.settings.adminActionsTitle')}</h3>
+            <p className="text-sm text-slate-500">{t('tenants.admin.settings.adminActionsSubtitle')}</p>
           </div>
 
           <div className="divide-y divide-slate-100">
             {/* Read Only Mode */}
             <div className="p-6 flex items-center justify-between gap-4">
               <div>
-                <h4 className="text-sm font-medium text-slate-900">Modo Solo Lectura</h4>
+                <h4 className="text-sm font-medium text-slate-900">{t('tenants.admin.settings.readOnlyTitle')}</h4>
                 <p className="text-sm text-slate-500 mt-1">
-                  Bloquea la creación de nuevos contratos, pagos y registros. Solo permite consultas.
+                  {t('tenants.admin.settings.readOnlyDescription')}
                 </p>
               </div>
               <button
@@ -487,9 +511,9 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
             {/* Export Data */}
             <div className="p-6 flex items-center justify-between gap-4">
               <div>
-                <h4 className="text-sm font-medium text-slate-900">Exportar Datos</h4>
+                <h4 className="text-sm font-medium text-slate-900">{t('tenants.admin.settings.exportTitle')}</h4>
                 <p className="text-sm text-slate-500 mt-1">
-                  Descarga un archivo JSON con toda la información de la empresa.
+                  {t('tenants.admin.settings.exportDescription')}
                 </p>
               </div>
               <button
@@ -497,7 +521,7 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
                 className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
                 <i className="bi bi-download" />
-                Exportar
+                {t('tenants.admin.settings.exportButton')}
               </button>
             </div>
 
@@ -505,12 +529,12 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
             <div className={`p-6 flex items-center justify-between gap-4 ${form.status === 'suspended' ? 'bg-emerald-50/50' : 'bg-red-50/50'}`}>
               <div>
                 <h4 className={`text-sm font-medium ${form.status === 'suspended' ? 'text-emerald-900' : 'text-red-900'}`}>
-                  {form.status === 'suspended' ? 'Reactivar Empresa' : 'Suspender Empresa'}
+                  {form.status === 'suspended' ? t('tenants.admin.settings.reactivateCompany') : t('tenants.admin.settings.suspendCompany')}
                 </h4>
                 <p className={`text-sm mt-1 ${form.status === 'suspended' ? 'text-emerald-700' : 'text-red-700'}`}>
                   {form.status === 'suspended' 
-                    ? 'Restaurar el acceso completo a la plataforma para todos los usuarios.'
-                    : 'La empresa perderá acceso inmediato al sistema. Se requiere justificación.'}
+                    ? t('tenants.admin.settings.reactivateDescription')
+                    : t('tenants.admin.settings.suspendDescription')}
                 </p>
               </div>
               <button
@@ -521,7 +545,7 @@ export default function TenantSettingsTab({ companyId, api, onUpdate }) {
                     : 'bg-white border border-red-200 text-red-700 hover:bg-red-50 focus:ring-red-500'}`}
               >
                 <i className={`bi ${form.status === 'suspended' ? 'bi-play-circle' : 'bi-pause-circle'}`} />
-                {form.status === 'suspended' ? 'Reactivar' : 'Suspender'}
+                {form.status === 'suspended' ? t('tenants.admin.settings.reactivateButton') : t('tenants.admin.settings.suspendButton')}
               </button>
             </div>
           </div>

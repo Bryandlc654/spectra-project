@@ -390,6 +390,7 @@ function AppRoutes() {
                 <Route path="support" element={<GenericTenantPage Component={TenantSupportTab} />} />
                 <Route path="onboarding-ops" element={<GenericTenantPage Component={TenantOnboardingOpsTab} />} />
                 <Route path="reports" element={<GenericTenantPage Component={TenantReportsTab} />} />
+                <Route path="approvals" element={<GenericTenantPage Component={TenantApprovalsTab} />} />
             </Route>
             <Route
               path="admins/*"
@@ -521,7 +522,7 @@ function AppRoutes() {
                 path="finance/*"
                 element={
                   <RoleRoute user={session?.user} section="finance">
-                    <FinanceRoutes apiUrl={apiUrl} token={session?.token} />
+                    <FinanceRoutes apiUrl={apiUrl} token={session?.token} user={session?.user} />
                   </RoleRoute>
                 }
               />

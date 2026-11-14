@@ -2,15 +2,17 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Modal from '../../../components/Modal';
 import CriticalActionModal from '../../../components/CriticalActionModal';
 import { useToast } from '../../../components/ToastProvider';
+import { useI18n } from '../../../i18n/I18nContext';
 
 const TYPES = [
-  { key: 'billing', label: 'Billing' },
-  { key: 'operations', label: 'Operaciones' }, // backend: mapear a enum/other según decidas
-  { key: 'legal', label: 'Legal' },
+  { key: 'billing', labelKey: 'tenants.operations.contacts.typeBilling' },
+  { key: 'operations', labelKey: 'tenants.operations.contacts.typeOperations' }, // backend: mapear a enum/other según decidas
+  { key: 'legal', labelKey: 'tenants.operations.contacts.typeLegal' },
 ];
 
 export default function TenantContactsTab({ companyId, api, tenant }) {
   const toast = useToast();
+  const { t } = useI18n();
   const [contacts, setContacts] = useState([]);
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(false);
@@ -47,11 +49,11 @@ export default function TenantContactsTab({ companyId, api, tenant }) {
     setErr('');
     try {
       await api.post(`/api/tenants/${companyId}/contacts`, { ...form });
-      toast.success('Contacto creado');
+      toast.success(t('tenants.operations.contacts.contactCreated'));
       resetForm();
       setCreateOpen(false);
       await load();
-    } catch (e2) { setErr(e2.message); toast.error(e2.message || 'Error al crear'); }
+    } catch (e2) { setErr(e2.message); toast.error(e2.message || t('tenants.operations.contacts.createError')); }
     finally { setWorking(false); }
   }
 
@@ -62,12 +64,12 @@ export default function TenantContactsTab({ companyId, api, tenant }) {
     setErr('');
     try {
       await api.put(`/api/tenants/${companyId}/contacts/${current.id}`, { ...form });
-      toast.success('Contacto actualizado');
+      toast.success(t('tenants.operations.contacts.contactUpdated'));
       setEditOpen(false);
       setCurrent(null);
       resetForm();
       await load();
-    } catch (e2) { setErr(e2.message); toast.error(e2.message || 'Error al actualizar'); }
+    } catch (e2) { setErr(e2.message); toast.error(e2.message || t('tenants.operations.contacts.updateError')); }
     finally { setWorking(false); }
   }
 
@@ -77,11 +79,11 @@ export default function TenantContactsTab({ companyId, api, tenant }) {
     setErr('');
     try {
       await api.del(`/api/tenants/${companyId}/contacts/${current.id}`);
-      toast.success('Contacto eliminado');
+      toast.success(t('tenants.operations.contacts.contactDeleted'));
       setDeleteOpen(false);
       setCurrent(null);
       await load();
-    } catch (e) { setErr(e.message); toast.error(e.message || 'Error al eliminar'); }
+    } catch (e) { setErr(e.message); toast.error(e.message || t('tenants.operations.contacts.deleteError')); }
     finally { setWorking(false); }
   }
 
@@ -113,8 +115,8 @@ export default function TenantContactsTab({ companyId, api, tenant }) {
 
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-slate-900">Contactos</h2>
-          <p className="text-sm text-slate-500">Personas de contacto clave para este tenant</p>
+          <h2 className="text-lg font-bold text-slate-900">{t('tenants.operations.contacts.title')}</h2>
+          <p className="text-sm text-slate-500">{t('tenants.operations.contacts.subtitle')}</p>
         </div>
         <button
           type="button"
@@ -123,7 +125,7 @@ export default function TenantContactsTab({ companyId, api, tenant }) {
           className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
         >
           <i className="bi bi-plus-lg" />
-          Agregar contacto
+          {t('tenants.operations.contacts.addContact')}
         </button>
       </div>
 
@@ -131,18 +133,21 @@ export default function TenantContactsTab({ companyId, api, tenant }) {
         <table className="w-full text-sm bg-white">
           <thead>
             <tr className="text-left text-xs uppercase tracking-widest text-slate-500">
-              <th className="px-4 py-3">Tipo</th>
-              <th className="px-4 py-3">Nombre</th>
-              <th className="px-4 py-3">Email</th>
-              <th className="px-4 py-3">Teléfono</th>
-              <th className="px-4 py-3 text-right">Acciones</th>
+              <th className="px-4 py-3">{t('tenants.common.type')}</th>
+              <th className="px-4 py-3">{t('tenants.common.name')}</th>
+              <th className="px-4 py-3">{t('tenants.common.email')}</th>
+              <th className="px-4 py-3">{t('tenants.operations.contacts.phone')}</th>
+              <th className="px-4 py-3 text-right">{t('tenants.common.actions')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {contacts.map((c) => (
               <tr key={c.id} className="hover:bg-slate-50/60">
                 <td className="px-4 py-3 font-semibold">
-                  {TYPES.find(t => t.key === c.type)?.label || c.type}
+                  {(() => {
+                    const typeDef = TYPES.find((item) => item.key === c.type);
+                    return typeDef ? t(typeDef.labelKey) : c.type;
+                  })()}
                 </td>
                 <td className="px-4 py-3">{c.name}</td>
                 <td className="px-4 py-3">{c.email || '—'}</td>
@@ -155,7 +160,7 @@ export default function TenantContactsTab({ companyId, api, tenant }) {
                       onClick={() => openEdit(c)}
                       className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-60"
                     >
-                      Editar
+                      {t('tenants.common.edit')}
                     </button>
                     <button
                       type="button"
@@ -163,33 +168,33 @@ export default function TenantContactsTab({ companyId, api, tenant }) {
                       onClick={() => openDelete(c)}
                       className="rounded-xl border border-red-200 text-red-600 px-3 py-2 text-sm font-semibold hover:bg-red-50 disabled:opacity-60"
                     >
-                      Eliminar
+                      {t('tenants.common.delete')}
                     </button>
                   </div>
                 </td>
               </tr>
             ))}
             {!contacts.length ? (
-              <tr><td colSpan={5} className="px-4 py-10 text-center text-slate-500">Sin contactos.</td></tr>
+              <tr><td colSpan={5} className="px-4 py-10 text-center text-slate-500">{t('tenants.operations.contacts.noContacts')}</td></tr>
             ) : null}
           </tbody>
         </table>
       </div>
 
-      <Modal open={createOpen} onClose={() => !working && setCreateOpen(false)} title="Agregar contacto" size="md">
+      <Modal open={createOpen} onClose={() => !working && setCreateOpen(false)} title={t('tenants.operations.contacts.addContact')} size="md">
         <form onSubmit={createContact} className="grid grid-cols-1 gap-3">
           <div>
-            <label className="text-xs font-semibold text-slate-600">Tipo</label>
+            <label className="text-xs font-semibold text-slate-600">{t('tenants.common.type')}</label>
             <select
               value={form.type}
               onChange={(e) => setForm((p) => ({ ...p, type: e.target.value }))}
               className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5"
             >
-              {TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+              {TYPES.map((item) => <option key={item.key} value={item.key}>{t(item.labelKey)}</option>)}
             </select>
           </div>
           <div>
-            <label className="text-xs font-semibold text-slate-600">Nombre</label>
+            <label className="text-xs font-semibold text-slate-600">{t('tenants.common.name')}</label>
             <input
               value={form.name}
               onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
@@ -198,7 +203,7 @@ export default function TenantContactsTab({ companyId, api, tenant }) {
             />
           </div>
           <div>
-            <label className="text-xs font-semibold text-slate-600">Email</label>
+            <label className="text-xs font-semibold text-slate-600">{t('tenants.common.email')}</label>
             <input
               type="email"
               value={form.email}
@@ -207,7 +212,7 @@ export default function TenantContactsTab({ companyId, api, tenant }) {
             />
           </div>
           <div>
-            <label className="text-xs font-semibold text-slate-600">Teléfono</label>
+            <label className="text-xs font-semibold text-slate-600">{t('tenants.operations.contacts.phone')}</label>
             <input
               value={form.phone}
               onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
@@ -215,7 +220,7 @@ export default function TenantContactsTab({ companyId, api, tenant }) {
             />
           </div>
           <div>
-            <label className="text-xs font-semibold text-slate-600">Notas</label>
+            <label className="text-xs font-semibold text-slate-600">{t('tenants.common.notes')}</label>
             <input
               value={form.notes}
               onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
@@ -229,32 +234,32 @@ export default function TenantContactsTab({ companyId, api, tenant }) {
               disabled={working}
               className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
             >
-              Cancelar
+              {t('tenants.common.cancel')}
             </button>
             <button
               disabled={working}
               className="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand/90 disabled:opacity-60"
             >
-              Guardar
+              {t('tenants.common.save')}
             </button>
           </div>
         </form>
       </Modal>
 
-      <Modal open={editOpen} onClose={() => !working && setEditOpen(false)} title="Editar contacto" size="md">
+      <Modal open={editOpen} onClose={() => !working && setEditOpen(false)} title={t('tenants.operations.contacts.editContact')} size="md">
         <form onSubmit={updateContact} className="grid grid-cols-1 gap-3">
           <div>
-            <label className="text-xs font-semibold text-slate-600">Tipo</label>
+            <label className="text-xs font-semibold text-slate-600">{t('tenants.common.type')}</label>
             <select
               value={form.type}
               onChange={(e) => setForm((p) => ({ ...p, type: e.target.value }))}
               className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5"
             >
-              {TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+              {TYPES.map((item) => <option key={item.key} value={item.key}>{t(item.labelKey)}</option>)}
             </select>
           </div>
           <div>
-            <label className="text-xs font-semibold text-slate-600">Nombre</label>
+            <label className="text-xs font-semibold text-slate-600">{t('tenants.common.name')}</label>
             <input
               value={form.name}
               onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
@@ -263,7 +268,7 @@ export default function TenantContactsTab({ companyId, api, tenant }) {
             />
           </div>
           <div>
-            <label className="text-xs font-semibold text-slate-600">Email</label>
+            <label className="text-xs font-semibold text-slate-600">{t('tenants.common.email')}</label>
             <input
               type="email"
               value={form.email}
@@ -272,7 +277,7 @@ export default function TenantContactsTab({ companyId, api, tenant }) {
             />
           </div>
           <div>
-            <label className="text-xs font-semibold text-slate-600">Teléfono</label>
+            <label className="text-xs font-semibold text-slate-600">{t('tenants.operations.contacts.phone')}</label>
             <input
               value={form.phone}
               onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
@@ -280,7 +285,7 @@ export default function TenantContactsTab({ companyId, api, tenant }) {
             />
           </div>
           <div>
-            <label className="text-xs font-semibold text-slate-600">Notas</label>
+            <label className="text-xs font-semibold text-slate-600">{t('tenants.common.notes')}</label>
             <input
               value={form.notes}
               onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
@@ -294,13 +299,13 @@ export default function TenantContactsTab({ companyId, api, tenant }) {
               disabled={working}
               className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
             >
-              Cancelar
+              {t('tenants.common.cancel')}
             </button>
             <button
               disabled={working}
               className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
             >
-              Guardar cambios
+              {t('tenants.operations.contacts.saveChanges')}
             </button>
           </div>
         </form>
@@ -310,9 +315,9 @@ export default function TenantContactsTab({ companyId, api, tenant }) {
         open={deleteOpen}
         onClose={() => !working && setDeleteOpen(false)}
         onConfirm={() => removeConfirmed()}
-        title="Eliminar contacto"
-        message="Esta acción eliminará el contacto seleccionado."
-        confirmText="Eliminar"
+        title={t('tenants.operations.contacts.deleteContactTitle')}
+        message={t('tenants.operations.contacts.deleteContactMessage')}
+        confirmText={t('tenants.common.delete')}
         loading={working}
         danger
         requireReason={false}

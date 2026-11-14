@@ -150,7 +150,7 @@ class ImmigrationController
             Response::json(['message' => 'Solicitud de visa creada'], 201);
         } elseif ($method === 'PATCH' && $id) {
             $data = json_decode(file_get_contents('php://input'), true);
-            $this->pdo->prepare("UPDATE visa_applications SET status = :status WHERE id LIKE :id")
+            $this->pdo->prepare("UPDATE visa_applications SET status = :status WHERE id = :id")
                  ->execute([':status' => $data['status'], ':id' => $id]);
             Response::json(['message' => 'Estado de visa actualizado']);
         }

@@ -3,6 +3,8 @@ import RBACTabs from './RBACTabs';
 import { PLATFORM_ROLES, ROLE_LABELS, setDynamicPermissions } from '../../lib/platformRoles';
 import { SYSTEM_PERMISSIONS } from './PermissionsPage';
 import { createApi } from '../../lib/api';
+import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../components/ToastProvider';
 
 const SYSTEM_ROLES = [
   {
@@ -34,7 +36,7 @@ const SYSTEM_ROLES = [
   {
     id: PLATFORM_ROLES.COMPANY_ADMIN,
     name: ROLE_LABELS[PLATFORM_ROLES.COMPANY_ADMIN],
-    description: 'Administración completa de una empresa (Tenant).'
+    description: 'Administración completa de una empresa.'
   },
   {
     id: PLATFORM_ROLES.FREELANCER,
@@ -60,6 +62,15 @@ const DEFAULT_PERMISSIONS = {
 };
 
 export default function RoleTemplatesPage({ apiUrl, token }) {
+  const { user: authUser } = useAuth();
+  const toast = useToast();
+  const myRole = authUser?.platform_role || authUser?.role || '';
+  // Mismas reglas que el backend: nadie edita su propio rol y solo super_admin
+  // edita los roles que administran permisos (admin, security).
+  const canEditRole = (roleId) => roleId !== PLATFORM_ROLES.SUPER_ADMIN
+    && roleId !== myRole
+    && (myRole === PLATFORM_ROLES.SUPER_ADMIN || !['admin', 'security'].includes(roleId));
+
   const api = useMemo(() => createApi({ baseUrl: apiUrl, token }), [apiUrl, token]);
   const [dynamicMap, setDynamicMap] = useState({});
   const [stats, setStats] = useState({});
@@ -126,9 +137,10 @@ export default function RoleTemplatesPage({ apiUrl, token }) {
         modules: selectedModules
       });
       await loadPermissions(); // Reload and update global state
+      toast.success('Permisos actualizados');
       setEditingRole(null);
     } catch (e) {
-      alert('Error guardando: ' + (e.message || 'Error desconocido'));
+      toast.error('Error guardando: ' + (e.message || 'Error desconocido'));
     } finally {
       setSaving(false);
     }
@@ -155,11 +167,12 @@ export default function RoleTemplatesPage({ apiUrl, token }) {
               <div className="mb-4">
                 <div className="flex justify-between items-start">
                     <h3 className="text-lg font-bold text-slate-800">{role.name}</h3>
-                    {!isSuperAdmin && (
+                    {canEditRole(role.id) && (
                         <button 
                             onClick={() => openEdit(role)}
                             className="text-slate-400 hover:text-brand transition-colors p-1"
                             title="Editar permisos"
+                            aria-label={`Editar permisos de ${role.name}`}
                         >
                             <i className="bi bi-pencil-square"></i>
                         </button>
@@ -197,8 +210,12 @@ export default function RoleTemplatesPage({ apiUrl, token }) {
                         {isSuperAdmin ? 'Rol de Sistema (Fijo)' : 'Rol Configurable'}
                      </span>
                      {userCount > 0 && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
-                            <i className="bi bi-people-fill"></i>
+                        <span
+                            className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded"
+                            title={`${userCount} usuario(s) con este rol`}
+                            aria-label={`${userCount} usuario(s) con este rol`}
+                        >
+                            <i className="bi bi-people-fill" aria-hidden="true"></i>
                             {userCount}
                         </span>
                      )}

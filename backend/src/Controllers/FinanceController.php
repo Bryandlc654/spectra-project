@@ -5,6 +5,7 @@ namespace App\Controllers;
 use App\Database;
 use App\Support\Response;
 use App\Support\Auth;
+use DateTime;
 use PDO;
 
 class FinanceController
@@ -46,6 +47,63 @@ class FinanceController
                  // but let's handle the list view here.
              }
              return;
+        }
+
+        if ($resource === 'keyfacil') {
+            if (!in_array(($user['platform_role'] ?? ''), ['super_admin', 'finance'], true)) {
+                Response::error('Acceso denegado: módulo de facturación electrónica', 403);
+                return;
+            }
+
+            if ($id === 'status' && $method === 'GET') {
+                $this->keyfacilStatus();
+                return;
+            }
+
+            if ($id === 'logs' && $method === 'GET') {
+                $this->keyfacilLogs();
+                return;
+            }
+
+            if ($id === 'search' && $method === 'POST') {
+                $this->keyfacilSearch();
+                return;
+            }
+
+            if ($id === 'invoices') {
+                $invoiceId = $segments[4] ?? null;
+                $action = $segments[5] ?? null;
+
+                if (!$invoiceId) {
+                    if ($method === 'GET') {
+                        $this->keyfacilInvoicesIndex();
+                        return;
+                    }
+                    if ($method === 'POST') {
+                        $this->keyfacilInvoicesStore();
+                        return;
+                    }
+                } else {
+                    if ($action === 'void' && $method === 'POST') {
+                        $this->keyfacilInvoiceVoid($invoiceId);
+                        return;
+                    }
+                    if (in_array($action, ['pdf', 'xml'], true) && $method === 'GET') {
+                        $this->keyfacilInvoiceFile($invoiceId, $action);
+                        return;
+                    }
+                    if (!$action && $method === 'DELETE') {
+                        $this->keyfacilInvoicesDestroy($invoiceId);
+                        return;
+                    }
+                }
+
+                Response::error('Método no permitido para facturas Keyfacil', 405);
+                return;
+            }
+
+            Response::error('Recurso Keyfacil no encontrado', 404);
+            return;
         }
 
         if ($resource === 'invoices') {
@@ -240,7 +298,7 @@ class FinanceController
             JOIN companies c ON w.company_id = c.id
             LEFT JOIN company_settings cs ON c.id = cs.company_id
             JOIN currencies cur ON w.currency_id = cur.id
-            WHERE w.company_id LIKE :id
+            WHERE w.company_id = :id
         ");
         $walletStmt->execute([':id' => $companyId]);
         $wallet = $walletStmt->fetch(PDO::FETCH_ASSOC);
@@ -259,7 +317,7 @@ class FinanceController
         $offset = ($page - 1) * $limit;
 
         // Count total transactions
-        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM wallet_transactions WHERE company_id LIKE :id");
+        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM wallet_transactions WHERE company_id = :id");
         $countStmt->execute([':id' => $companyId]);
         $total = $countStmt->fetchColumn();
 
@@ -270,7 +328,7 @@ class FinanceController
                 cur.symbol as currency_symbol
             FROM wallet_transactions wt
             JOIN currencies cur ON wt.currency_id = cur.id
-            WHERE wt.company_id LIKE :id
+            WHERE wt.company_id = :id
             ORDER BY wt.created_at DESC
             LIMIT :limit OFFSET :offset
         ");
@@ -334,6 +392,659 @@ class FinanceController
         exit;
     }
 
+    private function keyfacilStatus(): void
+    {
+        $service = new \App\Support\KeyfacilService();
+        Response::json([
+            'configured' => $service->isConfigured(),
+        ]);
+    }
+
+    private function keyfacilLogs(): void
+    {
+        $limit = (int)($_GET['limit'] ?? 100);
+        $limit = max(1, min(500, $limit));
+        Response::json([
+            'data' => \App\Support\KeyfacilLogger::tail($limit),
+        ]);
+    }
+
+    private function keyfacilSearch(): void
+    {
+        $payload = json_decode(file_get_contents('php://input'), true);
+        if (!is_array($payload)) $payload = [];
+
+        $tipo = trim((string)($payload['tipo'] ?? ''));
+        $serie = strtoupper(trim((string)($payload['serie'] ?? '')));
+        $numero = (int)($payload['numero'] ?? 0);
+
+        if (!in_array($tipo, ['01', '03', '07', '08'], true)) {
+            Response::error('tipo inválido (01, 03, 07 u 08)', 422);
+            return;
+        }
+        if ($serie === '' || $numero <= 0) {
+            Response::error('serie y numero son requeridos', 422);
+            return;
+        }
+
+        $service = new \App\Support\KeyfacilService();
+        $result = $service->searchInvoice([
+            'tipo' => $tipo,
+            'serie' => $serie,
+            'numero' => $numero,
+        ], [
+            'action' => 'search',
+            'tipo' => $tipo,
+            'serie' => $serie,
+            'numero' => $numero,
+        ]);
+
+        Response::json([
+            'ok' => (bool)($result['ok'] ?? false),
+            'status' => (int)($result['status'] ?? 0),
+            'data' => $result['data'] ?? null,
+            'error' => $result['error'] ?? null,
+        ]);
+    }
+
+    private function ensureKeyfacilInvoiceTable(): void
+    {
+        $this->pdo->exec("
+            CREATE TABLE IF NOT EXISTS keyfacil_invoices (
+                id CHAR(36) PRIMARY KEY,
+                tipo VARCHAR(2) NOT NULL DEFAULT '01',
+                serie VARCHAR(10) NOT NULL,
+                numero INT NOT NULL,
+                fecha_emision DATE NOT NULL,
+                fecha_vencimiento DATE NULL,
+                cliente_tipo VARCHAR(2) NULL,
+                cliente_documento VARCHAR(20) NULL,
+                cliente_nombre VARCHAR(255) NOT NULL,
+                cliente_direccion VARCHAR(255) NULL,
+                cliente_email VARCHAR(150) NULL,
+                cliente_telefono VARCHAR(50) NULL,
+                moneda VARCHAR(3) NOT NULL DEFAULT 'PEN',
+                condicion_pago_tipo VARCHAR(2) NOT NULL DEFAULT '01',
+                subtotal DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+                igv DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+                total DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+                items_json LONGTEXT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'draft',
+                keyfacil_id VARCHAR(100) NULL,
+                keyfacil_status VARCHAR(50) NULL,
+                keyfacil_response LONGTEXT NULL,
+                keyfacil_pdf LONGTEXT NULL,
+                keyfacil_xml LONGTEXT NULL,
+                keyfacil_pdf_url VARCHAR(500) NULL,
+                keyfacil_xml_url VARCHAR(500) NULL,
+                keyfacil_issued_at DATETIME NULL,
+                created_by CHAR(36) NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uniq_keyfacil_doc (tipo, serie, numero),
+                KEY idx_keyfacil_created (created_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ");
+    }
+
+    private function keyfacilInvoicesIndex(): void
+    {
+        $this->ensureKeyfacilInvoiceTable();
+        $stmt = $this->pdo->query("
+            SELECT
+                id, tipo, serie, numero, fecha_emision, fecha_vencimiento,
+                cliente_tipo, cliente_documento, cliente_nombre,
+                moneda, subtotal, igv, total, status,
+                keyfacil_id, keyfacil_status, keyfacil_issued_at, created_at,
+                (keyfacil_pdf IS NOT NULL OR keyfacil_pdf_url IS NOT NULL) AS has_pdf,
+                (keyfacil_xml IS NOT NULL OR keyfacil_xml_url IS NOT NULL) AS has_xml
+            FROM keyfacil_invoices
+            ORDER BY created_at DESC
+            LIMIT 200
+        ");
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as &$row) {
+            $row['has_pdf'] = (bool)$row['has_pdf'];
+            $row['has_xml'] = (bool)$row['has_xml'];
+            $row['subtotal'] = (float)$row['subtotal'];
+            $row['igv'] = (float)$row['igv'];
+            $row['total'] = (float)$row['total'];
+        }
+        Response::json(['data' => $rows]);
+    }
+
+    private function keyfacilInvoicesStore(): void
+    {
+        $this->ensureKeyfacilInvoiceTable();
+        $data = json_decode(file_get_contents('php://input'), true);
+        if (!is_array($data)) $data = [];
+
+        $tipo = trim((string)($data['tipo'] ?? '01'));
+        if (!in_array($tipo, ['01', '03'], true)) {
+            Response::error('tipo inválido (01 factura, 03 boleta)', 422);
+            return;
+        }
+
+        $serie = strtoupper(trim((string)($data['serie'] ?? '')));
+        if ($serie === '' || !preg_match('/^[A-Z][A-Z0-9]{2,5}$/', $serie)) {
+            Response::error('serie inválida (ej. F001)', 422);
+            return;
+        }
+        if ($tipo === '01' && !str_starts_with($serie, 'F')) {
+            Response::error('Para factura la serie debe empezar con F (ej. F001)', 422);
+            return;
+        }
+        if ($tipo === '03' && !str_starts_with($serie, 'B')) {
+            Response::error('Para boleta la serie debe empezar con B (ej. B001)', 422);
+            return;
+        }
+
+        $numero = (int)($data['numero'] ?? 0);
+        if ($numero <= 0) {
+            Response::error('numero inválido', 422);
+            return;
+        }
+
+        $issueDate = trim((string)($data['fecha_emision'] ?? ''));
+        if ($issueDate === '') $issueDate = date('Y-m-d');
+        $d = DateTime::createFromFormat('Y-m-d', $issueDate);
+        if (!$d || $d->format('Y-m-d') !== $issueDate) {
+            Response::error('fecha_emision inválida (YYYY-MM-DD)', 422);
+            return;
+        }
+
+        $dueDate = trim((string)($data['fecha_vencimiento'] ?? ''));
+        if ($dueDate !== '') {
+            $d2 = DateTime::createFromFormat('Y-m-d', $dueDate);
+            if (!$d2 || $d2->format('Y-m-d') !== $dueDate) {
+                Response::error('fecha_vencimiento inválida (YYYY-MM-DD)', 422);
+                return;
+            }
+            if (strtotime($dueDate) < strtotime($issueDate)) {
+                Response::error('La fecha de vencimiento no puede ser menor a la fecha de emisión', 422);
+                return;
+            }
+        }
+
+        $condicion = trim((string)($data['condicion_pago_tipo'] ?? ''));
+        if (!in_array($condicion, ['01', '02'], true)) {
+            $condicion = $dueDate !== '' ? '02' : '01';
+        }
+        if ($condicion === '02' && $dueDate === '') {
+            Response::error('Para crédito debes indicar fecha de vencimiento', 422);
+            return;
+        }
+
+        $docType = trim((string)($data['cliente_tipo'] ?? '6'));
+        if (!in_array($docType, ['6', '1', '4', '7', '-', '0'], true)) {
+            $docType = '6';
+        }
+        $docNumber = preg_replace('/\s+/', '', (string)($data['cliente_documento'] ?? ''));
+        if ($docNumber === '' && in_array($docType, ['-', '0'], true)) $docNumber = '-';
+
+        if ($tipo === '01') {
+            if ($docType !== '6' || strlen($docNumber) !== 11) {
+                Response::error('Para factura se requiere RUC de 11 dígitos', 422);
+                return;
+            }
+        } elseif ($docNumber === '') {
+            Response::error('El documento del cliente es requerido', 422);
+            return;
+        }
+
+        $customerName = trim((string)($data['cliente_nombre'] ?? ''));
+        if ($customerName === '') {
+            Response::error('La razón social / nombre del cliente es requerido', 422);
+            return;
+        }
+
+        $currency = strtoupper(trim((string)($data['moneda'] ?? 'PEN')));
+        if (!in_array($currency, ['PEN', 'USD', 'EUR'], true)) {
+            Response::error('moneda inválida (PEN, USD, EUR)', 422);
+            return;
+        }
+
+        $rawItems = $data['items'] ?? [];
+        if (!is_array($rawItems) || count($rawItems) === 0) {
+            Response::error('Debes incluir al menos un producto o servicio', 422);
+            return;
+        }
+
+        $allowedUnits = ['NIU', 'ZZ', 'KGM', 'LTR', 'GLI', 'BX', 'MTQ', 'MTR', 'GRM', 'TNE', 'MIL'];
+        $allowedIgv = ['10', '20', '30', '40'];
+        $items = [];
+        $subtotal = 0.0;
+        $igvTotal = 0.0;
+
+        foreach ($rawItems as $index => $item) {
+            $description = trim((string)($item['descripcion'] ?? ''));
+            if ($description === '') {
+                Response::error('La descripción del ítem ' . ($index + 1) . ' es requerida', 422);
+                return;
+            }
+            $qty = (float)($item['cantidad'] ?? 0);
+            if ($qty <= 0) {
+                Response::error('La cantidad del ítem ' . ($index + 1) . ' debe ser mayor a 0', 422);
+                return;
+            }
+            $price = (float)($item['precio_unitario'] ?? -1);
+            if ($price < 0) {
+                Response::error('El precio del ítem ' . ($index + 1) . ' es inválido', 422);
+                return;
+            }
+            $unit = strtoupper(trim((string)($item['unidad_medida'] ?? 'ZZ')));
+            if (!in_array($unit, $allowedUnits, true)) $unit = 'ZZ';
+            $igvType = trim((string)($item['tipo_igv'] ?? '10'));
+            if (!in_array($igvType, $allowedIgv, true)) $igvType = '10';
+            $code = trim((string)($item['codigo'] ?? ''));
+            if ($code === '') $code = 'ITEM-' . ($index + 1);
+
+            $lineBase = round($qty * $price, 2);
+            $lineIgv = $igvType === '10' ? round($lineBase * 0.18, 2) : 0.0;
+            $subtotal += $lineBase;
+            $igvTotal += $lineIgv;
+
+            $items[] = [
+                'codigo' => substr($code, 0, 30),
+                'descripcion' => $description,
+                'unidad_medida' => $unit,
+                'cantidad' => $qty,
+                'precio_unitario' => $price,
+                'tipo_igv' => $igvType,
+                'line_subtotal' => $lineBase,
+                'line_igv' => $lineIgv,
+                'line_total' => round($lineBase + $lineIgv, 2),
+            ];
+        }
+
+        $subtotal = round($subtotal, 2);
+        $igvTotal = round($igvTotal, 2);
+        $total = round($subtotal + $igvTotal, 2);
+
+        $dup = $this->pdo->prepare('SELECT id FROM keyfacil_invoices WHERE tipo = :tipo AND serie = :serie AND numero = :numero LIMIT 1');
+        $dup->execute([':tipo' => $tipo, ':serie' => $serie, ':numero' => $numero]);
+        $duplicate = (bool)$dup->fetchColumn();
+
+        $sellerName = trim((string)(Auth::user()['full_name'] ?? ''));
+
+        $payload = [
+            'tipo' => $tipo,
+            'serie' => $serie,
+            'numero' => $numero,
+            'fecha_emision' => $issueDate . 'T00:00:00-05:00',
+            'tipo_operacion' => '0101',
+            'cliente_tipo' => $docType,
+            'cliente_documento' => $docNumber,
+            'cliente_nombre' => $customerName,
+            'cliente_direccion' => trim((string)($data['cliente_direccion'] ?? '')) ?: 'Lima',
+            'cliente_email' => trim((string)($data['cliente_email'] ?? '')) ?: null,
+            'cliente_telefono' => trim((string)($data['cliente_telefono'] ?? '')) ?: null,
+            'vendedor_nombre' => $sellerName !== '' ? $sellerName : null,
+            'observaciones' => trim((string)($data['observaciones'] ?? '')) ?: null,
+            'moneda' => $currency,
+            'condicion_pago_tipo' => $condicion,
+            'incluir_pdf' => true,
+            'incluir_xml' => true,
+            'formato_pdf' => 'A4',
+            'items' => array_map(function (array $item): array {
+                return [
+                    'codigo' => $item['codigo'],
+                    'descripcion' => $item['descripcion'],
+                    'unidad_medida' => $item['unidad_medida'],
+                    'cantidad' => $item['cantidad'],
+                    'precio_unitario' => \App\Support\KeyfacilService::priceWithIgv((float)$item['precio_unitario'], (string)$item['tipo_igv']),
+                    'descuento_porcentaje' => 0,
+                    'tipo_igv' => $item['tipo_igv'],
+                ];
+            }, $items),
+        ];
+        if ($dueDate !== '') {
+            $payload['fecha_vencimiento'] = $dueDate . 'T00:00:00-05:00';
+            $payload['condicion_pago_credito_cuotas'] = [[
+                'monto' => $total,
+                'fecha_vencimiento' => $dueDate . 'T00:00:00-05:00',
+            ]];
+        }
+
+        if (!empty($data['dry_run'])) {
+            Response::json([
+                'dry_run' => true,
+                'duplicate' => $duplicate,
+                'data' => [
+                    'tipo' => $tipo,
+                    'serie' => $serie,
+                    'numero' => $numero,
+                    'cliente_tipo' => $docType,
+                    'cliente_documento' => $docNumber,
+                    'cliente_nombre' => $customerName,
+                    'moneda' => $currency,
+                    'subtotal' => $subtotal,
+                    'igv' => $igvTotal,
+                    'total' => $total,
+                    'items' => $items,
+                    'payload' => $payload,
+                ],
+            ]);
+            return;
+        }
+
+        if ($duplicate) {
+            Response::error('Ya existe un comprobante registrado con esa serie y número', 409);
+            return;
+        }
+
+        $id = $this->uuid();
+        $createdBy = Auth::userId();
+        $insert = $this->pdo->prepare("
+            INSERT INTO keyfacil_invoices (
+                id, tipo, serie, numero, fecha_emision, fecha_vencimiento,
+                cliente_tipo, cliente_documento, cliente_nombre, cliente_direccion,
+                cliente_email, cliente_telefono, moneda, condicion_pago_tipo,
+                subtotal, igv, total, items_json, status, created_by, created_at
+            ) VALUES (
+                :id, :tipo, :serie, :numero, :issue, :due,
+                :doc_type, :doc_number, :name, :address,
+                :email, :phone, :currency, :condition,
+                :subtotal, :igv, :total, :items, 'draft', :created_by, NOW()
+            )
+        ");
+        $insert->execute([
+            ':id' => $id,
+            ':tipo' => $tipo,
+            ':serie' => $serie,
+            ':numero' => $numero,
+            ':issue' => $issueDate,
+            ':due' => $dueDate !== '' ? $dueDate : null,
+            ':doc_type' => $docType,
+            ':doc_number' => $docNumber,
+            ':name' => $customerName,
+            ':address' => trim((string)($data['cliente_direccion'] ?? '')) ?: null,
+            ':email' => trim((string)($data['cliente_email'] ?? '')) ?: null,
+            ':phone' => trim((string)($data['cliente_telefono'] ?? '')) ?: null,
+            ':currency' => $currency,
+            ':condition' => $condicion,
+            ':subtotal' => $subtotal,
+            ':igv' => $igvTotal,
+            ':total' => $total,
+            ':items' => json_encode($items, JSON_UNESCAPED_UNICODE),
+            ':created_by' => $createdBy,
+        ]);
+
+        $service = new \App\Support\KeyfacilService();
+        $result = $service->issueInvoice($payload, [
+            'action' => 'issue',
+            'local_invoice_id' => $id,
+            'tipo' => $tipo,
+            'serie' => $serie,
+            'numero' => $numero,
+        ]);
+
+        if (!$result['ok']) {
+            $this->pdo->prepare("UPDATE keyfacil_invoices SET status = 'error', keyfacil_status = 'error', keyfacil_response = :resp, updated_at = NOW() WHERE id = :id")
+                ->execute([':resp' => $result['raw'] ?: null, ':id' => $id]);
+            Response::error($result['error'] ?: 'Error al emitir comprobante en Keyfacil', 502, [
+                'id' => $id,
+                'keyfacil_status' => $result['status'] ?? 0,
+                'response' => $result['data'] ?? null,
+            ]);
+            return;
+        }
+
+        $responseData = $result['data'] ?? [];
+        $payloadData = is_array($responseData['data'] ?? null) ? $responseData['data'] : $responseData;
+        $keyfacilId = $payloadData['id'] ?? $payloadData['invoice_id'] ?? $responseData['id'] ?? null;
+        $keyfacilStatus = $payloadData['status'] ?? $responseData['status'] ?? 'sent';
+
+        // Fallback: si la emisión no devolvió ID, recuperarlo con invoice-search.
+        if (!$keyfacilId) {
+            $search = $service->searchInvoice([
+                'tipo' => $tipo,
+                'serie' => $serie,
+                'numero' => $numero,
+            ], [
+                'action' => 'issue_search_fallback',
+                'local_invoice_id' => $id,
+                'tipo' => $tipo,
+                'serie' => $serie,
+                'numero' => $numero,
+            ]);
+            if (!empty($search['ok'])) {
+                $searchData = $search['data'] ?? [];
+                $searchPayload = is_array($searchData['data'] ?? null) ? $searchData['data'] : $searchData;
+                $keyfacilId = $searchPayload['id'] ?? $searchPayload['invoice_id'] ?? $searchData['id'] ?? $keyfacilId;
+                if ($keyfacilId) {
+                    $responseData = $searchData ?: $responseData;
+                    $payloadData = $searchPayload;
+                    $keyfacilStatus = $payloadData['status'] ?? $searchData['status'] ?? $keyfacilStatus;
+                }
+            }
+        }
+
+        $pdf = $this->extractKeyfacilFile($responseData, 'pdf');
+        $xml = $this->extractKeyfacilFile($responseData, 'xml');
+
+        // Fallback: si no vinieron PDF/XML en la emisión, consultarlos por ID.
+        if ((!$pdf || !$xml) && $keyfacilId) {
+            $detail = $service->getInvoice((string)$keyfacilId, true, true, [
+                'action' => 'issue_get_fallback',
+                'local_invoice_id' => $id,
+                'keyfacil_id' => $keyfacilId,
+            ]);
+            if (!empty($detail['ok'])) {
+                $detailData = $detail['data'] ?? [];
+                $pdf = $pdf ?: $this->extractKeyfacilFile($detailData, 'pdf');
+                $xml = $xml ?: $this->extractKeyfacilFile($detailData, 'xml');
+            }
+        }
+        $pdfBase64 = ($pdf && $this->looksLikeBase64($pdf)) ? preg_replace('#^data:[^;]+;base64,#i', '', $pdf) : null;
+        $xmlBase64 = ($xml && $this->looksLikeBase64($xml)) ? preg_replace('#^data:[^;]+;base64,#i', '', $xml) : null;
+        $pdfUrl = ($pdf && !$this->looksLikeBase64($pdf)) ? $pdf : null;
+        $xmlUrl = ($xml && !$this->looksLikeBase64($xml)) ? $xml : null;
+
+        $this->pdo->prepare("
+            UPDATE keyfacil_invoices SET
+                status = 'issued',
+                keyfacil_id = :kid,
+                keyfacil_status = :kstatus,
+                keyfacil_pdf = :pdf,
+                keyfacil_xml = :xml,
+                keyfacil_pdf_url = :pdf_url,
+                keyfacil_xml_url = :xml_url,
+                keyfacil_response = :resp,
+                keyfacil_issued_at = NOW(),
+                updated_at = NOW()
+            WHERE id = :id
+        ")->execute([
+            ':kid' => $keyfacilId,
+            ':kstatus' => $keyfacilStatus,
+            ':pdf' => $pdfBase64,
+            ':xml' => $xmlBase64,
+            ':pdf_url' => $pdfUrl,
+            ':xml_url' => $xmlUrl,
+            ':resp' => $result['raw'] ?: null,
+            ':id' => $id,
+        ]);
+
+        Response::json([
+            'message' => 'Comprobante emitido electrónicamente',
+            'data' => [
+                'id' => $id,
+                'tipo' => $tipo,
+                'serie' => $serie,
+                'numero' => $numero,
+                'status' => 'issued',
+                'keyfacil_id' => $keyfacilId,
+                'keyfacil_status' => $keyfacilStatus,
+                'subtotal' => $subtotal,
+                'igv' => $igvTotal,
+                'total' => $total,
+                'has_pdf' => (bool)$pdfBase64,
+                'has_xml' => (bool)$xmlBase64,
+            ],
+        ], 201);
+    }
+
+    private function keyfacilInvoicesDestroy(string $id): void
+    {
+        $this->ensureKeyfacilInvoiceTable();
+        $stmt = $this->pdo->prepare('SELECT * FROM keyfacil_invoices WHERE id = :id LIMIT 1');
+        $stmt->execute([':id' => $id]);
+        $invoice = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$invoice) {
+            Response::error('Comprobante no encontrado', 404);
+            return;
+        }
+        if (!empty($invoice['keyfacil_id']) && ($invoice['status'] ?? '') !== 'voided') {
+            Response::error('Anula el comprobante en Keyfacil antes de eliminarlo', 409);
+            return;
+        }
+        $this->pdo->prepare('DELETE FROM keyfacil_invoices WHERE id = :id')->execute([':id' => $id]);
+        Response::json(['message' => 'Comprobante eliminado']);
+    }
+
+    private function keyfacilInvoiceVoid(string $id): void
+    {
+        $this->ensureKeyfacilInvoiceTable();
+        $stmt = $this->pdo->prepare('SELECT * FROM keyfacil_invoices WHERE id = :id LIMIT 1');
+        $stmt->execute([':id' => $id]);
+        $invoice = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$invoice) {
+            Response::error('Comprobante no encontrado', 404);
+            return;
+        }
+        if (empty($invoice['keyfacil_id'])) {
+            Response::error('El comprobante no fue emitido en Keyfacil', 422);
+            return;
+        }
+
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+        $reason = trim((string)($data['motivo'] ?? ''));
+        if ($reason === '') {
+            Response::error('El motivo de anulación es obligatorio', 422);
+            return;
+        }
+
+        $service = new \App\Support\KeyfacilService();
+        $result = $service->voidInvoice((string)$invoice['keyfacil_id'], $reason, [
+            'action' => 'void',
+            'local_invoice_id' => $id,
+            'keyfacil_id' => $invoice['keyfacil_id'],
+        ]);
+        if (!$result['ok']) {
+            Response::error($result['error'] ?: 'Error al anular el comprobante en Keyfacil', 502, [
+                'keyfacil_status' => $result['status'] ?? 0,
+                'response' => $result['data'] ?? null,
+            ]);
+            return;
+        }
+
+        $this->pdo->prepare("
+            UPDATE keyfacil_invoices SET
+                status = 'voided',
+                keyfacil_status = 'voided',
+                keyfacil_response = :resp,
+                updated_at = NOW()
+            WHERE id = :id
+        ")->execute([':resp' => $result['raw'] ?: null, ':id' => $id]);
+
+        Response::json(['message' => 'Comprobante anulado en Keyfacil']);
+    }
+
+    private function keyfacilInvoiceFile(string $id, string $type): void
+    {
+        $this->ensureKeyfacilInvoiceTable();
+        $stmt = $this->pdo->prepare('SELECT * FROM keyfacil_invoices WHERE id = :id LIMIT 1');
+        $stmt->execute([':id' => $id]);
+        $invoice = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$invoice) {
+            Response::error('Comprobante no encontrado', 404);
+            return;
+        }
+
+        $base64 = $type === 'pdf' ? $invoice['keyfacil_pdf'] : $invoice['keyfacil_xml'];
+        $url = $type === 'pdf' ? $invoice['keyfacil_pdf_url'] : $invoice['keyfacil_xml_url'];
+
+        // Fallback: si no está almacenado, consultarlo a Keyfacil por ID.
+        if (!$base64 && !$url && !empty($invoice['keyfacil_id'])) {
+            $service = new \App\Support\KeyfacilService();
+            $detail = $service->getInvoice((string)$invoice['keyfacil_id'], true, true, [
+                'action' => 'file_get',
+                'local_invoice_id' => $id,
+                'keyfacil_id' => $invoice['keyfacil_id'],
+                'type' => $type,
+            ]);
+            if (!empty($detail['ok'])) {
+                $file = $this->extractKeyfacilFile($detail['data'] ?? [], $type);
+                if ($file) {
+                    $isBase64 = $this->looksLikeBase64($file);
+                    $base64 = $isBase64 ? preg_replace('#^data:[^;]+;base64,#i', '', $file) : null;
+                    $url = $isBase64 ? null : $file;
+                    $column = $type === 'pdf' ? 'keyfacil_pdf' : 'keyfacil_xml';
+                    $urlColumn = $type === 'pdf' ? 'keyfacil_pdf_url' : 'keyfacil_xml_url';
+                    $this->pdo->prepare("UPDATE keyfacil_invoices SET $column = :b64, $urlColumn = :url, updated_at = NOW() WHERE id = :id")
+                        ->execute([':b64' => $base64, ':url' => $url, ':id' => $id]);
+                }
+            }
+        }
+
+        if ($base64) {
+            $content = base64_decode(preg_replace('#^data:[^;]+;base64,#i', '', (string)$base64));
+            if ($content === false) {
+                Response::error('Archivo no disponible', 404);
+                return;
+            }
+            $mime = $type === 'pdf' ? 'application/pdf' : 'application/xml';
+            $filename = ($invoice['serie'] ?: 'comprobante') . '-' . ($invoice['numero'] ?: '') . '.' . $type;
+            header('Content-Type: ' . $mime);
+            header('Content-Disposition: attachment; filename="' . $filename . '"');
+            header('Cache-Control: private, max-age=0, must-revalidate');
+            echo $content;
+            if (!defined('TEST_MODE')) exit;
+            return;
+        }
+
+        if ($url) {
+            header('Location: ' . $url);
+            if (!defined('TEST_MODE')) exit;
+            return;
+        }
+
+        Response::error('Archivo no disponible', 404);
+    }
+
+    private function looksLikeBase64(string $value): bool
+    {
+        if (str_starts_with($value, 'data:')) return true;
+        $compact = preg_replace('/\s+/', '', $value);
+        if ($compact === '' || strlen($compact) < 100) return false;
+        return (bool)preg_match('#^[A-Za-z0-9+/]+={0,2}$#', $compact);
+    }
+
+    private function extractKeyfacilFile(array $data, string $type): ?string
+    {
+        $keys = [
+            $type,
+            $type . '_base64',
+            $type . '_content',
+            'file_' . $type,
+            'archivo_' . $type,
+            $type . '_url',
+            'url_' . $type,
+        ];
+        foreach ($keys as $key) {
+            if (isset($data[$key]) && is_string($data[$key]) && trim($data[$key]) !== '') {
+                return trim($data[$key]);
+            }
+        }
+        foreach ($data as $value) {
+            if (is_array($value)) {
+                $found = $this->extractKeyfacilFile($value, $type);
+                if ($found !== null) return $found;
+            }
+        }
+        return null;
+    }
+
     private function invoicesIndex(): void
     {
         $this->ensureInvoicesTable();
@@ -345,6 +1056,8 @@ class FinanceController
         $companyId = $_GET['company_id'] ?? null;
         $freelancerId = $_GET['freelancer_id'] ?? null;
         $q = trim((string)($_GET['q'] ?? ''));
+        $companyQ = trim((string)($_GET['company_q'] ?? ''));
+        $month = trim((string)($_GET['month'] ?? ''));
 
         $where = [];
         $params = [];
@@ -358,8 +1071,17 @@ class FinanceController
             $params[':freelancer_id'] = $freelancerId;
         }
         if ($q !== '') {
-            $where[] = "(i.invoice_number LIKE :q OR comp.legal_name LIKE :q)";
-            $params[':q'] = "%$q%";
+            $where[] = "(i.invoice_number LIKE :q_1 OR comp.legal_name LIKE :q_2)";
+            $params[':q_1'] = $params[':q_2'] = "%$q%";
+        }
+        if ($companyQ !== '') {
+            $where[] = "comp.legal_name LIKE :company_q";
+            $params[':company_q'] = "%$companyQ%";
+        }
+        if (preg_match('/^\d{4}-\d{2}$/', $month)) {
+            $where[] = "i.issue_date >= :month_start AND i.issue_date < :month_end";
+            $params[':month_start'] = $month . '-01';
+            $params[':month_end'] = date('Y-m-d', strtotime($month . '-01 +1 month'));
         }
 
         $whereClause = $where ? "WHERE " . implode(" AND ", $where) : "";
@@ -497,8 +1219,8 @@ class FinanceController
         }
 
         if ($search) {
-            $where[] = "(wt.description LIKE :q OR wt.reference_id LIKE :q)";
-            $params[':q'] = "%$search%";
+            $where[] = "(wt.description LIKE :q_1 OR wt.reference_id LIKE :q_2)";
+            $params[':q_1'] = $params[':q_2'] = "%$search%";
         }
 
         $whereSql = implode(' AND ', $where);
@@ -564,7 +1286,7 @@ class FinanceController
         }
 
         // Check wallet
-        $stmt = $this->pdo->prepare("SELECT * FROM wallets WHERE company_id LIKE :cid AND currency_id = :cur LIMIT 1");
+        $stmt = $this->pdo->prepare("SELECT * FROM wallets WHERE company_id = :cid AND currency_id = :cur LIMIT 1");
         $stmt->execute([':cid' => $companyId, ':cur' => $currencyId]);
         $wallet = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -599,7 +1321,7 @@ class FinanceController
 
             // Update Wallet Balance
             $newBalance = (float)$wallet['balance'] + $amount;
-            $upd = $this->pdo->prepare("UPDATE wallets SET balance = :bal, updated_at = NOW() WHERE company_id LIKE :cid AND currency_id = :cur");
+            $upd = $this->pdo->prepare("UPDATE wallets SET balance = :bal, updated_at = NOW() WHERE company_id = :cid AND currency_id = :cur");
             $upd->execute([':bal' => $newBalance, ':cid' => $companyId, ':cur' => $currencyId]);
 
             $this->pdo->commit();
@@ -616,7 +1338,7 @@ class FinanceController
     {
         $this->ensureWalletReconciliationColumns();
         // Toggle is_reconciled
-        $stmt = $this->pdo->prepare("SELECT is_reconciled FROM wallet_transactions WHERE id LIKE :id");
+        $stmt = $this->pdo->prepare("SELECT is_reconciled FROM wallet_transactions WHERE id = :id");
         $stmt->execute([':id' => $txId]);
         $tx = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -628,7 +1350,7 @@ class FinanceController
         $newState = ((int)$tx['is_reconciled'] === 1) ? 0 : 1;
         $reconciledAt = $newState ? date('Y-m-d H:i:s') : null;
 
-        $upd = $this->pdo->prepare("UPDATE wallet_transactions SET is_reconciled = :s, reconciled_at = :at WHERE id LIKE :id");
+        $upd = $this->pdo->prepare("UPDATE wallet_transactions SET is_reconciled = :s, reconciled_at = :at WHERE id = :id");
         $upd->execute([':s' => $newState, ':at' => $reconciledAt, ':id' => $txId]);
 
         Response::json(['message' => 'Estado actualizado', 'is_reconciled' => $newState]);
@@ -727,8 +1449,8 @@ class FinanceController
         $params = [];
 
         if ($search) {
-            $where .= " AND (i.invoice_number LIKE :s OR c.legal_name LIKE :s)";
-            $params[':s'] = "%$search%";
+            $where .= " AND (i.invoice_number LIKE :s_1 OR c.legal_name LIKE :s_2)";
+            $params[':s_1'] = $params[':s_2'] = "%$search%";
         }
 
         // Count

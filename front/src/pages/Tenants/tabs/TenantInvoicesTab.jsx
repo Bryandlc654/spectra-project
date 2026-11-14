@@ -3,8 +3,12 @@ import { useAuth } from '../../../context/AuthContext';
 import { PLATFORM_ROLES } from '../../../lib/platformRoles';
 import { useToast } from '../../../components/ToastProvider';
 import Modal from '../../../components/Modal';
+import { getStoredSession } from '../../../session';
+import { useI18n } from '../../../i18n/I18nContext';
 
 export default function TenantInvoicesTab({ companyId, api, currencies, currenciesById, type }) {
+  const { t, language } = useI18n();
+  const locale = language === 'en' ? 'en-US' : 'es-ES';
   const { user } = useAuth();
   const isSupport = user?.platform_role === PLATFORM_ROLES.SUPPORT;
   const toast = useToast();
@@ -31,9 +35,14 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
     due_date: '',
     currency_id: '',
     contact_id: '',
+    comprobante_tipo: '01',
+    customer_document_type: '6',
+    customer_document: '',
+    customer_address: '',
     items: [{ description: '', quantity: 1, unit_price: 0 }]
   });
   const [creating, setCreating] = useState(false);
+  const [sendingKeyfacil, setSendingKeyfacil] = useState(false);
   const [currenciesLocal, setCurrenciesLocal] = useState([]);
   const effectiveCurrencies = Array.isArray(currencies) && currencies.length > 0 ? currencies : currenciesLocal;
   const [selectedFile, setSelectedFile] = useState(null);
@@ -112,7 +121,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
         }
       } catch (e) {
         if (!cancelled) {
-          setErr(e?.message || 'No se pudieron cargar las facturas');
+          setErr(e?.message || t('tenants.finance.invoices.loadError'));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -133,7 +142,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
   const handleSave = async (e) => {
     e.preventDefault();
     if (!formData.invoice_number || !formData.currency_id || !formData.due_date) {
-      toast.error('Por favor completa los campos requeridos');
+      toast.error(t('tenants.finance.invoices.requiredFields'));
       return;
     }
 
@@ -142,17 +151,17 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
       let invoiceId = editingId;
       if (editingId) {
         await safeApi.put(`/api/tenants/${companyId}/invoices/${editingId}`, formData);
-        toast.success('Factura actualizada exitosamente');
+        toast.success(t('tenants.finance.invoices.updated'));
       } else {
         const res = await safeApi.post(`/api/tenants/${companyId}/invoices`, formData);
         invoiceId = res?.id || res?.data?.id || invoiceId;
-        toast.success('Factura creada exitosamente');
+        toast.success(t('tenants.finance.invoices.created'));
       }
       if (invoiceId && selectedFile) {
         const fd = new FormData();
         fd.append('file', selectedFile);
         await safeApi.post(`/api/tenants/${companyId}/invoices/${invoiceId}/attachment`, fd);
-        toast.success('Adjunto cargado');
+        toast.success(t('tenants.finance.invoices.attachmentUploaded'));
       }
       setCreateModalOpen(false);
       setEditingId(null);
@@ -163,12 +172,16 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
         due_date: '',
         currency_id: '',
         contact_id: '',
+        comprobante_tipo: '01',
+        customer_document_type: '6',
+        customer_document: '',
+        customer_address: '',
         items: [{ description: '', quantity: 1, unit_price: 0 }]
       });
       setSelectedFile(null);
       handleReload(); // Reload list
     } catch (error) {
-      toast.error(error.message || 'Error al guardar factura');
+      toast.error(error.message || t('tenants.finance.invoices.saveError'));
     } finally {
       setCreating(false);
     }
@@ -184,6 +197,10 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
       currency_id: invoice.currency_id,
       contact_id: invoice.contact_id || '',
       notes: invoice.notes || '',
+      comprobante_tipo: invoice.comprobante_tipo || '01',
+      customer_document_type: invoice.customer_document_type || '6',
+      customer_document: invoice.customer_document || '',
+      customer_address: invoice.customer_address || '',
       items: invoice.items && invoice.items.length > 0 
         ? invoice.items.map(i => ({
             description: i.description,
@@ -196,22 +213,22 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('¿Estás seguro de eliminar esta factura? Esta acción no se puede deshacer.')) return;
+    if (!window.confirm(t('tenants.finance.invoices.confirmDelete'))) return;
     try {
       await safeApi.del(`/api/tenants/${companyId}/invoices/${id}`);
-      toast.success('Factura eliminada');
+      toast.success(t('tenants.finance.invoices.deleted'));
       handleReload();
       if (selectedInvoice?.id === id) setViewModalOpen(false);
     } catch (error) {
-      toast.error(error.message || 'Error al eliminar factura');
+      toast.error(error.message || t('tenants.finance.invoices.deleteError'));
     }
   };
 
   const handlePay = async (id) => {
-    if (!window.confirm('¿Confirmar pago de factura? Se descontará del saldo disponible.')) return;
+    if (!window.confirm(t('tenants.finance.invoices.confirmPay'))) return;
     try {
       await safeApi.post(`/api/tenants/${companyId}/invoices/${id}/pay`);
-      toast.success('Factura pagada exitosamente');
+      toast.success(t('tenants.finance.invoices.paidSuccess'));
       handleReload();
       if (selectedInvoice?.id === id) {
           // Update the view modal if open
@@ -219,23 +236,23 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
           setSelectedInvoice(updated);
       }
     } catch (error) {
-      toast.error(error.message || 'Error al procesar el pago');
+      toast.error(error.message || t('tenants.finance.invoices.payError'));
     }
   };
 
   const handleSend = async (id) => {
     try {
       await safeApi.post(`/api/tenants/${companyId}/invoices/${id}/send`);
-      toast.success('Factura enviada por correo');
+      toast.success(t('tenants.finance.invoices.sentEmail'));
       handleReload();
     } catch (error) {
-      toast.error(error.message || 'Error al enviar correo');
+      toast.error(error.message || t('tenants.finance.invoices.sendError'));
     }
   };
 
   const handlePdf = async (id) => {
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('auth_token'); 
+      const token = getStoredSession()?.token;
       const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
       const res = await fetch(`${baseUrl}/api/tenants/${companyId}/invoices/${id}/pdf`, {
           headers: {
@@ -244,7 +261,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
           }
       });
       
-      if (!res.ok) throw new Error('Error al descargar PDF');
+      if (!res.ok) throw new Error(t('tenants.finance.invoices.pdfDownloadError'));
       
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
@@ -257,7 +274,65 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
       window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error(error);
-      toast.error('Error al generar PDF');
+      toast.error(t('tenants.finance.invoices.pdfError'));
+    }
+  };
+
+  const handleIssueKeyfacil = async (id) => {
+    if (!window.confirm(t('tenants.finance.invoices.confirmIssue'))) return;
+    setSendingKeyfacil(true);
+    try {
+      const res = await safeApi.post(`/api/tenants/${companyId}/invoices/${id}/keyfacil`);
+      toast.success(res?.message || t('tenants.finance.invoices.issued'));
+      const updated = await safeApi.get(`/api/tenants/${companyId}/invoices/${id}`);
+      setSelectedInvoice(updated);
+      handleReload();
+    } catch (error) {
+      toast.error(error.message || t('tenants.finance.invoices.issueError'));
+    } finally {
+      setSendingKeyfacil(false);
+    }
+  };
+
+  const handleVoidKeyfacil = async (id) => {
+    const motivo = window.prompt(t('tenants.finance.invoices.voidReasonPrompt'));
+    if (!motivo || !motivo.trim()) return;
+    try {
+      await safeApi.post(`/api/tenants/${companyId}/invoices/${id}/keyfacil-void`, { motivo: motivo.trim() });
+      toast.success(t('tenants.finance.invoices.voided'));
+      const updated = await safeApi.get(`/api/tenants/${companyId}/invoices/${id}`);
+      setSelectedInvoice(updated);
+      handleReload();
+    } catch (error) {
+      toast.error(error.message || t('tenants.finance.invoices.voidError'));
+    }
+  };
+
+  const handleKeyfacilFile = async (invoice, type) => {
+    const directUrl = type === 'pdf' ? invoice.keyfacil_pdf_url : invoice.keyfacil_xml_url;
+    if (directUrl) {
+      window.open(directUrl, '_blank', 'noopener');
+      return;
+    }
+
+    try {
+      const token = getStoredSession()?.token;
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const res = await fetch(`${baseUrl}/api/tenants/${companyId}/invoices/${invoice.id}/keyfacil-${type}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error(t('tenants.finance.invoices.fileUnavailable'));
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `comprobante-${invoice.keyfacil_serie || invoice.invoice_number || invoice.id}.${type}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      toast.error(error.message || t('tenants.finance.invoices.fileDownloadError'));
     }
   };
 
@@ -269,7 +344,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
           const res = await safeApi.get(`/api/tenants/${companyId}/invoices/${invoiceId}`);
           setSelectedInvoice(res);
       } catch (e) {
-          toast.error('Error al cargar factura');
+          toast.error(t('tenants.finance.invoices.loadInvoiceError'));
           setViewModalOpen(false);
       } finally {
           setLoadingInvoice(false);
@@ -303,7 +378,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
     if (!value) return '—';
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return String(value);
-    return d.toLocaleDateString();
+    return d.toLocaleDateString(locale);
   };
 
   const resolveCurrency = (row) => {
@@ -325,14 +400,16 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
     const symbol = currency?.symbol || '$';
     const code = currency?.code || '';
     return {
-      text: `${symbol} ${amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+      text: `${symbol} ${amount.toLocaleString(locale, { minimumFractionDigits: 2 })}`,
       code,
     };
   };
 
   const renderStatusBadge = (statusRaw) => {
-    if (!statusRaw) return <span className="text-xs text-slate-500">Sin estado</span>;
+    if (!statusRaw) return <span className="text-xs text-slate-500">{t('tenants.finance.invoices.status.noStatus')}</span>;
     const status = String(statusRaw).toLowerCase();
+    const translatedStatus = t(`tenants.finance.invoices.status.${status}`);
+    const statusLabel = translatedStatus.startsWith('tenants.finance.invoices.status.') ? status : translatedStatus;
     let cls = 'bg-slate-100 text-slate-700';
     if (status === 'draft') cls = 'bg-slate-100 text-slate-700';
     else if (status === 'sent') cls = 'bg-blue-50 text-blue-700';
@@ -341,7 +418,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
 
     return (
       <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${cls}`}>
-        {status || 'Desconocido'}
+        {statusLabel}
       </span>
     );
   };
@@ -349,7 +426,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
   const handleCopyId = (id) => {
     if (!id || typeof navigator === 'undefined' || !navigator.clipboard) return;
     navigator.clipboard.writeText(String(id)).then(
-      () => toast.success('ID copiado'),
+      () => toast.success(t('tenants.common.idCopied')),
       () => {}
     );
   };
@@ -357,22 +434,22 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
   if (!safeApi?.get) {
     return (
       <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
-        API no inicializada para este tab.
+        {t('tenants.finance.invoices.apiNotInitialized')}
       </div>
     );
   }
 
   if (loading && !invoices.length && !err) {
-    return <div className="py-8 text-center text-slate-500">Cargando facturas…</div>;
+    return <div className="py-8 text-center text-slate-500">{t('tenants.finance.invoices.loadingInvoices')}</div>;
   }
 
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h3 className="text-lg font-bold text-slate-900">Facturas emitidas</h3>
+          <h3 className="text-lg font-bold text-slate-900">{t('tenants.finance.invoices.title')}</h3>
           <p className="text-xs text-slate-500">
-            Listado de invoices asociados a esta empresa.
+            {t('tenants.finance.invoices.subtitle')}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -384,11 +461,11 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
             }}
             className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700"
           >
-            <option value="">Todos los estados</option>
-            <option value="draft">Borrador</option>
-            <option value="sent">Enviado</option>
-            <option value="paid">Pagado</option>
-            <option value="overdue">Vencido</option>
+            <option value="">{t('tenants.finance.invoices.allStatuses')}</option>
+            <option value="draft">{t('tenants.finance.invoices.status.draft')}</option>
+            <option value="sent">{t('tenants.finance.invoices.status.sent')}</option>
+            <option value="paid">{t('tenants.finance.invoices.status.paid')}</option>
+            <option value="overdue">{t('tenants.finance.invoices.status.overdue')}</option>
           </select>
 
           <select
@@ -399,7 +476,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
             }}
             className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700"
           >
-            <option value="">Todas las monedas</option>
+            <option value="">{t('tenants.finance.invoices.allCurrencies')}</option>
             {effectiveCurrencies.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.code} {c.symbol ? `(${c.symbol})` : ''}
@@ -414,7 +491,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
               setSearch(e.target.value);
               setPage(1);
             }}
-            placeholder="Buscar por número, referencia…"
+            placeholder={t('tenants.finance.invoices.searchPlaceholder')}
             className="w-40 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 placeholder:text-slate-400 focus:border-brand focus:ring-brand"
           />
 
@@ -424,7 +501,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
             className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
           >
             <i className="bi bi-arrow-repeat" />
-            Refrescar
+            {t('tenants.common.refresh')}
           </button>
           {!isSupport && (
             <button
@@ -436,6 +513,11 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
                   issue_date: new Date().toISOString().split('T')[0],
                   due_date: '',
                   currency_id: '',
+                  contact_id: '',
+                  comprobante_tipo: '01',
+                  customer_document_type: '6',
+                  customer_document: '',
+                  customer_address: '',
                   items: [{ description: '', quantity: 1, unit_price: 0 }]
                 });
                 setCreateModalOpen(true);
@@ -443,7 +525,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
               className="inline-flex items-center gap-1 rounded-xl bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand/90"
             >
               <i className="bi bi-plus-lg" />
-              Nueva Factura
+              {t('tenants.finance.invoices.newInvoice')}
             </button>
           )}
         </div>
@@ -456,22 +538,23 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
             setCreateModalOpen(false);
             setEditingId(null);
         }} 
-        title={editingId ? "Editar Factura" : "Nueva Factura"}
+        title={editingId ? t('tenants.finance.invoices.editInvoice') : t('tenants.finance.invoices.newInvoice')}
       >
         <form onSubmit={handleSave} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-slate-700">Número / Referencia</label>
+              <label className="block text-xs font-medium text-slate-700">{t('tenants.finance.invoices.invoiceNumberLabel')}</label>
               <input
                 type="text"
                 required
                 className="mt-1 w-full rounded-lg border-slate-300 text-sm"
                 value={formData.invoice_number}
                 onChange={e => setFormData({ ...formData, invoice_number: e.target.value })}
+                placeholder={t('tenants.finance.invoices.invoiceNumberPlaceholder')}
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-700">Contrato (Opcional)</label>
+              <label className="block text-xs font-medium text-slate-700">{t('tenants.finance.invoices.contractOptional')}</label>
               <select
                 className="mt-1 w-full rounded-lg border-slate-300 text-sm"
                 value={formData.contract_id}
@@ -486,20 +569,20 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
                   }));
                 }}
               >
-                <option value="">Ninguno</option>
+                <option value="">{t('tenants.common.none')}</option>
                 {contracts.map(c => (
                   <option key={c.id} value={c.id}>{c.title}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-700">Contacto de facturación</label>
+              <label className="block text-xs font-medium text-slate-700">{t('tenants.finance.invoices.billingContact')}</label>
               <select
                 className="mt-1 w-full rounded-lg border-slate-300 text-sm"
                 value={formData.contact_id || ''}
                 onChange={e => setFormData({ ...formData, contact_id: e.target.value || '' })}
               >
-                <option value="">Seleccionar…</option>
+                <option value="">{t('tenants.common.select')}</option>
                 {contacts.map(ct => (
                   <option key={ct.id} value={ct.id}>
                     {ct.name} {ct.email ? `— ${ct.email}` : ''}
@@ -508,21 +591,21 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-700">Moneda</label>
+              <label className="block text-xs font-medium text-slate-700">{t('tenants.common.currency')}</label>
               <select
                 required
                 className="mt-1 w-full rounded-lg border-slate-300 text-sm"
                 value={formData.currency_id}
                 onChange={e => setFormData({ ...formData, currency_id: e.target.value })}
               >
-                <option value="">Seleccionar...</option>
+                <option value="">{t('tenants.common.select')}</option>
                 {effectiveCurrencies.map(c => (
                   <option key={c.id} value={c.id}>{c.code} - {c.name}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-700">Fecha Emisión</label>
+              <label className="block text-xs font-medium text-slate-700">{t('tenants.finance.invoices.issueDate')}</label>
               <input
                 type="date"
                 required
@@ -532,7 +615,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-700">Fecha Vencimiento</label>
+              <label className="block text-xs font-medium text-slate-700">{t('tenants.finance.invoices.dueDate')}</label>
               <input
                 type="date"
                 required
@@ -542,19 +625,76 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
               />
             </div>
           </div>
-          
+
+          <div className="rounded-xl border border-slate-200 p-3 space-y-3">
+            <div>
+              <h4 className="text-sm font-semibold text-slate-900">{t('tenants.finance.invoices.keyfacilTitle')}</h4>
+              <p className="mt-1 text-xs text-slate-500">
+                {t('tenants.finance.invoices.keyfacilHelp')}
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-700">{t('tenants.finance.invoices.documentKind')}</label>
+                <select
+                  className="mt-1 w-full rounded-lg border-slate-300 text-sm"
+                  value={formData.comprobante_tipo || '01'}
+                  onChange={e => setFormData({ ...formData, comprobante_tipo: e.target.value })}
+                >
+                  <option value="01">{t('tenants.finance.invoices.electronicInvoice')}</option>
+                  <option value="03">{t('tenants.finance.invoices.electronicReceipt')}</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700">{t('tenants.finance.invoices.documentType')}</label>
+                <select
+                  className="mt-1 w-full rounded-lg border-slate-300 text-sm"
+                  value={formData.customer_document_type || '6'}
+                  onChange={e => setFormData({ ...formData, customer_document_type: e.target.value })}
+                >
+                  <option value="6">{t('tenants.finance.invoices.docRuc')}</option>
+                  <option value="1">{t('tenants.finance.invoices.docDni')}</option>
+                  <option value="4">{t('tenants.finance.invoices.docForeignId')}</option>
+                  <option value="7">{t('tenants.finance.invoices.docPassport')}</option>
+                  <option value="-">{t('tenants.finance.invoices.docOther')}</option>
+                  <option value="0">{t('tenants.finance.invoices.docNonDomiciled')}</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700">{t('tenants.finance.invoices.customerDocument')}</label>
+                <input
+                  type="text"
+                  className="mt-1 w-full rounded-lg border-slate-300 text-sm"
+                  value={formData.customer_document || ''}
+                  onChange={e => setFormData({ ...formData, customer_document: e.target.value })}
+                  placeholder={t('tenants.finance.invoices.customerDocumentPlaceholder')}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700">{t('tenants.finance.invoices.customerAddress')}</label>
+                <input
+                  type="text"
+                  className="mt-1 w-full rounded-lg border-slate-300 text-sm"
+                  value={formData.customer_address || ''}
+                  onChange={e => setFormData({ ...formData, customer_address: e.target.value })}
+                  placeholder={t('tenants.finance.invoices.customerAddressPlaceholder')}
+                />
+              </div>
+            </div>
+          </div>
+
           <div>
-            <label className="block text-xs font-medium text-slate-700">Notas</label>
+            <label className="block text-xs font-medium text-slate-700">{t('tenants.common.notes')}</label>
             <textarea
               rows={2}
               className="mt-1 w-full rounded-lg border-slate-300 text-sm"
               value={formData.notes || ''}
               onChange={e => setFormData({ ...formData, notes: e.target.value })}
-              placeholder="Notas opcionales..."
+              placeholder={t('tenants.finance.invoices.notesPlaceholder')}
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-700">Adjuntar archivo (PDF/DOC)</label>
+            <label className="block text-xs font-medium text-slate-700">{t('tenants.finance.invoices.attachFile')}</label>
             <input
               type="file"
               accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -563,16 +703,16 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
             />
             {selectedFile && (
               <div className="mt-1 text-xs text-slate-500">
-                Seleccionado: {selectedFile.name}
+                {t('tenants.finance.invoices.selectedFile', { name: selectedFile.name })}
               </div>
             )}
           </div>
 
           <div className="border-t border-slate-100 pt-4">
             <div className="flex items-center justify-between mb-2">
-              <h4 className="text-sm font-semibold text-slate-900">Ítems</h4>
+              <h4 className="text-sm font-semibold text-slate-900">{t('tenants.finance.invoices.items')}</h4>
               <button type="button" onClick={addItem} className="text-xs text-brand font-medium hover:underline">
-                + Agregar ítem
+                {t('tenants.finance.invoices.addItem')}
               </button>
             </div>
             <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
@@ -581,7 +721,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
                   <div className="flex-1">
                     <input
                       type="text"
-                      placeholder="Descripción"
+                      placeholder={t('tenants.finance.invoices.descriptionPlaceholder')}
                       className="w-full rounded border-slate-200 text-xs mb-1"
                       value={item.description}
                       onChange={e => updateItem(idx, 'description', e.target.value)}
@@ -591,7 +731,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
                         type="number"
                         min="0.01"
                         step="0.01"
-                        placeholder="Cant."
+                        placeholder={t('tenants.finance.invoices.quantityShort')}
                         className="w-20 rounded border-slate-200 text-xs"
                         value={item.quantity}
                         onChange={e => updateItem(idx, 'quantity', e.target.value)}
@@ -600,7 +740,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
                         type="number"
                         min="0"
                         step="0.01"
-                        placeholder="Precio Unit."
+                        placeholder={t('tenants.finance.invoices.unitPriceShort')}
                         className="flex-1 rounded border-slate-200 text-xs"
                         value={item.unit_price}
                         onChange={e => updateItem(idx, 'unit_price', e.target.value)}
@@ -620,7 +760,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
               ))}
             </div>
             <div className="mt-2 text-right text-sm font-bold text-slate-900">
-               Total: {(formData.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0)).toFixed(2)}
+               {t('tenants.finance.invoices.totalAmount', { amount: (formData.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0)).toFixed(2) })}
             </div>
           </div>
 
@@ -633,14 +773,14 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
               }}
               className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
-              Cancelar
+              {t('tenants.common.cancel')}
             </button>
             <button
               type="submit"
               disabled={creating}
               className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand/90 disabled:opacity-50"
             >
-              {creating ? 'Guardando...' : (editingId ? 'Actualizar' : 'Crear Factura')}
+              {creating ? t('tenants.common.saving') : (editingId ? t('tenants.common.update') : t('tenants.finance.invoices.createInvoice'))}
             </button>
           </div>
         </form>
@@ -654,7 +794,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
 
       {!invoices.length && !loading && !err && (
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
-          No hay facturas registradas para este tenant.
+          {t('tenants.finance.invoices.empty')}
         </div>
       )}
 
@@ -663,12 +803,12 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-4 py-3 text-left">Fecha</th>
-                <th className="px-4 py-3 text-left">Factura</th>
-                <th className="px-4 py-3 text-left">Cliente</th>
-                {!isSupport && <th className="px-4 py-3 text-left">Monto</th>}
-                <th className="px-4 py-3 text-left">Estado</th>
-                {!isSupport && <th className="px-4 py-3 text-right">Acciones</th>}
+                <th className="px-4 py-3 text-left">{t('tenants.common.date')}</th>
+                <th className="px-4 py-3 text-left">{t('tenants.finance.invoices.title')}</th>
+                <th className="px-4 py-3 text-left">{t('tenants.finance.invoices.customer')}</th>
+                {!isSupport && <th className="px-4 py-3 text-left">{t('tenants.common.amount')}</th>}
+                <th className="px-4 py-3 text-left">{t('tenants.common.status')}</th>
+                {!isSupport && <th className="px-4 py-3 text-right">{t('tenants.common.actions')}</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -691,14 +831,14 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-slate-900">
-                          {displayNumber || 'Sin número'}
+                          {displayNumber || t('tenants.finance.invoices.noNumber')}
                         </span>
                         {inv.id && (
                           <button
                             type="button"
                             onClick={() => handleCopyId(inv.id)}
                             className="text-slate-400 hover:text-brand"
-                            title="Copiar ID"
+                            title={t('tenants.common.copyId')}
                           >
                             <i className="bi bi-clipboard" />
                           </button>
@@ -706,7 +846,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
                       </div>
                       {inv.reference && (
                         <div className="text-xs text-slate-500 truncate max-w-xs">
-                          Ref: {inv.reference}
+                          {t('tenants.finance.invoices.reference', { reference: inv.reference })}
                         </div>
                       )}
                     </td>
@@ -714,7 +854,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
                       <div className="text-sm font-medium text-slate-900">{customer}</div>
                       {inv.customer_tax_id && (
                         <div className="text-xs text-slate-500">
-                          RUC: {inv.customer_tax_id}
+                          {t('tenants.finance.invoices.taxId', { value: inv.customer_tax_id })}
                         </div>
                       )}
                     </td>
@@ -736,7 +876,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
                             type="button"
                             onClick={() => handleView(inv.id)}
                             className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                            title="Ver detalle"
+                            title={t('tenants.common.viewDetail')}
                           >
                             <i className="bi bi-eye" />
                           </button>
@@ -746,7 +886,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
                                 type="button"
                                 onClick={() => handleEdit(inv)}
                                 className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600"
-                                title="Editar"
+                                title={t('tenants.common.edit')}
                               >
                                 <i className="bi bi-pencil" />
                               </button>
@@ -754,7 +894,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
                                 type="button"
                                 onClick={() => handleDelete(inv.id)}
                                 className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
-                                title="Eliminar"
+                                title={t('tenants.common.delete')}
                               >
                                 <i className="bi bi-trash" />
                               </button>
@@ -778,10 +918,10 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
                 className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
                 <i className="bi bi-chevron-left" />
-                Anterior
+                {t('tenants.common.previous')}
               </button>
               <span>
-                Página {page} de {totalPages}
+                {t('tenants.common.pageOf', { page, total: totalPages })}
               </span>
               <button
                 type="button"
@@ -789,7 +929,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
                 onClick={() => setPage((p) => p + 1)}
                 className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
-                Siguiente
+                {t('tenants.common.next')}
                 <i className="bi bi-chevron-right" />
               </button>
             </div>
@@ -797,9 +937,9 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
         </div>
       )}
       {/* View Invoice Modal */}
-      <Modal open={viewModalOpen} onClose={() => setViewModalOpen(false)} title="Detalle de Factura">
+      <Modal open={viewModalOpen} onClose={() => setViewModalOpen(false)} title={t('tenants.finance.invoices.detailTitle')}>
         {loadingInvoice && !selectedInvoice ? (
-             <div className="py-8 text-center text-slate-500">Cargando detalles...</div>
+             <div className="py-8 text-center text-slate-500">{t('tenants.finance.invoices.detailLoading')}</div>
         ) : selectedInvoice ? (
             <div className="space-y-6">
                 <div className="flex justify-between items-start border-b border-slate-100 pb-4">
@@ -811,26 +951,26 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
                     </div>
                     <div className="text-right text-xs text-slate-500 space-y-1">
                          <div>
-                            <span className="font-medium text-slate-700 mr-2">Emisión:</span>
+                            <span className="font-medium text-slate-700 mr-2">{t('tenants.finance.invoices.issuedLabel')}</span>
                             {formatDate(selectedInvoice.issue_date)}
                         </div>
                          <div>
-                            <span className="font-medium text-slate-700 mr-2">Vencimiento:</span>
+                            <span className="font-medium text-slate-700 mr-2">{t('tenants.finance.invoices.dueLabel')}</span>
                             {formatDate(selectedInvoice.due_date)}
                         </div>
                     </div>
                 </div>
 
                 <div>
-                    <h5 className="text-sm font-semibold text-slate-900 mb-3">Ítems de la factura</h5>
+                    <h5 className="text-sm font-semibold text-slate-900 mb-3">{t('tenants.finance.invoices.invoiceItems')}</h5>
                     <div className="overflow-hidden rounded-lg border border-slate-200">
                         <table className="w-full text-sm">
                             <thead className="bg-slate-50 text-xs font-medium text-slate-500 uppercase tracking-wider">
                                 <tr>
-                                    <th className="px-3 py-2 text-left">Descripción</th>
-                                    <th className="px-3 py-2 text-right">Cant.</th>
-                                    {!isSupport && <th className="px-3 py-2 text-right">Precio</th>}
-                                    {!isSupport && <th className="px-3 py-2 text-right">Total</th>}
+                                    <th className="px-3 py-2 text-left">{t('tenants.common.description')}</th>
+                                    <th className="px-3 py-2 text-right">{t('tenants.finance.invoices.quantityShort')}</th>
+                                    {!isSupport && <th className="px-3 py-2 text-right">{t('tenants.finance.invoices.price')}</th>}
+                                    {!isSupport && <th className="px-3 py-2 text-right">{t('tenants.finance.invoices.total')}</th>}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 bg-white">
@@ -846,7 +986,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
                             {!isSupport && (
                             <tfoot className="bg-slate-50 font-semibold text-slate-900">
                                  <tr>
-                                    <td colSpan="3" className="px-3 py-2 text-right">Total</td>
+                                    <td colSpan="3" className="px-3 py-2 text-right">{t('tenants.finance.invoices.total')}</td>
                                     <td className="px-3 py-2 text-right">
                                         {selectedInvoice.currency_symbol} {Number(selectedInvoice.total_amount).toFixed(2)}
                                     </td>
@@ -859,23 +999,82 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
 
                 {selectedInvoice.notes && (
                     <div className="rounded-lg bg-yellow-50 p-3 text-xs text-yellow-800">
-                        <span className="font-bold block mb-1">Notas:</span>
+                        <span className="font-bold block mb-1">{t('tenants.finance.invoices.notesLabel')}</span>
                         {selectedInvoice.notes}
                     </div>
                 )}
                 
                 {(selectedInvoice.attachment_path || selectedInvoice.attachment_name) && (
                     <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
-                        <span className="font-semibold mr-2">Adjunto:</span>
+                        <span className="font-semibold mr-2">{t('tenants.finance.invoices.attachmentLabel')}</span>
                         {selectedInvoice.attachment_path ? (
                           <a href={selectedInvoice.attachment_path} target="_blank" rel="noreferrer" className="text-brand hover:underline">
-                            {selectedInvoice.attachment_name || 'Ver archivo'}
+                            {selectedInvoice.attachment_name || t('tenants.finance.invoices.viewFile')}
                           </a>
                         ) : (
                           <span>{selectedInvoice.attachment_name}</span>
                         )}
                     </div>
                 )}
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <h5 className="text-sm font-semibold text-slate-900">{t('tenants.finance.invoices.sunatTitle')}</h5>
+                            <p className="mt-1 text-xs text-slate-500">
+                                {selectedInvoice.keyfacil_id
+                                    ? t('tenants.finance.invoices.emittedStatus', {
+                                        serie: selectedInvoice.keyfacil_serie || '',
+                                        number: selectedInvoice.keyfacil_number || '',
+                                        status: selectedInvoice.keyfacil_status || 'emitido',
+                                      })
+                                    : t('tenants.finance.invoices.notIssued')}
+                            </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {selectedInvoice.keyfacil_id ? (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleKeyfacilFile(selectedInvoice, 'pdf')}
+                                        className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                    >
+                                        <i className="bi bi-file-earmark-pdf" />
+                                        {t('tenants.finance.invoices.sunatPdf')}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleKeyfacilFile(selectedInvoice, 'xml')}
+                                        className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                    >
+                                        <i className="bi bi-file-earmark-code" />
+                                        {t('tenants.finance.invoices.xml')}
+                                    </button>
+                                    {selectedInvoice.status !== 'voided' && (
+                                        <button
+                                            type="button"
+                                            onClick={() => handleVoidKeyfacil(selectedInvoice.id)}
+                                            className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50"
+                                        >
+                                            <i className="bi bi-x-circle" />
+                                            {t('tenants.finance.invoices.voidAction')}
+                                        </button>
+                                    )}
+                                </>
+                            ) : (
+                                <button
+                                    type="button"
+                                    onClick={() => handleIssueKeyfacil(selectedInvoice.id)}
+                                    disabled={sendingKeyfacil}
+                                    className="inline-flex items-center gap-1 rounded-lg bg-brand px-3 py-1.5 text-xs font-bold text-white hover:bg-brand/90 disabled:opacity-50"
+                                >
+                                    <i className="bi bi-send" />
+                                    {sendingKeyfacil ? t('tenants.finance.invoices.issuing') : t('tenants.finance.invoices.issueAction')}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
 
                 <div className="flex flex-wrap gap-3 border-t border-slate-100 pt-4 mt-4">
                     {!isSupport && (
@@ -886,7 +1085,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
                         className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                     >
                         <i className="bi bi-file-earmark-pdf" />
-                        PDF
+                        {t('tenants.finance.invoices.pdf')}
                     </button>
                     <button
                         type="button"
@@ -894,7 +1093,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
                         className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                     >
                         <i className="bi bi-envelope" />
-                        Enviar
+                        {t('tenants.finance.invoices.send')}
                     </button>
                     </>
                     )}
@@ -912,7 +1111,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
                                 className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                             >
                                 <i className="bi bi-pencil" />
-                                Editar
+                                {t('tenants.common.edit')}
                             </button>
                             <button
                                 type="button"
@@ -920,7 +1119,7 @@ export default function TenantInvoicesTab({ companyId, api, currencies, currenci
                                 className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
                             >
                                 <i className="bi bi-credit-card" />
-                                Pagar
+                                {t('tenants.finance.invoices.pay')}
                             </button>
                         </>
                     )}

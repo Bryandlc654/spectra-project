@@ -693,10 +693,39 @@ class RoleController
             return;
         }
 
-        // Anti-escalation: solo super_admin puede modificar el rol super_admin
-        if ($role === 'super_admin' && (Auth::user()['platform_role'] ?? '') !== 'super_admin') {
-            Response::error('Acceso denegado', 403);
+        $actorRole = (string)(Auth::user()['platform_role'] ?? '');
+        $role = (string)$role;
+
+        // Roles internos válidos. super_admin es fijo (acceso total) y no se edita.
+        $editable = ['admin', 'support', 'finance', 'legal', 'security', 'it_admin', 'company_admin', 'freelancer', 'freelance', 'user'];
+        if ($role === 'super_admin') {
+            Response::error('El rol Super Admin es fijo y no se puede modificar', 403);
             return;
+        }
+        if (!in_array($role, $editable, true)) {
+            Response::error('Rol no válido', 422);
+            return;
+        }
+        // Anti auto-escalada: nadie edita su propio rol, y solo super_admin
+        // puede tocar los roles que administran permisos (admin, security).
+        if ($role === $actorRole) {
+            Response::error('No puedes modificar los permisos de tu propio rol', 403);
+            return;
+        }
+        if (in_array($role, ['admin', 'security'], true) && $actorRole !== 'super_admin') {
+            Response::error('Solo el Super Admin puede modificar este rol', 403);
+            return;
+        }
+        $modules = array_values(array_unique(array_map('strval', $modules)));
+        if (count($modules) > 200) {
+            Response::error('Demasiados módulos', 422);
+            return;
+        }
+        foreach ($modules as $mod) {
+            if (!preg_match('/^[a-z0-9_-]{1,64}$/', $mod)) {
+                Response::error('Identificador de módulo no válido: ' . substr($mod, 0, 40), 422);
+                return;
+            }
         }
         
         $this->pdo->beginTransaction();
@@ -719,6 +748,11 @@ class RoleController
             }
             
             $this->pdo->commit();
+            try {
+                (new \App\Support\AuditLogger())->log('rbac.system_role.updated', 'system_role', $role, ['modules' => $modules]);
+            } catch (\Throwable $e) {
+                error_log('[Spectra] audit rbac: ' . $e->getMessage());
+            }
             $this->getSystemPermissions();
             
         } catch (\Throwable $e) {

@@ -248,7 +248,7 @@ export default function GlobalContractTemplatesPage({ apiUrl, token }) {
                 <div>
                     <h3 className="text-lg font-bold text-slate-900">Plantillas Globales de Contratos</h3>
                     <p className="text-xs text-slate-500">
-                        Gestiona las plantillas base disponibles para todos los tenants.
+                        Gestiona las plantillas base disponibles para todas las empresas.
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-2">

@@ -1,8 +1,11 @@
+import { downloadFile } from '../../../lib/api';
 import React, { useState, useEffect } from 'react';
+import { useI18n } from '../../../i18n/I18nContext';
 
 // --- Sub-components ---
 
 function PayrollSettingsView({ companyId, api }) {
+    const { t } = useI18n();
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [settings, setSettings] = useState({
@@ -36,9 +39,9 @@ function PayrollSettingsView({ companyId, api }) {
         setSaving(true);
         try {
             await api.post(`/api/companies/${companyId}/payroll-settings`, settings);
-            alert('Configuración guardada correctamente');
+            alert(t('tenants.finance.payroll.settingsSaved'));
         } catch (e) {
-            alert(e.message || 'Error al guardar');
+            alert(e.message || t('tenants.finance.payroll.saveError'));
         } finally {
             setSaving(false);
         }
@@ -46,27 +49,27 @@ function PayrollSettingsView({ companyId, api }) {
 
     const handleChange = (f, v) => setSettings(p => ({ ...p, [f]: v }));
 
-    if (loading) return <div className="p-10 text-center text-slate-500">Cargando configuración de nómina...</div>;
+    if (loading) return <div className="p-10 text-center text-slate-500">{t('tenants.finance.payroll.settingsLoading')}</div>;
 
     return (
         <form onSubmit={handleSubmit} className="max-w-2xl bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
             <div>
-                <h3 className="text-lg font-semibold text-slate-900">Configuración de ciclo de nómina</h3>
+                <h3 className="text-lg font-semibold text-slate-900">{t('tenants.finance.payroll.settingsTitle')}</h3>
                 <p className="mt-1 text-sm text-slate-500">
-                    Define cada cuánto se ejecuta la nómina y en qué días se realizan los cortes y pagos.
+                    {t('tenants.finance.payroll.settingsSubtitle')}
                 </p>
             </div>
 
             <div className="grid grid-cols-2 gap-6">
                 <div>
-                    <label className="block text-sm font-medium text-slate-700">Tipo de Ciclo</label>
+                    <label className="block text-sm font-medium text-slate-700">{t('tenants.finance.payroll.cycleType')}</label>
                     <select 
                         value={settings.cycle_type}
                         onChange={e => handleChange('cycle_type', e.target.value)}
                         className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
                     >
-                        <option value="monthly">Mensual</option>
-                        <option value="biweekly">Quincenal</option>
+                        <option value="monthly">{t('tenants.finance.payroll.monthly')}</option>
+                        <option value="biweekly">{t('tenants.finance.payroll.biweekly')}</option>
                     </select>
                 </div>
             </div>
@@ -74,7 +77,7 @@ function PayrollSettingsView({ companyId, api }) {
             <div className="grid grid-cols-2 gap-6">
                 <div>
                     <label className="block text-sm font-medium text-slate-700">
-                        {settings.cycle_type === 'monthly' ? 'Día de Corte' : 'Día de Corte (2da Quincena)'}
+                        {settings.cycle_type === 'monthly' ? t('tenants.finance.payroll.cutoffDay') : t('tenants.finance.payroll.cutoffDaySecond')}
                     </label>
                     <input 
                         type="number" 
@@ -86,7 +89,7 @@ function PayrollSettingsView({ companyId, api }) {
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-slate-700">
-                        {settings.cycle_type === 'monthly' ? 'Día de Pago' : 'Día de Pago (2da Quincena)'}
+                        {settings.cycle_type === 'monthly' ? t('tenants.finance.payroll.paymentDay') : t('tenants.finance.payroll.paymentDaySecond')}
                     </label>
                     <input 
                         type="number" 
@@ -101,7 +104,7 @@ function PayrollSettingsView({ companyId, api }) {
             {settings.cycle_type === 'biweekly' && (
                 <div className="grid grid-cols-2 gap-6 pt-4 border-t border-slate-100">
                     <div>
-                        <label className="block text-sm font-medium text-slate-700">Día de Corte (1ra Quincena)</label>
+                        <label className="block text-sm font-medium text-slate-700">{t('tenants.finance.payroll.cutoffDayFirst')}</label>
                         <input 
                             type="number" 
                             min="1" max="31"
@@ -111,7 +114,7 @@ function PayrollSettingsView({ companyId, api }) {
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-slate-700">Día de Pago (1ra Quincena)</label>
+                        <label className="block text-sm font-medium text-slate-700">{t('tenants.finance.payroll.paymentDayFirst')}</label>
                         <input 
                             type="number" 
                             min="1" max="31"
@@ -129,7 +132,7 @@ function PayrollSettingsView({ companyId, api }) {
                     disabled={saving}
                     className="inline-flex justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50"
                 >
-                    {saving ? 'Guardando...' : 'Guardar Configuración'}
+                    {saving ? t('tenants.common.saving') : t('tenants.finance.payroll.saveSettings')}
                 </button>
             </div>
         </form>
@@ -137,6 +140,9 @@ function PayrollSettingsView({ companyId, api }) {
 }
 
 function RunDetailsModal({ run, onClose, api, onUpdate }) {
+    const { t, language } = useI18n();
+    const locale = language === 'en' ? 'en-US' : 'es-ES';
+    const formatAmount = (value) => Number(value || 0).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
     const [processing, setProcessing] = useState(false);
@@ -157,22 +163,22 @@ function RunDetailsModal({ run, onClose, api, onUpdate }) {
     }
 
     async function handleCalculate() {
-        if (!confirm('¿Recalcular nómina? Esto sobrescribirá los cálculos actuales.')) return;
+        if (!confirm(t('tenants.finance.payroll.confirmCalculate'))) return;
         setProcessing(true);
         try {
             await api.post(`/api/payroll/runs/${run.id}/calculate`);
             await loadItems();
             onUpdate(); // Refresh parent list
-            alert('Cálculo completado');
+            alert(t('tenants.finance.payroll.calculateDone'));
         } catch (e) {
-            alert(e.message || 'Error al calcular');
+            alert(e.message || t('tenants.finance.payroll.calculateError'));
         } finally {
             setProcessing(false);
         }
     }
 
     async function handleApprove() {
-        if (!confirm('¿Aprobar nómina? Pasará a estado de procesamiento.')) return;
+        if (!confirm(t('tenants.finance.payroll.confirmApprove'))) return;
         setProcessing(true);
         try {
             await api.put(`/api/payroll/runs/${run.id}`, { status: 'processing' });
@@ -186,7 +192,7 @@ function RunDetailsModal({ run, onClose, api, onUpdate }) {
     }
 
     async function handlePay() {
-        if (!confirm('¿Pagar nómina ahora? Se generarán facturas y se descontará de la billetera.')) return;
+        if (!confirm(t('tenants.finance.payroll.confirmPay'))) return;
         setProcessing(true);
         try {
             await api.put(`/api/payroll/runs/${run.id}`, { status: 'paid' });
@@ -200,7 +206,11 @@ function RunDetailsModal({ run, onClose, api, onUpdate }) {
     }
 
     async function handleExport() {
-        window.open(`${api.baseUrl}/api/payroll/items?export=csv&payroll_run_id=${run.id}`, '_blank');
+        try {
+            await downloadFile(null, `/api/payroll/items?export=csv&payroll_run_id=${encodeURIComponent(run.id)}`, `nomina-${run.id}.csv`);
+        } catch (e) {
+            alert(e.message);
+        }
     }
 
     // Group items by user
@@ -225,20 +235,20 @@ function RunDetailsModal({ run, onClose, api, onUpdate }) {
             <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col">
                 <div className="p-6 border-b border-slate-200 flex justify-between items-center bg-slate-50 rounded-t-xl">
                     <div>
-                        <h3 className="text-xl font-bold text-slate-900">Detalle de Nómina</h3>
+                        <h3 className="text-xl font-bold text-slate-900">{t('tenants.finance.payroll.runDetailTitle')}</h3>
                         <p className="text-sm text-slate-500">
-                            Periodo: {run.period_start} - {run.period_end} | Estado: <span className="font-semibold uppercase">{run.status}</span>
+                            {t('tenants.finance.payroll.runPeriodStatusPrefix', { start: run.period_start, end: run.period_end })} <span className="font-semibold uppercase">{run.status}</span>
                         </p>
                     </div>
                     <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-                        <span className="sr-only">Cerrar</span>
+                        <span className="sr-only">{t('tenants.common.close')}</span>
                         <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                 </div>
                 
                 <div className="p-6 overflow-y-auto flex-1">
                     {loading ? (
-                        <div className="text-center py-10">Cargando detalles...</div>
+                        <div className="text-center py-10">{t('tenants.finance.payroll.detailLoading')}</div>
                     ) : (
                         <div className="space-y-6">
                             {/* Actions Toolbar */}
@@ -250,14 +260,14 @@ function RunDetailsModal({ run, onClose, api, onUpdate }) {
                                             disabled={processing}
                                             className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
                                         >
-                                            {processing ? 'Calculando...' : 'Calcular Nómina'}
+                                            {processing ? t('tenants.finance.payroll.calculating') : t('tenants.finance.payroll.calculate')}
                                         </button>
                                         <button 
                                             onClick={handleApprove}
                                             disabled={processing}
                                             className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
                                         >
-                                            Aprobar para Pago
+                                            {t('tenants.finance.payroll.approve')}
                                         </button>
                                     </>
                                 )}
@@ -267,35 +277,35 @@ function RunDetailsModal({ run, onClose, api, onUpdate }) {
                                         disabled={processing}
                                         className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50"
                                     >
-                                        Ejecutar Pagos
+                                        {t('tenants.finance.payroll.executePayments')}
                                     </button>
                                 )}
                                 <button 
                                     onClick={handleExport}
                                     className="px-4 py-2 border border-slate-300 bg-white text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50"
                                 >
-                                    Exportar CSV
+                                    {t('tenants.finance.payroll.exportCsv')}
                                 </button>
                             </div>
 
                             {/* Summary Cards */}
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
-                                    <div className="text-sm text-slate-500">Total Devengado</div>
+                                    <div className="text-sm text-slate-500">{t('tenants.finance.payroll.totalEarned')}</div>
                                     <div className="text-2xl font-bold text-slate-900">
-                                        ${Object.values(itemsByUser).reduce((s, u) => s + u.earnings, 0).toFixed(2)}
+                                        ${formatAmount(Object.values(itemsByUser).reduce((s, u) => s + u.earnings, 0))}
                                     </div>
                                 </div>
                                 <div className="p-4 bg-red-50 rounded-lg border border-red-100">
-                                    <div className="text-sm text-red-600">Total Retenciones</div>
+                                    <div className="text-sm text-red-600">{t('tenants.finance.payroll.totalDeductions')}</div>
                                     <div className="text-2xl font-bold text-red-700">
-                                        ${Object.values(itemsByUser).reduce((s, u) => s + u.deductions, 0).toFixed(2)}
+                                        ${formatAmount(Object.values(itemsByUser).reduce((s, u) => s + u.deductions, 0))}
                                     </div>
                                 </div>
                                 <div className="p-4 bg-emerald-50 rounded-lg border border-emerald-100">
-                                    <div className="text-sm text-emerald-600">Total a Pagar (Neto)</div>
+                                    <div className="text-sm text-emerald-600">{t('tenants.finance.payroll.totalNet')}</div>
                                     <div className="text-2xl font-bold text-emerald-700">
-                                        ${Object.values(itemsByUser).reduce((s, u) => s + u.net, 0).toFixed(2)}
+                                        ${formatAmount(Object.values(itemsByUser).reduce((s, u) => s + u.net, 0))}
                                     </div>
                                 </div>
                             </div>
@@ -305,10 +315,10 @@ function RunDetailsModal({ run, onClose, api, onUpdate }) {
                                 <table className="min-w-full divide-y divide-slate-200">
                                     <thead className="bg-slate-50">
                                         <tr>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Empleado</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Devengado</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Retenciones</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Neto</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">{t('tenants.finance.payroll.employee')}</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">{t('tenants.finance.payroll.earned')}</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">{t('tenants.finance.payroll.deductions')}</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">{t('tenants.finance.payroll.net')}</th>
                                         </tr>
                                     </thead>
                                     <tbody className="bg-white divide-y divide-slate-200">
@@ -319,20 +329,20 @@ function RunDetailsModal({ run, onClose, api, onUpdate }) {
                                                     <div className="text-sm text-slate-500">{u.email}</div>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-slate-900 font-medium">
-                                                    {u.earnings.toFixed(2)}
+                                                    {formatAmount(u.earnings)}
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-red-600">
-                                                    -{u.deductions.toFixed(2)}
+                                                    -{formatAmount(u.deductions)}
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-emerald-600">
-                                                    {u.net.toFixed(2)}
+                                                    {formatAmount(u.net)}
                                                 </td>
                                             </tr>
                                         ))}
                                         {Object.keys(itemsByUser).length === 0 && (
                                             <tr>
                                                 <td colSpan="4" className="px-6 py-10 text-center text-slate-500">
-                                                    No hay items calculados. Haz clic en "Calcular Nómina".
+                                                    {t('tenants.finance.payroll.noItems')}
                                                 </td>
                                             </tr>
                                         )}
@@ -348,6 +358,8 @@ function RunDetailsModal({ run, onClose, api, onUpdate }) {
 }
 
 function PayrollRunsView({ companyId, api }) {
+    const { t, language } = useI18n();
+    const locale = language === 'en' ? 'en-US' : 'es-ES';
     const [runs, setRuns] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showCreate, setShowCreate] = useState(false);
@@ -387,7 +399,7 @@ function PayrollRunsView({ companyId, api }) {
             // Reset form
             setNewRun({ period_start: '', period_end: '', payment_date: '', type: 'regular' });
         } catch (e) {
-            alert(e.message || 'Error al crear ejecución');
+            alert(e.message || t('tenants.finance.payroll.createError'));
         }
     }
 
@@ -411,9 +423,9 @@ function PayrollRunsView({ companyId, api }) {
         <div className="space-y-5">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
-                    <h3 className="text-lg font-semibold text-slate-900">Ejecuciones de nómina</h3>
+                    <h3 className="text-lg font-semibold text-slate-900">{t('tenants.finance.payroll.runsTitle')}</h3>
                     <p className="mt-1 text-sm text-slate-500">
-                        Crea y gestiona las ejecuciones de nómina desde el cálculo hasta el pago.
+                        {t('tenants.finance.payroll.runsSubtitle')}
                     </p>
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-2">
@@ -422,16 +434,16 @@ function PayrollRunsView({ companyId, api }) {
                         onChange={e => setStatusFilter(e.target.value)}
                         className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700"
                     >
-                        <option value="">Todos los estados</option>
-                        <option value="draft">Borrador</option>
-                        <option value="processing">Procesando</option>
-                        <option value="paid">Pagado</option>
+                        <option value="">{t('tenants.finance.payroll.allStatuses')}</option>
+                        <option value="draft">{t('tenants.finance.payroll.status.draft')}</option>
+                        <option value="processing">{t('tenants.finance.payroll.status.processing')}</option>
+                        <option value="paid">{t('tenants.finance.payroll.status.paid')}</option>
                     </select>
                     <button 
                         onClick={() => setShowCreate(true)}
                         className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
                     >
-                        <span className="text-lg leading-none">+</span> Nueva nómina
+                        <span className="text-lg leading-none">+</span> {t('tenants.finance.payroll.newRun')}
                     </button>
                 </div>
             </div>
@@ -439,26 +451,26 @@ function PayrollRunsView({ companyId, api }) {
             <div className="flex flex-wrap gap-2 text-xs text-slate-600">
                 <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1">
                     <span className="h-2 w-2 rounded-full bg-slate-500" />
-                    Total: {stats.total}
+                    {t('tenants.finance.payroll.totalCount', { count: stats.total })}
                 </span>
                 <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1">
                     <span className="h-2 w-2 rounded-full bg-slate-400" />
-                    Borrador: {stats.draft}
+                    {t('tenants.finance.payroll.draftCount', { count: stats.draft })}
                 </span>
                 <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-3 py-1 text-blue-700">
                     <span className="h-2 w-2 rounded-full bg-blue-500" />
-                    Procesando: {stats.processing}
+                    {t('tenants.finance.payroll.processingCount', { count: stats.processing })}
                 </span>
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-emerald-700">
                     <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                    Pagado: {stats.paid}
+                    {t('tenants.finance.payroll.paidCount', { count: stats.paid })}
                 </span>
             </div>
 
             {showCreate && (
                 <form onSubmit={handleCreate} className="bg-slate-50 p-4 rounded-lg border border-slate-200 grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
                     <div>
-                        <label className="block text-xs font-medium text-slate-500 mb-1">Inicio Periodo</label>
+                        <label className="block text-xs font-medium text-slate-500 mb-1">{t('tenants.finance.payroll.periodStart')}</label>
                         <input 
                             type="date" required
                             value={newRun.period_start}
@@ -467,7 +479,7 @@ function PayrollRunsView({ companyId, api }) {
                         />
                     </div>
                     <div>
-                        <label className="block text-xs font-medium text-slate-500 mb-1">Fin Periodo</label>
+                        <label className="block text-xs font-medium text-slate-500 mb-1">{t('tenants.finance.payroll.periodEnd')}</label>
                         <input 
                             type="date" required
                             value={newRun.period_end}
@@ -476,7 +488,7 @@ function PayrollRunsView({ companyId, api }) {
                         />
                     </div>
                     <div>
-                        <label className="block text-xs font-medium text-slate-500 mb-1">Fecha Pago</label>
+                        <label className="block text-xs font-medium text-slate-500 mb-1">{t('tenants.finance.payroll.paymentDate')}</label>
                         <input 
                             type="date" required
                             value={newRun.payment_date}
@@ -485,55 +497,55 @@ function PayrollRunsView({ companyId, api }) {
                         />
                     </div>
                     <div className="flex gap-2">
-                        <button type="submit" className="flex-1 bg-emerald-600 text-white px-3 py-2 rounded-md text-sm hover:bg-emerald-700">Crear</button>
-                        <button type="button" onClick={() => setShowCreate(false)} className="bg-white border border-slate-300 text-slate-600 px-3 py-2 rounded-md text-sm hover:bg-slate-50">Cancelar</button>
+                        <button type="submit" className="flex-1 bg-emerald-600 text-white px-3 py-2 rounded-md text-sm hover:bg-emerald-700">{t('tenants.common.create')}</button>
+                        <button type="button" onClick={() => setShowCreate(false)} className="bg-white border border-slate-300 text-slate-600 px-3 py-2 rounded-md text-sm hover:bg-slate-50">{t('tenants.common.cancel')}</button>
                     </div>
                 </form>
             )}
 
             {loading ? (
-                <div className="text-center py-10 text-slate-500">Cargando...</div>
+                <div className="text-center py-10 text-slate-500">{t('tenants.common.loading')}</div>
             ) : runs.length === 0 ? (
                 <div className="text-center py-10 bg-white rounded-lg border border-dashed border-slate-300 text-slate-500">
-                    No hay ejecuciones de nómina registradas.
+                    {t('tenants.finance.payroll.runsEmpty')}
                 </div>
             ) : filteredRuns.length === 0 ? (
                 <div className="text-center py-10 bg-white rounded-lg border border-dashed border-slate-300 text-slate-500">
-                    No hay ejecuciones con el estado seleccionado.
+                    {t('tenants.finance.payroll.runsEmptyFilter')}
                 </div>
             ) : (
                 <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
                     <table className="min-w-full divide-y divide-slate-200">
                         <thead className="bg-slate-50">
                             <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Periodo</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Fecha Pago</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Estado</th>
-                                <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Total</th>
-                                <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Acciones</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">{t('tenants.finance.payroll.period')}</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">{t('tenants.finance.payroll.paymentDate')}</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">{t('tenants.common.status')}</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">{t('tenants.finance.payroll.total')}</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">{t('tenants.common.actions')}</th>
                             </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-slate-200">
                             {filteredRuns.map(run => (
                                 <tr key={run.id} className="hover:bg-slate-50 transition-colors cursor-pointer" onClick={() => setSelectedRun(run)}>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 font-medium">
-                                        {run.period_start} al {run.period_end}
+                                        {t('tenants.finance.payroll.periodRange', { start: run.period_start, end: run.period_end })}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                                        {run.payment_date || '—'}
+                                        {run.payment_date || t('tenants.common.notAvailable')}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
                                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
                                             ${run.status === 'paid' ? 'bg-emerald-100 text-emerald-800' : 
                                               run.status === 'processing' ? 'bg-blue-100 text-blue-800' : 
                                               'bg-slate-100 text-slate-800'}`}>
-                                            {run.status === 'paid' ? 'Pagado' : 
-                                             run.status === 'processing' ? 'Procesando' : 
-                                             'Borrador'}
+                                            {run.status === 'paid' ? t('tenants.finance.payroll.status.paid') : 
+                                             run.status === 'processing' ? t('tenants.finance.payroll.status.processing') : 
+                                             t('tenants.finance.payroll.status.draft')}
                                         </span>
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-slate-900">
-                                        {run.total_amount ? `$${Number(run.total_amount).toFixed(2)}` : '—'}
+                                        {run.total_amount ? `$${Number(run.total_amount).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : t('tenants.common.notAvailable')}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                         <button
@@ -544,7 +556,7 @@ function PayrollRunsView({ companyId, api }) {
                                             }}
                                             className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-900"
                                         >
-                                            <span>Ver detalles</span>
+                                            <span>{t('tenants.common.viewDetail')}</span>
                                             <i className="bi bi-arrow-right-short" />
                                         </button>
                                     </td>
@@ -570,18 +582,19 @@ function PayrollRunsView({ companyId, api }) {
 // --- Main Component ---
 
 export default function TenantPayrollTab({ companyId, api }) {
+    const { t } = useI18n();
     const [activeTab, setActiveTab] = useState('runs');
 
     const tabs = [
-        { id: 'runs', label: 'Ejecuciones' },
-        { id: 'settings', label: 'Configuración' }
+        { id: 'runs', label: t('tenants.finance.payroll.tabRuns') },
+        { id: 'settings', label: t('tenants.finance.payroll.tabSettings') }
     ];
 
     return (
         <div className="space-y-6">
             {/* Tabs Header */}
             <div className="border-b border-slate-200">
-                <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+                <nav className="-mb-px flex space-x-8" aria-label={t('tenants.finance.payroll.tabsLabel')}>
                     {tabs.map((tab) => (
                         <button
                             key={tab.id}

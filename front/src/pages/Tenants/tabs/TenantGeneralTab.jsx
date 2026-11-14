@@ -1,8 +1,11 @@
 // src/pages/tenants/tabs/TenantGeneralTab.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { normalizePageResponse } from '../../../lib/pagination';
+import { useI18n } from '../../../i18n/I18nContext';
 
 export default function TenantGeneralTab({ companyId, api }) {
+    const { t, language } = useI18n();
+    const locale = language === 'en' ? 'en-US' : 'es-ES';
     const [data, setData] = useState(null);
     const [err, setErr] = useState('');
 
@@ -21,7 +24,7 @@ export default function TenantGeneralTab({ companyId, api }) {
                 const d = await api.get(`/api/tenants/${companyId}`);
                 setData(d);
             } catch (e) {
-                setErr(e?.message || 'No se pudo cargar el tenant');
+                setErr(e?.message || t('tenants.legacy.general.loadError'));
             }
         })();
     }, [companyId, api]);
@@ -46,7 +49,7 @@ export default function TenantGeneralTab({ companyId, api }) {
                 setCurrencies(outCurrencies.items || []);
                 setTimezones(outTimezones.items || []);
             } catch (e) {
-                setLookupsErr(e?.message || 'No se pudieron cargar los catálogos');
+                setLookupsErr(e?.message || t('tenants.legacy.general.lookupsLoadError'));
             } finally {
                 setLookupsLoading(false);
             }
@@ -92,34 +95,40 @@ export default function TenantGeneralTab({ companyId, api }) {
         wallet?.currency ||
         (wallet?.currency_id ? currenciesById.get(String(wallet.currency_id)) : null);
 
+    const statusKey = company?.status ? `tenants.common.${company.status}` : '';
+    const translatedStatus = statusKey ? t(statusKey) : '';
+    const statusLabel = company?.status
+        ? (translatedStatus === statusKey ? company.status : translatedStatus)
+        : '—';
+
     if (err) return <div className="text-sm text-red-700">{err}</div>;
-    if (!company) return <div className="text-sm text-slate-600">Cargando...</div>;
+    if (!company) return <div className="text-sm text-slate-600">{t('tenants.common.loading')}</div>;
 
     return (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="rounded-2xl border border-slate-200 p-4 bg-white">
-                <div className="text-xs font-semibold tracking-widest text-slate-500 uppercase">Datos</div>
+                <div className="text-xs font-semibold tracking-widest text-slate-500 uppercase">{t('tenants.legacy.general.data')}</div>
 
                 {lookupsErr ? (
                     <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                        No se pudieron cargar catálogos (Países/Monedas/Zonas horarias).
+                        {t('tenants.legacy.general.lookupsWarning')}
                         <div className="mt-1 text-xs text-amber-800">{lookupsErr}</div>
                     </div>
                 ) : null}
 
                 <div className="mt-3 space-y-2 text-sm">
                     <div>
-                        <span className="text-slate-500">Razón social:</span>{' '}
+                        <span className="text-slate-500">{t('tenants.legacy.general.legalName')}</span>{' '}
                         <span className="font-semibold">{company.legal_name}</span>
                     </div>
 
                     <div>
-                        <span className="text-slate-500">Comercial:</span>{' '}
+                        <span className="text-slate-500">{t('tenants.legacy.general.tradeName')}</span>{' '}
                         <span className="font-semibold">{company.trade_name || '—'}</span>
                     </div>
 
                     <div>
-                        <span className="text-slate-500">País:</span>{' '}
+                        <span className="text-slate-500">{t('tenants.legacy.general.country')}</span>{' '}
                         {countryObj ? (
                             <span className="font-semibold">
                                 {countryObj.iso2} — {countryObj.name}
@@ -131,7 +140,7 @@ export default function TenantGeneralTab({ companyId, api }) {
                     </div>
 
                     <div>
-                        <span className="text-slate-500">Moneda base:</span>{' '}
+                        <span className="text-slate-500">{t('tenants.legacy.general.baseCurrency')}</span>{' '}
                         {currencyObj ? (
                             <span className="font-semibold">
                                 {currencyObj.code} — {currencyObj.name}
@@ -144,7 +153,7 @@ export default function TenantGeneralTab({ companyId, api }) {
                     </div>
 
                     <div>
-                        <span className="text-slate-500">Zona horaria:</span>{' '}
+                        <span className="text-slate-500">{t('tenants.legacy.general.timezone')}</span>{' '}
                         {tzObj ? (
                             <span className="font-semibold">{tzObj.name || tzObj.timezone || tzObj.value || '—'}</span>
                         ) : (
@@ -153,23 +162,23 @@ export default function TenantGeneralTab({ companyId, api }) {
                     </div>
 
                     <div>
-                        <span className="text-slate-500">Estado:</span>{' '}
-                        <span className="font-semibold">{company.status || '—'}</span>
+                        <span className="text-slate-500">{t('tenants.common.status')}:</span>{' '}
+                        <span className="font-semibold">{statusLabel}</span>
                     </div>
                 </div>
             </div>
 
             <div className="rounded-2xl border border-slate-200 p-4 bg-white">
-                <div className="text-xs font-semibold tracking-widest text-slate-500 uppercase">Resumen</div>
+                <div className="text-xs font-semibold tracking-widest text-slate-500 uppercase">{t('tenants.legacy.general.summary')}</div>
 
                 <div className="mt-3 grid grid-cols-2 gap-3">
                     <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
-                        <div className="text-xs text-slate-500">Wallet</div>
+                        <div className="text-xs text-slate-500">{t('tenants.legacy.general.wallet')}</div>
                         <div className="text-lg font-bold text-slate-900">{wallet?.balance ?? '—'}</div>
                     </div>
 
                     <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
-                        <div className="text-xs text-slate-500">Wallet currency</div>
+                        <div className="text-xs text-slate-500">{t('tenants.legacy.general.walletCurrency')}</div>
                         <div className="text-lg font-bold text-slate-900">
                             {walletCurrencyObj ? (
                                 <>
@@ -184,18 +193,18 @@ export default function TenantGeneralTab({ companyId, api }) {
 
                     {/* Placeholders hasta tener endpoints reales */}
                     <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
-                        <div className="text-xs text-slate-500">Invoices</div>
+                        <div className="text-xs text-slate-500">{t('tenants.legacy.general.invoices')}</div>
                         <div className="text-lg font-bold text-slate-900">—</div>
                     </div>
 
                     <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
-                        <div className="text-xs text-slate-500">Proyectos</div>
+                        <div className="text-xs text-slate-500">{t('tenants.legacy.general.projects')}</div>
                         <div className="text-lg font-bold text-slate-900">—</div>
                     </div>
                 </div>
 
                 {lookupsLoading ? (
-                    <div className="mt-3 text-xs text-slate-500">Cargando catálogos…</div>
+                    <div className="mt-3 text-xs text-slate-500">{t('tenants.legacy.general.loadingCatalogs')}</div>
                 ) : null}
             </div>
         </div>

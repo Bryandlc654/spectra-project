@@ -5,8 +5,11 @@ import { createApi } from '../../../lib/api';
 import { useToast } from '../../../components/ToastProvider';
 import { normalizePageResponse } from '../../../lib/pagination';
 import CriticalActionModal from '../../../components/CriticalActionModal';
+import { useI18n } from '../../../i18n/I18nContext';
 
 export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
+  const { t, language } = useI18n();
+  const locale = language === 'en' ? 'en-US' : 'es-ES';
   const { user } = useAuth();
   const isSupport = user?.platform_role === PLATFORM_ROLES.SUPPORT;
   const api = useMemo(() => createApi({ baseUrl: apiUrl, token }), [apiUrl, token]);
@@ -70,7 +73,7 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
         setOnboardingLoading(true);
         api.get(`/api/onboarding/tasks/${viewOnboarding.user_id}`)
            .then(data => setOnboardingTasks(data || []))
-           .catch(e => toast.error('Error cargando tareas'))
+           .catch(e => toast.error(t('tenants.finance.members.onboardingLoadError')))
            .finally(() => setOnboardingLoading(false));
     }
   }, [viewOnboarding]);
@@ -94,7 +97,7 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
       setMembers(out.items || []);
     } catch (e) {
       console.error(e);
-      setErr('No se pudieron cargar los miembros. ' + (e.message || ''));
+      setErr(t('tenants.finance.members.membersLoadError') + ' ' + (e.message || ''));
     } finally {
       setLoading(false);
     }
@@ -158,10 +161,10 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
       setSelectedRole('');
       setInviteEmail('');
       setInviteName('');
-      toast.success(mode === 'search' ? 'Usuario agregado correctamente' : 'Invitación enviada correctamente');
+      toast.success(mode === 'search' ? t('tenants.finance.members.added') : t('tenants.finance.members.invited'));
       loadMembers();
     } catch (e) {
-      toast.error(e.message || 'Error al procesar solicitud');
+      toast.error(e.message || t('tenants.finance.members.requestError'));
     } finally {
       setAdding(false);
     }
@@ -179,26 +182,26 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
     try {
       if (type === 'remove_member') {
         await api.del(`/api/companies/${companyId}/members/${member.id}`, { reason });
-        toast.success('Acceso revocado correctamente');
+        toast.success(t('tenants.finance.members.accessRevoked'));
         loadMembers();
       } else if (type === 'resend_invite') {
         await api.post(`/api/companies/${companyId}/members/${member.id}/resend-invite`);
-        toast.success('Invitación reenviada');
+        toast.success(t('tenants.finance.members.inviteResent'));
       } else if (type === 'toggle_access') {
         await api.post(`/api/companies/${companyId}/members/${member.id}/toggle-access`);
-        toast.success('Acceso actualizado');
+        toast.success(t('tenants.finance.members.accessUpdated'));
         loadMembers();
       } else if (type === 'reset_role') {
         await api.post(`/api/companies/${companyId}/members/${member.id}/reset-role`);
-        toast.success('Rol reseteado a defaults');
+        toast.success(t('tenants.finance.members.roleReset'));
         loadMembers();
       } else if (type === 'force_password') {
         await api.post(`/api/companies/${companyId}/members/${member.id}/force-password-reset`);
-        toast.success('Se solicitará cambio de contraseña al usuario');
+        toast.success(t('tenants.finance.members.passwordResetRequested'));
       }
       setPendingAction(null);
     } catch (e) {
-      toast.error(e.message || 'Error al ejecutar acción');
+      toast.error(e.message || t('tenants.finance.members.actionError'));
     } finally {
       setActionLoading(false);
     }
@@ -211,40 +214,40 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
               user_id: assignManager.user_id,
               manager_id: selectedManager.id
           });
-          toast.success('Manager asignado correctamente');
+          toast.success(t('tenants.finance.members.managerAssigned'));
           setAssignManager(null);
           loadMembers(); // Reload to show new manager
       } catch (e) {
-          toast.error(e.message || 'Error al asignar manager');
+          toast.error(e.message || t('tenants.finance.members.managerAssignError'));
       }
   }
 
-  if (loading && !members.length) return <div className="py-8 text-center text-slate-500">Cargando miembros...</div>;
+  if (loading && !members.length) return <div className="py-8 text-center text-slate-500">{t('tenants.finance.members.loadingMembers')}</div>;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-bold text-slate-800">Usuarios con Acceso</h3>
+        <h3 className="text-lg font-bold text-slate-800">{t('tenants.finance.members.title')}</h3>
         {!isSupport && (
           <button
               onClick={() => setOpenAdd(true)}
               disabled={readOnly || roles.length === 0}
               className="rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white hover:bg-brand/90 disabled:opacity-50"
           >
-              + Asignar Usuario
+              + {t('tenants.finance.members.assignUser')}
           </button>
         )}
       </div>
 
       {readOnly && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Modo Solo Lectura activo. No se pueden agregar ni modificar miembros.
+          {t('tenants.finance.members.readOnlyWarning')}
         </div>
       )}
 
       {!readOnly && roles.length === 0 && (
         <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-          No hay roles definidos. Define roles en la pestaña Roles para poder asignar usuarios.
+          {t('tenants.finance.members.noRoles')}
         </div>
       )}
 
@@ -252,7 +255,7 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
 
       {!members.length && !loading && !err && (
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center text-slate-500">
-              No hay usuarios asignados a esta empresa.
+              {t('tenants.finance.members.empty')}
           </div>
       )}
 
@@ -261,12 +264,12 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
             <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-slate-500">
                     <tr>
-                        <th className="px-4 py-3 text-left font-semibold">Usuario</th>
-                        <th className="px-4 py-3 text-left font-semibold">Email</th>
-                        <th className="px-4 py-3 text-left font-semibold">Manager</th>
-                        <th className="px-4 py-3 text-left font-semibold">Estado</th>
-                        <th className="px-4 py-3 text-left font-semibold">Rol Asignado</th>
-                        {!isSupport && !readOnly && <th className="px-4 py-3 text-right font-semibold">Acciones</th>}
+                        <th className="px-4 py-3 text-left font-semibold">{t('tenants.finance.members.user')}</th>
+                        <th className="px-4 py-3 text-left font-semibold">{t('tenants.common.email')}</th>
+                        <th className="px-4 py-3 text-left font-semibold">{t('tenants.finance.members.manager')}</th>
+                        <th className="px-4 py-3 text-left font-semibold">{t('tenants.common.status')}</th>
+                        <th className="px-4 py-3 text-left font-semibold">{t('tenants.finance.members.assignedRole')}</th>
+                        {!isSupport && !readOnly && <th className="px-4 py-3 text-right font-semibold">{t('tenants.common.actions')}</th>}
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -284,12 +287,12 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
                                         <i className="bi bi-person-video2 mr-1"></i> {m.manager_name}
                                     </span>
                                 ) : (
-                                    <span className="text-slate-400 italic text-xs">Sin asignar</span>
+                                    <span className="text-slate-400 italic text-xs">{t('tenants.finance.members.unassigned')}</span>
                                 )}
                             </td>
                             <td className="px-4 py-3">
                                 <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${m.active !== false ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
-                                    {m.active !== false ? 'Activo' : 'Desactivado'}
+                                    {m.active !== false ? t('tenants.common.active') : t('tenants.finance.members.deactivated')}
                                 </span>
                             </td>
                             <td className="px-4 py-3">
@@ -312,30 +315,30 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
                                     {openActionMenu === m.id && (
                                         <div className="absolute right-8 top-8 z-50 w-56 origin-top-right rounded-xl bg-white shadow-xl ring-1 ring-black/5 focus:outline-none py-1 text-left">
                                             <button onClick={() => setViewOnboarding(m)} className="block w-full px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left">
-                                                <i className="bi bi-list-check mr-2"/> Ver Onboarding
+                                                <i className="bi bi-list-check mr-2"/> {t('tenants.finance.members.viewOnboarding')}
                                             </button>
                                             <button onClick={() => setAssignManager(m)} className="block w-full px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left">
-                                                <i className="bi bi-diagram-3 mr-2"/> Asignar Manager
+                                                <i className="bi bi-diagram-3 mr-2"/> {t('tenants.finance.members.assignManager')}
                                             </button>
                                             <div className="border-t border-slate-100 my-1"></div>
                                             <button onClick={() => openActionConfirm('resend_invite', m)} className="block w-full px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left">
-                                                <i className="bi bi-envelope mr-2"/> Reenviar invitación
+                                                <i className="bi bi-envelope mr-2"/> {t('tenants.finance.members.resendInvite')}
                                             </button>
                                             <button onClick={() => openActionConfirm('toggle_access', m)} className="block w-full px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left">
-                                                <i className={`bi bi-${m.active !== false ? 'slash-circle' : 'check-circle'} mr-2`}/> {m.active !== false ? 'Desactivar acceso' : 'Reactivar acceso'}
+                                                <i className={`bi bi-${m.active !== false ? 'slash-circle' : 'check-circle'} mr-2`}/> {m.active !== false ? t('tenants.finance.members.disableAccess') : t('tenants.finance.members.enableAccess')}
                                             </button>
                                             <button onClick={() => openActionConfirm('reset_role', m)} className="block w-full px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left">
-                                                <i className="bi bi-arrow-counterclockwise mr-2"/> Resetear rol
+                                                <i className="bi bi-arrow-counterclockwise mr-2"/> {t('tenants.finance.members.resetRole')}
                                             </button>
                                             <button onClick={() => openActionConfirm('force_password', m)} className="block w-full px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left">
-                                                <i className="bi bi-key mr-2"/> Forzar cambio pass
+                                                <i className="bi bi-key mr-2"/> {t('tenants.finance.members.forcePassword')}
                                             </button>
                                             <div className="border-t border-slate-100 my-1"></div>
                                             <button 
                                                 onClick={() => openActionConfirm('remove_member', m)}
                                                 className="block w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50 text-left font-medium"
                                             >
-                                                <i className="bi bi-trash mr-2"/> Revocar acceso
+                                                <i className="bi bi-trash mr-2"/> {t('tenants.finance.members.revokeAccess')}
                                             </button>
                                         </div>
                                     )}
@@ -354,7 +357,7 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
           <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setOpenAdd(false)} />
           <div className="relative w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
-              <h3 className="text-lg font-bold text-slate-900">Asignar Usuario a Empresa</h3>
+              <h3 className="text-lg font-bold text-slate-900">{t('tenants.finance.members.addModalTitle')}</h3>
               <button onClick={() => setOpenAdd(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-600">
                 <i className="bi bi-x-lg" />
               </button>
@@ -369,21 +372,21 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
                     onClick={() => setMode('search')} 
                     className={`pb-2 text-sm font-semibold transition-colors ${mode==='search'?'text-brand border-b-2 border-brand':'text-slate-500 hover:text-slate-700'}`}
                   >
-                    Buscar Usuario
+                    {t('tenants.finance.members.searchUserTab')}
                   </button>
                   <button 
                     type="button"
                     onClick={() => setMode('invite')} 
                     className={`pb-2 text-sm font-semibold transition-colors ${mode==='invite'?'text-brand border-b-2 border-brand':'text-slate-500 hover:text-slate-700'}`}
                   >
-                    Invitar por Email
+                    {t('tenants.finance.members.inviteByEmail')}
                   </button>
               </div>
 
               {/* User Search */}
               {mode === 'search' ? (
                   <div className="space-y-2">
-                      <label className="text-sm font-semibold text-slate-700">Buscar Usuario</label>
+                      <label className="text-sm font-semibold text-slate-700">{t('tenants.finance.members.searchUserLabel')}</label>
                       {!selectedUser ? (
                           <div className="relative">
                             <input
@@ -391,7 +394,7 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
                                 value={searchUser}
                                 onChange={(e) => setSearchUser(e.target.value)}
                                 className="w-full rounded-lg border-slate-300 py-2 pl-10 text-sm focus:border-brand focus:ring-brand"
-                                placeholder="Nombre o email..."
+                                placeholder={t('tenants.finance.members.searchUserPlaceholder')}
                             />
                             <i className="bi bi-search absolute left-3 top-2.5 text-slate-400" />
                             
@@ -426,39 +429,39 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
               ) : (
                   <>
                     <div className="space-y-2">
-                        <label className="text-sm font-semibold text-slate-700">Email del Usuario</label>
+                        <label className="text-sm font-semibold text-slate-700">{t('tenants.finance.members.inviteEmailLabel')}</label>
                         <input
                             type="email"
                             required
                             value={inviteEmail}
                             onChange={(e) => setInviteEmail(e.target.value)}
                             className="w-full rounded-lg border-slate-300 py-2 text-sm focus:border-brand focus:ring-brand"
-                            placeholder="colaborador@ejemplo.com"
+                            placeholder={t('tenants.finance.members.inviteEmailPlaceholder')}
                         />
                     </div>
                     <div className="space-y-2">
-                        <label className="text-sm font-semibold text-slate-700">Nombre Completo</label>
+                        <label className="text-sm font-semibold text-slate-700">{t('tenants.finance.members.fullName')}</label>
                         <input
                             type="text"
                             required
                             value={inviteName}
                             onChange={(e) => setInviteName(e.target.value)}
                             className="w-full rounded-lg border-slate-300 py-2 text-sm focus:border-brand focus:ring-brand"
-                            placeholder="Juan Pérez"
+                            placeholder={t('tenants.finance.members.fullNamePlaceholder')}
                         />
                     </div>
                   </>
               )}
 
               <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-700">Rol en la Empresa</label>
+                  <label className="text-sm font-semibold text-slate-700">{t('tenants.finance.members.companyRole')}</label>
                   <select
                     required
                     value={selectedRole}
                     onChange={(e) => setSelectedRole(e.target.value)}
                     className="w-full rounded-lg border-slate-300 py-2 text-sm focus:border-brand focus:ring-brand"
                   >
-                      <option value="">Seleccionar Rol...</option>
+                      <option value="">{t('tenants.finance.members.selectRole')}</option>
                       {(Array.isArray(roles) ? roles : Array.isArray(roles?.data) ? roles.data : Array.isArray(roles?.items) ? roles.items : []).map(r => (
                           <option key={r.id} value={r.id}>{r.name}</option>
                       ))}
@@ -471,7 +474,7 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
                     disabled={adding}
                     className="rounded-xl bg-brand px-6 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-brand/90 disabled:opacity-50"
                   >
-                      {adding ? 'Procesando...' : (mode === 'search' ? 'Asignar Usuario' : 'Enviar Invitación')}
+                      {adding ? t('tenants.finance.members.processing') : (mode === 'search' ? t('tenants.finance.members.assignUserAction') : t('tenants.finance.members.sendInvite'))}
                   </button>
               </div>
             </form>
@@ -486,8 +489,8 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
           <div className="relative w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl flex flex-col max-h-[90vh]">
              <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 bg-slate-50">
                 <div>
-                    <h3 className="text-lg font-bold text-slate-900">Progreso de Onboarding</h3>
-                    <p className="text-sm text-slate-500">Empleado: {viewOnboarding.user_name}</p>
+                    <h3 className="text-lg font-bold text-slate-900">{t('tenants.finance.members.onboardingTitle')}</h3>
+                    <p className="text-sm text-slate-500">{t('tenants.finance.members.onboardingEmployee', { name: viewOnboarding.user_name })}</p>
                 </div>
                 <button onClick={() => setViewOnboarding(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-600">
                     <i className="bi bi-x-lg" />
@@ -496,10 +499,10 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
              
              <div className="flex-1 overflow-y-auto p-6">
                 {onboardingLoading ? (
-                    <div className="text-center py-8 text-slate-500">Cargando tareas...</div>
+                    <div className="text-center py-8 text-slate-500">{t('tenants.finance.members.onboardingLoading')}</div>
                 ) : onboardingTasks.length === 0 ? (
                     <div className="text-center py-8 text-slate-500 border-2 border-dashed border-slate-200 rounded-xl">
-                        Este usuario no tiene tareas de onboarding asignadas.
+                        {t('tenants.finance.members.onboardingEmpty')}
                     </div>
                 ) : (
                     <div className="space-y-3">
@@ -515,7 +518,7 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
                                     <p className="text-xs text-slate-500 mt-0.5">{task.description}</p>
                                     {task.completed_at && (
                                         <p className="text-[10px] text-emerald-600 mt-1 font-medium">
-                                            Completado el {new Date(task.completed_at).toLocaleDateString()}
+                                            {t('tenants.finance.members.onboardingCompleted', { date: new Date(task.completed_at).toLocaleDateString(locale) })}
                                         </p>
                                     )}
                                 </div>
@@ -534,7 +537,7 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
             <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setAssignManager(null)} />
             <div className="relative w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
                 <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
-                    <h3 className="text-lg font-bold text-slate-900">Asignar Manager</h3>
+                    <h3 className="text-lg font-bold text-slate-900">{t('tenants.finance.members.assignManagerTitle')}</h3>
                     <button onClick={() => setAssignManager(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-600">
                         <i className="bi bi-x-lg" />
                     </button>
@@ -542,11 +545,11 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
                 
                 <div className="p-6 space-y-4">
                     <p className="text-sm text-slate-600">
-                        Asigna un manager a <strong>{assignManager.user_name}</strong> para construir el organigrama.
+                        {t('tenants.finance.members.assignManagerHintStart')} <strong>{assignManager.user_name}</strong> {t('tenants.finance.members.assignManagerHintEnd')}
                     </p>
 
                     <div className="space-y-2">
-                        <label className="text-sm font-semibold text-slate-700">Buscar Manager</label>
+                        <label className="text-sm font-semibold text-slate-700">{t('tenants.finance.members.searchManagerLabel')}</label>
                         {!selectedManager ? (
                             <div className="relative">
                                 <input
@@ -554,7 +557,7 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
                                     value={managerSearch}
                                     onChange={(e) => setManagerSearch(e.target.value)}
                                     className="w-full rounded-lg border-slate-300 py-2 pl-10 text-sm focus:border-brand focus:ring-brand"
-                                    placeholder="Nombre del manager..."
+                                    placeholder={t('tenants.finance.members.searchManagerPlaceholder')}
                                 />
                                 <i className="bi bi-search absolute left-3 top-2.5 text-slate-400" />
                                 
@@ -593,7 +596,7 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
                             disabled={!selectedManager}
                             className="rounded-xl bg-brand px-6 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-brand/90 disabled:opacity-50"
                         >
-                            Guardar Asignación
+                            {t('tenants.finance.members.saveAssignment')}
                         </button>
                     </div>
                 </div>
@@ -607,15 +610,15 @@ export default function TenantMembersTab({ companyId, apiUrl, token, tenant }) {
         onConfirm={confirmAction}
         loading={actionLoading}
         title={
-            pendingAction?.type === 'remove_member' ? 'Revocar Acceso' : 
-            pendingAction?.type === 'resend_invite' ? 'Reenviar Invitación' :
-            pendingAction?.type === 'toggle_access' ? 'Cambiar Acceso' :
-            pendingAction?.type === 'reset_role' ? 'Resetear Rol' :
-            'Acción Crítica'
+            pendingAction?.type === 'remove_member' ? t('tenants.finance.members.revokeAccessTitle') : 
+            pendingAction?.type === 'resend_invite' ? t('tenants.finance.members.resendInviteTitle') :
+            pendingAction?.type === 'toggle_access' ? t('tenants.finance.members.changeAccessTitle') :
+            pendingAction?.type === 'reset_role' ? t('tenants.finance.members.resetRoleTitle') :
+            t('tenants.finance.members.criticalActionTitle')
         }
         message={
-            pendingAction?.type === 'remove_member' ? `¿Estás seguro de eliminar a ${pendingAction?.member.user_name}?` :
-            'Confirma que deseas realizar esta acción.'
+            pendingAction?.type === 'remove_member' ? t('tenants.finance.members.confirmRemove', { name: pendingAction?.member.user_name }) :
+            t('tenants.finance.members.confirmGeneric')
         }
         requireReason={pendingAction?.type === 'remove_member'}
       />

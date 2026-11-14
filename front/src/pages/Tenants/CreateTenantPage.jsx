@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { createApi } from '../../lib/api';
 import { useToast } from '../../components/ToastProvider';
 import { normalizePageResponse } from '../../lib/pagination';
+import { useI18n } from '../../i18n/I18nContext';
 
 function StepIndicator({ currentStep, steps }) {
   return (
@@ -45,6 +46,7 @@ function StepIndicator({ currentStep, steps }) {
 export default function CreateTenantPage({ apiUrl, token }) {
   const navigate = useNavigate();
   const toast = useToast();
+  const { t } = useI18n();
   const api = useMemo(() => createApi({ baseUrl: apiUrl, token }), [apiUrl, token]);
 
   const [step, setStep] = useState(1);
@@ -53,8 +55,8 @@ export default function CreateTenantPage({ apiUrl, token }) {
   
   // Lookups
   const [countries, setCountries] = useState([]);
-  const [timezones, setTimezones] = useState([]);
   const [currencies, setCurrencies] = useState([]);
+  const [timezones, setTimezones] = useState([]);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -62,11 +64,10 @@ export default function CreateTenantPage({ apiUrl, token }) {
     legal_name: '',
     trade_name: '',
     country_id: '',
-    timezone_id: '',
     status: 'active', // active, pending, suspended
     default_currency_id: '',
+    timezone_id: '',
     logo: null, // Nuevo campo para logo
-    per_freelancer_fee: '',
     
     // Step 2: Fiscal
     tax_id: '',
@@ -81,6 +82,7 @@ export default function CreateTenantPage({ apiUrl, token }) {
     // Step 4: Init
     create_default_roles: true,
     activate_templates: true,
+    kyb_required: true,
   });
 
   useEffect(() => {
@@ -91,17 +93,17 @@ export default function CreateTenantPage({ apiUrl, token }) {
   async function loadLookups() {
     setLookupsLoading(true);
     try {
-      const [cRes, tRes, curRes] = await Promise.all([
+      const [cRes, curRes, tzRes] = await Promise.all([
         api.get('/api/countries?per_page=200'),
-        api.get('/api/timezones?per_page=200'),
         api.get('/api/currencies?per_page=200'),
+        api.get('/api/timezones?per_page=200'),
       ]);
 
       setCountries(normalizePageResponse(cRes).items);
-      setTimezones(normalizePageResponse(tRes).items);
       setCurrencies(normalizePageResponse(curRes).items);
+      setTimezones(normalizePageResponse(tzRes).items);
     } catch (e) {
-      toast.error('Error cargando catálogos: ' + e.message);
+      toast.error(t('tenants.detail.create.catalogLoadError', { error: e.message }));
     } finally {
       setLookupsLoading(false);
     }
@@ -111,14 +113,39 @@ export default function CreateTenantPage({ apiUrl, token }) {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  // Zona horaria sugerida por país (el usuario puede cambiarla)
+  const COUNTRY_TZ = { PE: 'America/Lima', CL: 'America/Santiago', CO: 'America/Bogota', MX: 'America/Mexico_City', AR: 'America/Argentina/Buenos_Aires', US: 'America/New_York', EC: 'America/Guayaquil' };
+  const handleCountryChange = (countryId) => {
+    const country = countries.find(c => String(c.id) === String(countryId));
+    const code = String(country?.iso2 || country?.code || '').toUpperCase();
+    const tz = timezones.find(z => (z.name || z.identifier || z.tz) === COUNTRY_TZ[code]);
+    setFormData(prev => ({ ...prev, country_id: countryId, timezone_id: tz ? String(tz.id) : prev.timezone_id }));
+  };
+
   // Step 1 Validation
-  const canNextStep1 = formData.legal_name && formData.country_id && formData.timezone_id && formData.default_currency_id;
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  const emailValid = EMAIL_RE.test(String(formData.owner_email || '').trim());
+  const [logoError, setLogoError] = useState('');
+  const canNextStep1 = formData.legal_name.trim() && formData.country_id && formData.default_currency_id && !logoError;
+  // Campos obligatorios que faltan en el paso actual (se muestran junto a "Siguiente")
+  const missingFields = step === 1
+    ? [
+        !formData.legal_name.trim() && t('tenants.detail.create.legalNameLabel'),
+        !formData.country_id && t('tenants.detail.create.countryLabel'),
+        !formData.default_currency_id && t('tenants.detail.create.baseCurrencyLabel'),
+      ].filter(Boolean)
+    : step === 3
+      ? [
+          (!formData.owner_email ? t('tenants.detail.create.adminEmailLabel') : (!emailValid && t('tenants.detail.create.validEmail'))),
+          formData.owner_mode !== 'invite' && !formData.owner_name && t('tenants.detail.create.ownerNameLabel'),
+        ].filter(Boolean)
+      : [];
   
   // Step 2 Validation
   const canNextStep2 = true; 
   
   // Step 3 Validation
-  const canNextStep3 = formData.owner_email && (formData.owner_mode === 'invite' || formData.owner_name);
+  const canNextStep3 = emailValid && (formData.owner_mode === 'invite' || formData.owner_name.trim());
 
   async function handleSubmit() {
     setLoading(true);
@@ -127,8 +154,8 @@ export default function CreateTenantPage({ apiUrl, token }) {
       const payload = {
         ...formData,
         country_id: Number(formData.country_id),
-        timezone_id: Number(formData.timezone_id),
         default_currency_id: Number(formData.default_currency_id),
+        timezone_id: formData.timezone_id ? Number(formData.timezone_id) : undefined,
         invoice_number_start: Number(formData.invoice_number_start),
       };
 
@@ -141,28 +168,28 @@ export default function CreateTenantPage({ apiUrl, token }) {
 
       await api.post('/api/tenants/wizard', data);
 
-      toast.success('Empresa creada y configurada correctamente');
+      toast.success(t('tenants.detail.create.createSuccess'));
       navigate('/dashboard/tenants');
     } catch (e) {
       console.error(e);
-      toast.error(e.message || 'Error al crear la empresa');
+      toast.error(e.message || t('tenants.detail.create.createError'));
     } finally {
       setLoading(false);
     }
   }
 
   const steps = [
-    { label: 'Básico' },
-    { label: 'Fiscal' },
-    { label: 'Admin' },
-    { label: 'Confirmar' },
+    { label: t('tenants.detail.create.steps.basic') },
+    { label: t('tenants.detail.create.steps.tax') },
+    { label: t('tenants.detail.create.steps.admin') },
+    { label: t('tenants.detail.create.steps.confirm') },
   ];
 
   return (
     <div className="max-w-5xl mx-auto py-10 px-4">
       <div className="mb-8 text-center">
-        <h1 className="text-3xl font-bold text-slate-900">Nueva Empresa</h1>
-        <p className="text-slate-500 mt-2">Configura una nueva organización en la plataforma paso a paso.</p>
+        <h1 className="text-3xl font-bold text-slate-900">{t('tenants.detail.create.title')}</h1>
+        <p className="text-slate-500 mt-2">{t('tenants.detail.create.subtitle')}</p>
       </div>
 
       <StepIndicator currentStep={step} steps={steps} />
@@ -172,60 +199,78 @@ export default function CreateTenantPage({ apiUrl, token }) {
         {step === 1 && (
           <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
             <div>
-                <h2 className="text-xl font-bold text-slate-900">Datos de la Organización</h2>
-                <p className="text-sm text-slate-500">Información legal y configuración regional.</p>
+                <h2 className="text-xl font-bold text-slate-900">{t('tenants.detail.create.orgTitle')}</h2>
+                <p className="text-sm text-slate-500">{t('tenants.detail.create.orgSubtitle')}</p>
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="md:col-span-2">
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Logotipo</label>
+                <label htmlFor="tenant-logo" className="block text-sm font-semibold text-slate-700 mb-1">{t('tenants.detail.create.logoLabel')}</label>
                 <div className="relative">
                   <input
+                    id="tenant-logo"
                     type="file"
                     accept="image/png, image/jpeg, image/webp"
-                    onChange={e => handleChange('logo', e.target.files[0])}
+                    aria-describedby="tenant-logo-hint"
+                    onChange={e => {
+                      const file = e.target.files[0] || null;
+                      if (file && !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+                        setLogoError(t('tenants.detail.create.logoInvalidType'));
+                        handleChange('logo', null);
+                      } else if (file && file.size > 2 * 1024 * 1024) {
+                        setLogoError(t('tenants.detail.create.logoTooBig'));
+                        handleChange('logo', null);
+                      } else {
+                        setLogoError('');
+                        handleChange('logo', file);
+                      }
+                    }}
                     className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-brand/10 file:text-brand hover:file:bg-brand/20"
                   />
-                  <p className="text-xs text-slate-400 mt-1">Formatos: PNG, JPG, WEBP. Máx 2MB.</p>
+                  <p id="tenant-logo-hint" className="text-xs text-slate-400 mt-1">{t('tenants.detail.create.logoHint')}</p>
+                  {logoError && <p className="text-xs text-red-600 mt-1" role="alert">{logoError}</p>}
                 </div>
               </div>
 
               <div className="md:col-span-2">
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Razón Social <span className="text-red-500">*</span></label>
+                <label htmlFor="tenant-legal-name" className="block text-sm font-semibold text-slate-700 mb-1">{t('tenants.detail.create.legalNameLabel')} <span className="text-red-500">*</span></label>
                 <div className="relative">
                     <i className="bi bi-building absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
                     <input
                     value={formData.legal_name}
+                    id="tenant-legal-name"
                     onChange={e => handleChange('legal_name', e.target.value)}
                     className="w-full rounded-xl border border-slate-200 pl-10 pr-3 py-2.5 outline-none focus:ring-4 focus:ring-brand/15 focus:border-brand transition"
-                    placeholder="Ej. Spectra Global Inc."
+                    placeholder={t('tenants.detail.create.legalNamePlaceholder')}
                     autoFocus
                     />
                 </div>
               </div>
 
               <div className="md:col-span-2">
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Nombre Comercial</label>
+                <label htmlFor="tenant-trade-name" className="block text-sm font-semibold text-slate-700 mb-1">{t('tenants.detail.create.tradeNameLabel')}</label>
                 <div className="relative">
                     <i className="bi bi-shop absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
                     <input
                     value={formData.trade_name}
+                    id="tenant-trade-name"
                     onChange={e => handleChange('trade_name', e.target.value)}
                     className="w-full rounded-xl border border-slate-200 pl-10 pr-3 py-2.5 outline-none focus:ring-4 focus:ring-brand/15 focus:border-brand transition"
-                    placeholder="Opcional"
+                    placeholder={t('tenants.common.optional')}
                     />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">País <span className="text-red-500">*</span></label>
+                <label htmlFor="tenant-country" className="block text-sm font-semibold text-slate-700 mb-1">{t('tenants.detail.create.countryLabel')} <span className="text-red-500">*</span></label>
                 <select
                   value={formData.country_id}
-                  onChange={e => handleChange('country_id', e.target.value)}
+                    id="tenant-country"
+                  onChange={e => handleCountryChange(e.target.value)}
                   disabled={lookupsLoading}
                   className="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:ring-4 focus:ring-brand/15 focus:border-brand transition bg-white"
                 >
-                  <option value="">Seleccionar País</option>
+                  <option value="">{t('tenants.detail.create.selectCountry')}</option>
                   {countries.map(c => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
@@ -233,14 +278,15 @@ export default function CreateTenantPage({ apiUrl, token }) {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Moneda Base <span className="text-red-500">*</span></label>
+                <label htmlFor="tenant-currency" className="block text-sm font-semibold text-slate-700 mb-1">{t('tenants.detail.create.baseCurrencyLabel')} <span className="text-red-500">*</span></label>
                 <select
                   value={formData.default_currency_id}
+                    id="tenant-currency"
                   onChange={e => handleChange('default_currency_id', e.target.value)}
                   disabled={lookupsLoading}
                   className="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:ring-4 focus:ring-brand/15 focus:border-brand transition bg-white"
                 >
-                  <option value="">Seleccionar Moneda</option>
+                  <option value="">{t('tenants.detail.create.selectCurrency')}</option>
                   {currencies.map(c => (
                     <option key={c.id} value={c.id}>{c.code} - {c.name}</option>
                   ))}
@@ -248,56 +294,35 @@ export default function CreateTenantPage({ apiUrl, token }) {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Zona Horaria <span className="text-red-500">*</span></label>
+                <label htmlFor="tenant-timezone" className="block text-sm font-semibold text-slate-700 mb-1">{t('tenants.detail.create.timezoneLabel')}</label>
                 <select
+                  id="tenant-timezone"
                   value={formData.timezone_id}
                   onChange={e => handleChange('timezone_id', e.target.value)}
                   disabled={lookupsLoading}
                   className="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:ring-4 focus:ring-brand/15 focus:border-brand transition bg-white"
                 >
-                  <option value="">Seleccionar Zona Horaria</option>
-                  {timezones.map(t => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
+                  <option value="">{t('tenants.detail.create.selectTimezone')}</option>
+                  {timezones.map(z => (
+                    <option key={z.id} value={z.id}>{z.name || z.identifier || z.tz}</option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Estado Inicial</label>
+                <label htmlFor="tenant-status" className="block text-sm font-semibold text-slate-700 mb-1">{t('tenants.detail.create.initialStatusLabel')}</label>
                 <select
                   value={formData.status}
+                    id="tenant-status"
                   onChange={e => handleChange('status', e.target.value)}
                   className="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:ring-4 focus:ring-brand/15 focus:border-brand transition bg-white"
                 >
-                  <option value="active">Activo</option>
-                  <option value="pending">Pendiente de Aprobación</option>
-                  <option value="suspended">Suspendido</option>
+                  <option value="active">{t('tenants.common.active')}</option>
+                  <option value="pending">{t('tenants.detail.create.pendingApproval')}</option>
+                  <option value="suspended">{t('tenants.common.suspended')}</option>
                 </select>
               </div>
 
-              <div className="md:col-span-2 pt-4 border-t border-slate-100 mt-2">
-                <h3 className="font-bold text-slate-800 mb-4">Tarifa por Freelancer Activo</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="md:col-span-1">
-                    <label className="block text-sm font-semibold text-slate-700 mb-1">Tarifa por contrato de freelancer</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-                        {currencies.find(c => String(c.id) === String(formData.default_currency_id))?.symbol || '$'}
-                      </span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={formData.per_freelancer_fee}
-                        onChange={e => handleChange('per_freelancer_fee', e.target.value)}
-                        placeholder="Ej. 15.00"
-                        className="w-full rounded-xl border border-slate-200 pl-7 pr-3 py-2.5 outline-none focus:ring-4 focus:ring-brand/15 focus:border-brand transition"
-                      />
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1">Se factura por cada freelancer con contrato activo.</p>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         )}
@@ -306,44 +331,25 @@ export default function CreateTenantPage({ apiUrl, token }) {
         {step === 2 && (
           <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
              <div>
-                <h2 className="text-xl font-bold text-slate-900">Configuración Fiscal</h2>
-                <p className="text-sm text-slate-500">Detalles de facturación e identificación tributaria.</p>
+                <h2 className="text-xl font-bold text-slate-900">{t('tenants.detail.create.taxTitle')}</h2>
+                <p className="text-sm text-slate-500">{t('tenants.detail.create.taxSubtitle')}</p>
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="md:col-span-2">
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Tax ID / RUC / RFC</label>
+                <label htmlFor="tenant-tax-id" className="block text-sm font-semibold text-slate-700 mb-1">Tax ID / RUC / RFC</label>
                 <div className="relative">
                     <i className="bi bi-card-text absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
                     <input
+                    id="tenant-tax-id"
                     value={formData.tax_id}
                     onChange={e => handleChange('tax_id', e.target.value)}
                     className="w-full rounded-xl border border-slate-200 pl-10 pr-3 py-2.5 outline-none focus:ring-4 focus:ring-brand/15 focus:border-brand transition"
-                    placeholder="Identificador fiscal único"
+                    placeholder={t('tenants.detail.create.taxIdPlaceholder')}
                     />
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Serie de Facturación</label>
-                <input
-                  value={formData.invoice_series}
-                  onChange={e => handleChange('invoice_series', e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:ring-4 focus:ring-brand/15 focus:border-brand transition"
-                  placeholder="Ej. F001"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Numeración Inicial</label>
-                <input
-                  type="number"
-                  value={formData.invoice_number_start}
-                  onChange={e => handleChange('invoice_number_start', e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:ring-4 focus:ring-brand/15 focus:border-brand transition"
-                  min="1"
-                />
-              </div>
             </div>
           </div>
         )}
@@ -352,8 +358,8 @@ export default function CreateTenantPage({ apiUrl, token }) {
         {step === 3 && (
           <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
             <div>
-                <h2 className="text-xl font-bold text-slate-900">Administrador de la Empresa</h2>
-                <p className="text-sm text-slate-500">Asigna un usuario responsable (Owner).</p>
+                <h2 className="text-xl font-bold text-slate-900">{t('tenants.detail.create.adminTitle')}</h2>
+                <p className="text-sm text-slate-500">{t('tenants.detail.create.adminSubtitle')}</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -366,8 +372,8 @@ export default function CreateTenantPage({ apiUrl, token }) {
                   className="absolute top-4 right-4 text-brand focus:ring-brand"
                 />
                 <i className="bi bi-person-plus text-2xl text-brand mb-2"></i>
-                <span className="font-semibold text-slate-800">Crear nuevo usuario</span>
-                <span className="text-xs text-slate-500 mt-1">Registrar una nueva cuenta de usuario.</span>
+                <span className="font-semibold text-slate-800">{t('tenants.detail.create.createUserTitle')}</span>
+                <span className="text-xs text-slate-500 mt-1">{t('tenants.detail.create.createUserHint')}</span>
               </label>
 
               <label className={`relative flex flex-col p-4 border rounded-xl cursor-pointer transition-all ${formData.owner_mode === 'invite' ? 'border-brand bg-brand/5 ring-1 ring-brand' : 'border-slate-200 hover:border-slate-300'}`}>
@@ -379,36 +385,38 @@ export default function CreateTenantPage({ apiUrl, token }) {
                   className="absolute top-4 right-4 text-brand focus:ring-brand"
                 />
                 <i className="bi bi-envelope-paper text-2xl text-brand mb-2"></i>
-                <span className="font-semibold text-slate-800">Invitar usuario existente</span>
-                <span className="text-xs text-slate-500 mt-1">Vincular un usuario ya registrado.</span>
+                <span className="font-semibold text-slate-800">{t('tenants.detail.create.inviteUserTitle')}</span>
+                <span className="text-xs text-slate-500 mt-1">{t('tenants.detail.create.inviteUserHint')}</span>
               </label>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-slate-50 rounded-xl border border-slate-100">
               <div className="md:col-span-2">
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Email del Administrador <span className="text-red-500">*</span></label>
+                <label htmlFor="tenant-owner-email" className="block text-sm font-semibold text-slate-700 mb-1">{t('tenants.detail.create.adminEmailLabel')} <span className="text-red-500">*</span></label>
                 <div className="relative">
                   <i className="bi bi-envelope absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type="email"
+                    id="tenant-owner-email"
                     value={formData.owner_email}
                     onChange={e => handleChange('owner_email', e.target.value)}
                     className="w-full rounded-xl border border-slate-200 pl-10 pr-3 py-2.5 outline-none focus:ring-4 focus:ring-brand/15 focus:border-brand transition bg-white"
-                    placeholder="admin@empresa.com"
+                    placeholder={t('tenants.detail.create.adminEmailPlaceholder')}
                   />
                 </div>
               </div>
 
               {formData.owner_mode === 'create' && (
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">Nombre Completo <span className="text-red-500">*</span></label>
+                  <label htmlFor="tenant-owner-name" className="block text-sm font-semibold text-slate-700 mb-1">{t('tenants.detail.create.ownerNameLabel')} <span className="text-red-500">*</span></label>
                   <div className="relative">
                     <i className="bi bi-person absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                     <input
+                      id="tenant-owner-name"
                       value={formData.owner_name}
                       onChange={e => handleChange('owner_name', e.target.value)}
                       className="w-full rounded-xl border border-slate-200 pl-10 pr-3 py-2.5 outline-none focus:ring-4 focus:ring-brand/15 focus:border-brand transition bg-white"
-                      placeholder="Juan Pérez"
+                      placeholder={t('tenants.detail.create.ownerNamePlaceholder')}
                     />
                   </div>
                 </div>
@@ -421,8 +429,8 @@ export default function CreateTenantPage({ apiUrl, token }) {
         {step === 4 && (
           <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
              <div>
-                <h2 className="text-xl font-bold text-slate-900">Inicialización y Confirmación</h2>
-                <p className="text-sm text-slate-500">Revisa los datos y configura el entorno inicial.</p>
+                <h2 className="text-xl font-bold text-slate-900">{t('tenants.detail.create.initTitle')}</h2>
+                <p className="text-sm text-slate-500">{t('tenants.detail.create.initSubtitle')}</p>
             </div>
             
             <div className="space-y-4">
@@ -436,8 +444,8 @@ export default function CreateTenantPage({ apiUrl, token }) {
                     />
                 </div>
                 <div>
-                  <span className="block font-semibold text-slate-800 group-hover:text-brand transition">Crear roles base por defecto</span>
-                  <span className="block text-sm text-slate-500 mt-1">Genera roles estándar: Admin, Finance, HR, Approver, Viewer.</span>
+                  <span className="block font-semibold text-slate-800 group-hover:text-brand transition">{t('tenants.detail.create.defaultRolesTitle')}</span>
+                  <span className="block text-sm text-slate-500 mt-1">{t('tenants.detail.create.defaultRolesHint')}</span>
                 </div>
               </label>
 
@@ -451,33 +459,48 @@ export default function CreateTenantPage({ apiUrl, token }) {
                     />
                 </div>
                 <div>
-                  <span className="block font-semibold text-slate-800 group-hover:text-brand transition">Activar plantillas base</span>
-                  <span className="block text-sm text-slate-500 mt-1">Carga plantillas de documentos y correos según el país seleccionado.</span>
+                  <span className="block font-semibold text-slate-800 group-hover:text-brand transition">{t('tenants.detail.create.templatesTitle')}</span>
+                  <span className="block text-sm text-slate-500 mt-1">{t('tenants.detail.create.templatesHint')}</span>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-3 p-4 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-50 transition group">
+                <div className="flex h-6 items-center">
+                    <input
+                    type="checkbox"
+                    checked={formData.kyb_required}
+                    onChange={e => handleChange('kyb_required', e.target.checked)}
+                    className="h-5 w-5 rounded border-slate-300 text-brand focus:ring-brand transition"
+                    />
+                </div>
+                <div>
+                  <span className="block font-semibold text-slate-800 group-hover:text-brand transition">{t('tenants.detail.create.kybRequiredTitle')}</span>
+                  <span className="block text-sm text-slate-500 mt-1">{t('tenants.detail.create.kybRequiredHint')}</span>
                 </div>
               </label>
             </div>
 
             <div className="bg-slate-50 rounded-xl p-6 border border-slate-200">
-              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-200 pb-2">Resumen de la Empresa</h3>
+              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-200 pb-2">{t('tenants.detail.create.summaryTitle')}</h3>
               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-6 text-sm">
                 <div>
-                  <dt className="text-slate-400 text-xs uppercase font-semibold">Empresa</dt>
+                  <dt className="text-slate-400 text-xs uppercase font-semibold">{t('tenants.detail.company')}</dt>
                   <dd className="font-semibold text-slate-900 text-base mt-0.5">{formData.legal_name}</dd>
                 </div>
                 <div>
-                  <dt className="text-slate-400 text-xs uppercase font-semibold">Ubicación</dt>
+                  <dt className="text-slate-400 text-xs uppercase font-semibold">{t('tenants.detail.create.summaryLocation')}</dt>
                   <dd className="font-medium text-slate-900 mt-0.5">
                     {countries.find(c => String(c.id) === formData.country_id)?.name}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-slate-400 text-xs uppercase font-semibold">Moneda</dt>
+                  <dt className="text-slate-400 text-xs uppercase font-semibold">{t('tenants.common.currency')}</dt>
                   <dd className="font-medium text-slate-900 mt-0.5">
                     {currencies.find(c => String(c.id) === formData.default_currency_id)?.code}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-slate-400 text-xs uppercase font-semibold">Administrador</dt>
+                  <dt className="text-slate-400 text-xs uppercase font-semibold">{t('tenants.detail.create.summaryAdmin')}</dt>
                   <dd className="font-medium text-slate-900 mt-0.5">{formData.owner_email}</dd>
                 </div>
               </dl>
@@ -493,10 +516,16 @@ export default function CreateTenantPage({ apiUrl, token }) {
             disabled={loading}
             >
             {step > 1 ? <i className="bi bi-arrow-left" /> : <i className="bi bi-x-lg" />}
-            {step > 1 ? 'Anterior' : 'Cancelar'}
+            {step > 1 ? t('tenants.common.previous') : t('tenants.common.cancel')}
             </button>
 
             {step < 4 ? (
+            <div className="flex items-center gap-3">
+            {missingFields.length > 0 && (
+              <p className="text-xs text-slate-500" role="status" aria-live="polite">
+                {t('tenants.detail.create.missingFields')}: {missingFields.join(', ')}
+              </p>
+            )}
             <button
                 onClick={() => setStep(s => s + 1)}
                 disabled={
@@ -506,9 +535,10 @@ export default function CreateTenantPage({ apiUrl, token }) {
                 }
                 className="px-6 py-2.5 rounded-xl bg-brand text-white font-semibold hover:bg-brand-dark disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-2 shadow-lg shadow-brand/20"
             >
-                Siguiente
+                {t('tenants.common.next')}
                 <i className="bi bi-arrow-right" />
             </button>
+            </div>
             ) : (
             <button
                 onClick={handleSubmit}
@@ -518,12 +548,12 @@ export default function CreateTenantPage({ apiUrl, token }) {
                 {loading ? (
                 <>
                     <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Creando...
+                    {t('tenants.detail.create.creating')}
                 </>
                 ) : (
                 <>
                     <i className="bi bi-check-lg" />
-                    Crear Empresa
+                    {t('tenants.detail.create.submit')}
                 </>
                 )}
             </button>

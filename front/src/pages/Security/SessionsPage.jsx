@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { createApi } from '../../lib/api';
+import ConfirmModal from '../../components/ConfirmModal';
+import { useToast } from '../../components/ToastProvider';
 
 export default function SessionsPage({ apiUrl, token, currentUser }) {
   const api = useMemo(() => createApi({ baseUrl: apiUrl, token }), [apiUrl, token]);
@@ -16,17 +18,18 @@ export default function SessionsPage({ apiUrl, token, currentUser }) {
   const [page, setPage] = useState(1);
   const [perPage] = useState(20);
   const [meta, setMeta] = useState({ total: 0, last_page: 1 });
+  const [statusFilter, setStatusFilter] = useState('active');
 
   useEffect(() => {
     loadSessions();
     // eslint-disable-next-line
-  }, [page]);
+  }, [page, statusFilter]);
 
   async function loadSessions() {
     setLoading(true);
     setError('');
     try {
-      const res = await api.get(`/api/security/sessions?page=${page}&per_page=${perPage}`);
+      const res = await api.get(`/api/security/sessions?page=${page}&per_page=${perPage}&status=${statusFilter}`);
       const data = res.data || res || {};
       
       if (data.data && Array.isArray(data.data)) {
@@ -45,42 +48,74 @@ export default function SessionsPage({ apiUrl, token, currentUser }) {
     }
   }
 
-  async function handleRevoke(id) {
-    if (!confirm('¿Estás seguro de que deseas revocar esta sesión? El usuario será desconectado.')) return;
-    
-    setRevokingId(id);
-    try {
-      await api.post(`/api/security/sessions/${id}/revoke`);
-      // Reload or update local state
-      setSessions(prev => prev.map(s => s.id === id ? { ...s, is_active: 0 } : s));
-    } catch (e) {
-      alert('Error revocando sesión: ' + e.message);
-    } finally {
-      setRevokingId(null);
-    }
+  // Confirmaciones con el modal de la app (antes confirm()/alert() nativos)
+  const toast = useToast();
+  const [confirmState, setConfirmState] = useState(null); // { type: 'one'|'all', id? }
+  const [confirmBusy, setConfirmBusy] = useState(false);
+
+  function handleRevoke(id) {
+    setConfirmState({ type: 'one', id });
   }
 
-  async function handleRevokeAll() {
-    if (!confirm('¿ATENCIÓN: Estás seguro de que deseas revocar TODAS las sesiones activas del sistema? Todos los usuarios serán desconectados.')) return;
-    
+  function handleRevokeAll() {
+    setConfirmState({ type: 'all' });
+  }
+
+  async function runConfirmed() {
+    if (!confirmState) return;
+    setConfirmBusy(true);
     try {
-      setLoading(true);
-      await api.post(`/api/security/sessions/revoke-all`);
-      alert('Todas las sesiones han sido revocadas.');
-      loadSessions();
+      if (confirmState.type === 'one') {
+        const id = confirmState.id;
+        setRevokingId(id);
+        await api.post(`/api/security/sessions/${id}/revoke`);
+        setSessions(prev => prev.map(s => s.id === id ? { ...s, is_active: 0 } : s));
+        toast.success('Sesión revocada');
+      } else {
+        const res = await api.post(`/api/security/sessions/revoke-all`);
+        toast.success(`Sesiones revocadas: ${res?.revoked ?? 0}. Tu sesión actual se mantiene.`);
+        loadSessions();
+      }
+      setConfirmState(null);
     } catch (e) {
-      alert('Error revocando sesiones: ' + e.message);
-      setLoading(false);
+      toast.error('Error revocando sesiones: ' + e.message);
+    } finally {
+      setRevokingId(null);
+      setConfirmBusy(false);
     }
   }
 
   return (
     <div className="space-y-6">
+      <ConfirmModal
+        open={!!confirmState}
+        title={confirmState?.type === 'all' ? 'Revocar todas las sesiones' : 'Revocar sesión'}
+        message={confirmState?.type === 'all'
+          ? 'Se desconectará a TODOS los usuarios de la plataforma, salvo tu sesión actual. Tendrán que volver a iniciar sesión.'
+          : 'El usuario de esta sesión será desconectado y tendrá que volver a iniciar sesión.'}
+        confirmText={confirmState?.type === 'all' ? 'Revocar todas' : 'Revocar'}
+        loading={confirmBusy}
+        onConfirm={runConfirmed}
+        onClose={() => !confirmBusy && setConfirmState(null)}
+      />
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
             <div className="text-xs font-semibold tracking-widest text-slate-500 uppercase">Seguridad</div>
-            <h1 className="text-xl font-bold">Sesiones Activas</h1>
+            <h1 className="text-xl font-bold">Sesiones</h1>
             <p className="text-sm text-slate-600">Monitoreo y control de sesiones de usuarios en la plataforma.</p>
+        </div>
+        <div className="flex items-center gap-2">
+            <label htmlFor="sessions-status" className="text-xs font-semibold text-slate-600">Estado</label>
+            <select
+                id="sessions-status"
+                value={statusFilter}
+                onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 outline-none focus:ring-4 focus:ring-brand/15 focus:border-brand"
+            >
+                <option value="active">Activas</option>
+                <option value="revoked">Revocadas</option>
+                <option value="all">Todas</option>
+            </select>
         </div>
         {canRevokeGlobal && (
             <button 
@@ -131,7 +166,7 @@ export default function SessionsPage({ apiUrl, token, currentUser }) {
                             <td colSpan="5" className="px-6 py-10 text-center text-slate-500">
                                 <div className="flex flex-col items-center gap-2">
                                     <i className="bi bi-shield-check text-2xl text-slate-300"></i>
-                                    <span>No se encontraron sesiones activas.</span>
+                                    <span>{statusFilter === 'active' ? 'No se encontraron sesiones activas.' : 'No se encontraron sesiones.'}</span>
                                 </div>
                             </td>
                         </tr>

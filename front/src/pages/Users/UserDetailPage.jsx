@@ -203,6 +203,8 @@ export default function UserDetailPage({ apiUrl, token, defaultRole, roleScope }
   if (err) return <div className="p-10 text-center text-red-500">{err}</div>;
   if (!user) return <div className="p-10 text-center text-slate-500">Usuario no encontrado</div>;
 
+  const isSuperAdmin = user.platform_role === 'super_admin';
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
@@ -264,12 +266,14 @@ export default function UserDetailPage({ apiUrl, token, defaultRole, roleScope }
             <div className="rounded-2xl border border-slate-200 bg-white p-5">
                 <div className="flex items-center justify-between mb-4">
                     <h2 className="font-bold text-slate-800">Empresas vinculadas</h2>
-                    <button 
-                        onClick={() => setShowAddMember(true)}
-                        className="text-xs font-bold text-brand hover:underline"
-                    >
-                        + Agregar a empresa
-                    </button>
+                    {!isSuperAdmin && (
+                        <button 
+                            onClick={() => setShowAddMember(true)}
+                            className="text-xs font-bold text-brand hover:underline"
+                        >
+                            + Agregar a empresa
+                        </button>
+                    )}
                 </div>
                 
                 <div className="overflow-x-auto">
@@ -317,7 +321,9 @@ export default function UserDetailPage({ apiUrl, token, defaultRole, roleScope }
                             ))}
                             {!(user.memberships || []).length && (
                                 <tr>
-                                    <td colSpan={4} className="py-4 text-center text-slate-500">No pertenece a ninguna empresa.</td>
+                                    <td colSpan={4} className="py-4 text-center text-slate-500">
+                                        {isSuperAdmin ? 'Los super admin no requieren empresa asignada.' : 'No pertenece a ninguna empresa.'}
+                                    </td>
                                 </tr>
                             )}
                         </tbody>

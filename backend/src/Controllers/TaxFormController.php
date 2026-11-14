@@ -123,7 +123,7 @@ class TaxFormController
 
     public function getMyForm(string $userId): void
     {
-        $stmt = $this->pdo->prepare("SELECT * FROM tax_forms WHERE user_id LIKE ? ORDER BY created_at DESC LIMIT 1");
+        $stmt = $this->pdo->prepare("SELECT * FROM tax_forms WHERE user_id = ? ORDER BY created_at DESC LIMIT 1");
         $stmt->execute([$userId]);
         $form = $stmt->fetch(PDO::FETCH_ASSOC);
         

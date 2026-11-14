@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { createApi } from '../lib/api';
+import { getProjectStatus } from '../lib/projectStatus';
 
 export default function FreelancerProjectDetailPage({ user, apiUrl, token }) {
   const { id } = useParams();
@@ -12,7 +13,12 @@ export default function FreelancerProjectDetailPage({ user, apiUrl, token }) {
   const api = useMemo(() => createApi({ baseUrl: apiUrl, token }), [apiUrl, token]);
 
   useEffect(() => {
-    if (!user?.id || !id) return;
+    if (!user?.id || !id) {
+      // Sin id de usuario o sin id de proyecto no hay nada que pedir: se cierra el
+      // loader en vez de dejar "Cargando detalles..." indefinidamente.
+      setLoading(false);
+      return;
+    }
 
     const fetchProject = async () => {
       try {
@@ -58,14 +64,10 @@ export default function FreelancerProjectDetailPage({ user, apiUrl, token }) {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
                 <h1 className="text-3xl font-bold text-slate-900">{project.name}</h1>
-                <p className="mt-1 text-lg text-slate-600">{project.company_name}</p>
+                <p className="mt-1 text-lg text-slate-600">{project.company_name || 'Empresa no disponible'}</p>
             </div>
-            <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${
-                project.status === 'active' ? 'bg-emerald-100 text-emerald-800' : 
-                project.status === 'completed' ? 'bg-blue-100 text-blue-800' : 
-                'bg-slate-100 text-slate-800'
-            }`}>
-                {project.status === 'active' ? 'Activo' : project.status === 'completed' ? 'Completado' : project.status}
+            <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${getProjectStatus(project.status).badgeClass}`}>
+                {getProjectStatus(project.status).label}
             </span>
         </div>
       </div>
@@ -129,13 +131,17 @@ export default function FreelancerProjectDetailPage({ user, apiUrl, token }) {
                         {project.responsibles.map((resp, idx) => (
                             <div key={idx} className="flex items-center gap-3">
                                 <div className="flex h-10 w-10 flex-none items-center justify-center rounded-full bg-indigo-100 text-indigo-700 font-bold">
-                                    {resp.full_name.charAt(0)}
+                                    {(resp.full_name || '?').charAt(0).toUpperCase()}
                                 </div>
                                 <div>
-                                    <p className="font-medium text-slate-900">{resp.full_name}</p>
-                                    <a href={`mailto:${resp.email}`} className="text-xs text-indigo-600 hover:underline">
-                                        {resp.email}
-                                    </a>
+                                    <p className="font-medium text-slate-900">{resp.full_name || 'Sin nombre'}</p>
+                                    {resp.email ? (
+                                        <a href={`mailto:${resp.email}`} className="text-xs text-indigo-600 hover:underline">
+                                            {resp.email}
+                                        </a>
+                                    ) : (
+                                        <span className="text-xs text-slate-400">Sin email</span>
+                                    )}
                                     <div className="text-xs text-slate-500 capitalize">{resp.role_in_project}</div>
                                 </div>
                             </div>

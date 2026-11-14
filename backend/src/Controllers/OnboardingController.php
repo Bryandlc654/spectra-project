@@ -80,10 +80,35 @@ class OnboardingController
         Response::json(['message' => 'Offboarding initiated']);
     }
 
+    private function isSelfOnboardingEligible(string $userId): bool
+    {
+        $stmt = $this->pdo->prepare("SELECT platform_role FROM users WHERE id = ? AND deleted_at IS NULL LIMIT 1");
+        $stmt->execute([$userId]);
+        $role = $stmt->fetchColumn();
+
+        return in_array((string)$role, ['company_admin', 'freelancer', 'freelance'], true);
+    }
+
     public function assignDefaultTasks(string $userId): void
     {
+        $roleStmt = $this->pdo->prepare("SELECT platform_role FROM users WHERE id = ? AND deleted_at IS NULL LIMIT 1");
+        $roleStmt->execute([$userId]);
+        $role = (string)$roleStmt->fetchColumn();
+
+        // El Admin de Empresa tiene un checklist de empresa, no de empleado.
+        if ($role === 'company_admin') {
+            $this->assignCompanyAdminTasks($userId);
+            return;
+        }
+
+        // El freelancer tiene su propio checklist (sin formulario fiscal).
+        if (in_array($role, ['freelancer', 'freelance'], true)) {
+            $this->assignFreelancerTasks($userId);
+            return;
+        }
+
         // Avoid duplicates for onboarding
-        $stmt = $this->pdo->prepare("SELECT count(*) FROM onboarding_tasks WHERE user_id LIKE ? AND type = 'onboarding'");
+        $stmt = $this->pdo->prepare("SELECT count(*) FROM onboarding_tasks WHERE user_id = ? AND type = 'onboarding'");
         $stmt->execute([$userId]);
         if ($stmt->fetchColumn() > 0) {
             return;
@@ -104,10 +129,80 @@ class OnboardingController
         }
     }
 
+    private function assignFreelancerTasks(string $userId): void
+    {
+        // Quita pendientes del checklist genérico que ya no aplican al freelancer.
+        $obsoleteTitles = [
+            'Completar Información Bancaria',
+            'Formulario de Impuestos (W-8BEN)',
+            'Leer Manual del Empleado',
+            'Firmar Contrato',
+        ];
+        $placeholders = implode(',', array_fill(0, count($obsoleteTitles), '?'));
+        $del = $this->pdo->prepare("DELETE FROM onboarding_tasks WHERE user_id = ? AND type = 'onboarding' AND status <> 'completed' AND title IN ($placeholders)");
+        $del->execute(array_merge([$userId], $obsoleteTitles));
+
+        $existingStmt = $this->pdo->prepare("SELECT title FROM onboarding_tasks WHERE user_id = ? AND type = 'onboarding'");
+        $existingStmt->execute([$userId]);
+        $existing = $existingStmt->fetchAll(PDO::FETCH_COLUMN);
+
+        $tasks = [
+            ['title' => 'Completar perfil profesional', 'desc' => 'Completa tu área, habilidades, experiencia y biografía para aparecer en el directorio y poder ser asignado a proyectos.', 'req' => 1],
+            ['title' => 'Subir Identificación (ID/Pasaporte)', 'desc' => 'Sube una foto clara de tu documento de identidad (frente y dorso).', 'req' => 1],
+            ['title' => 'Firmar Contrato', 'desc' => 'Revisa y firma digitalmente tu contrato de servicios.', 'req' => 1],
+            ['title' => 'Configurar método de cobro', 'desc' => 'Agrega tu cuenta bancaria o método de retiro para recibir pagos.', 'req' => 1],
+            ['title' => 'Leer guía del freelancer', 'desc' => 'Revisa las políticas, procesos y buenas prácticas para trabajar en la plataforma.', 'req' => 0],
+            ['title' => 'Activar autenticación 2FA', 'desc' => 'Activa la autenticación de dos factores para proteger tu cuenta.', 'req' => 0],
+        ];
+
+        $insert = $this->pdo->prepare("INSERT INTO onboarding_tasks (user_id, title, description, required, type) VALUES (?, ?, ?, ?, 'onboarding')");
+        foreach ($tasks as $t) {
+            if (!in_array($t['title'], $existing, true)) {
+                $insert->execute([$userId, $t['title'], $t['desc'], $t['req']]);
+            }
+        }
+    }
+
+    private function assignCompanyAdminTasks(string $userId): void
+    {
+        // Quita pendientes del checklist genérico de empleado/freelancer.
+        $legacyTitles = [
+            'Subir Identificación (ID/Pasaporte)',
+            'Firmar Contrato',
+            'Completar Información Bancaria',
+            'Formulario de Impuestos (W-8BEN)',
+            'Leer Manual del Empleado',
+            'Configurar Autenticación 2FA',
+        ];
+        $placeholders = implode(',', array_fill(0, count($legacyTitles), '?'));
+        $del = $this->pdo->prepare("DELETE FROM onboarding_tasks WHERE user_id = ? AND type = 'onboarding' AND status <> 'completed' AND title IN ($placeholders)");
+        $del->execute(array_merge([$userId], $legacyTitles));
+
+        $existingStmt = $this->pdo->prepare("SELECT title FROM onboarding_tasks WHERE user_id = ? AND type = 'onboarding'");
+        $existingStmt->execute([$userId]);
+        $existing = $existingStmt->fetchAll(PDO::FETCH_COLUMN);
+
+        $tasks = [
+            ['title' => 'Completar datos legales de la empresa', 'desc' => 'Revisa y completa la razón social, identificación fiscal y dirección en Gestión Empresa.', 'req' => 1],
+            ['title' => 'Completar verificación KYB', 'desc' => 'Sube los documentos corporativos y envía la solicitud KYB para validar la empresa.', 'req' => 1],
+            ['title' => 'Configurar datos de facturación', 'desc' => 'Define moneda, impuestos y datos de facturación de la empresa.', 'req' => 1],
+            ['title' => 'Invitar al equipo interno', 'desc' => 'Agrega a los usuarios internos de la empresa y asigna sus roles.', 'req' => 0],
+            ['title' => 'Revisar contrato y suscripción', 'desc' => 'Verifica el plan contratado, los contratos y la facturación de la empresa.', 'req' => 0],
+            ['title' => 'Activar autenticación 2FA', 'desc' => 'Activa la autenticación de dos factores para proteger la cuenta.', 'req' => 0],
+        ];
+
+        $insert = $this->pdo->prepare("INSERT INTO onboarding_tasks (user_id, title, description, required, type) VALUES (?, ?, ?, ?, 'onboarding')");
+        foreach ($tasks as $t) {
+            if (!in_array($t['title'], $existing, true)) {
+                $insert->execute([$userId, $t['title'], $t['desc'], $t['req']]);
+            }
+        }
+    }
+
     public function assignOffboardingTasks(string $userId): void
     {
         // Avoid duplicates for offboarding
-        $stmt = $this->pdo->prepare("SELECT count(*) FROM onboarding_tasks WHERE user_id LIKE ? AND type = 'offboarding'");
+        $stmt = $this->pdo->prepare("SELECT count(*) FROM onboarding_tasks WHERE user_id = ? AND type = 'offboarding'");
         $stmt->execute([$userId]);
         if ($stmt->fetchColumn() > 0) {
             return;
@@ -130,7 +225,7 @@ class OnboardingController
     public function assignInternalOnboardingTasks(string $userId, ?string $companyId = null): void
     {
         // Check if already exists
-        $stmt = $this->pdo->prepare("SELECT count(*) FROM onboarding_tasks WHERE user_id LIKE ? AND type = 'internal_onboarding'");
+        $stmt = $this->pdo->prepare("SELECT count(*) FROM onboarding_tasks WHERE user_id = ? AND type = 'internal_onboarding'");
         $stmt->execute([$userId]);
         if ($stmt->fetchColumn() > 0) {
             return;
@@ -315,12 +410,16 @@ class OnboardingController
     {
         $type = $_GET['type'] ?? null;
 
-        // Auto-seed onboarding if empty and no type specified or type is onboarding
+        // Auto-seed onboarding only for eligible roles (company_admin / freelancer).
         if (!$type || $type === 'onboarding') {
+            if (!$this->isSelfOnboardingEligible($userId)) {
+                Response::json([]);
+                return;
+            }
             $this->assignDefaultTasks($userId);
         }
 
-        $sql = "SELECT * FROM onboarding_tasks WHERE user_id LIKE ?";
+        $sql = "SELECT * FROM onboarding_tasks WHERE user_id = ?";
         $params = [$userId];
 
         if ($type) {
@@ -354,8 +453,12 @@ class OnboardingController
     {
         $type = $_GET['type'] ?? null;
         
-        // Auto-seed if empty
+        // Auto-seed if empty (solo para roles con onboarding propio)
         if (!$type || $type === 'onboarding') {
+            if (!$this->isSelfOnboardingEligible($userId)) {
+                Response::json([]);
+                return;
+            }
             $this->assignDefaultTasks($userId);
         }
 
@@ -447,8 +550,8 @@ class OnboardingController
         } else {
             // Default onboarding: only active users
             $whereClauses[] = "u.status = 'active'";
-            // Exclude super_admin and support from onboarding list as per requirement
-            $whereClauses[] = "u.platform_role NOT IN ('super_admin', 'support')";
+            // Solo Admin de Empresa y Freelancer realizan onboarding propio.
+            $whereClauses[] = "u.platform_role IN ('company_admin', 'freelancer', 'freelance')";
         }
 
         if (!empty($whereClauses)) {

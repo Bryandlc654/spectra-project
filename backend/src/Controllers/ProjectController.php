@@ -26,7 +26,7 @@ class ProjectController
         $userId = Auth::userId();
         if (!$userId) return null;
 
-        $stmt = $this->pdo->prepare("SELECT company_id FROM company_users WHERE user_id LIKE :uid LIMIT 1");
+        $stmt = $this->pdo->prepare("SELECT company_id FROM company_users WHERE user_id = :uid LIMIT 1");
         $stmt->execute([':uid' => $userId]);
         return $stmt->fetchColumn() ?: null;
     }
@@ -206,7 +206,7 @@ class ProjectController
             FROM projects p
             LEFT JOIN countries c ON p.country_id = c.id
             LEFT JOIN currencies cur ON p.currency_id = cur.id
-            WHERE p.company_id LIKE :cid AND p.deleted_at IS NULL
+            WHERE p.company_id = :cid AND p.deleted_at IS NULL
             ORDER BY p.created_at DESC
             LIMIT :limit OFFSET :offset
         ");
@@ -216,7 +216,7 @@ class ProjectController
         $stmt->execute();
         $projects = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM projects WHERE company_id LIKE :cid AND deleted_at IS NULL");
+        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM projects WHERE company_id = :cid AND deleted_at IS NULL");
         $countStmt->execute([':cid' => $companyId]);
         $total = (int)$countStmt->fetchColumn();
 
@@ -243,7 +243,7 @@ class ProjectController
 
         // Auto-fill defaults from company if missing
         if (empty($data['country_id']) || empty($data['currency_id'])) {
-            $stmt = $this->pdo->prepare("SELECT country_id, default_currency_id FROM companies WHERE id LIKE :id");
+            $stmt = $this->pdo->prepare("SELECT country_id, default_currency_id FROM companies WHERE id = :id");
             $stmt->execute([':id' => $companyId]);
             $company = $stmt->fetch(PDO::FETCH_ASSOC);
             
@@ -288,7 +288,7 @@ class ProjectController
             FROM projects p
             LEFT JOIN countries c ON p.country_id = c.id
             LEFT JOIN currencies cur ON p.currency_id = cur.id
-            WHERE p.id LIKE :id AND p.deleted_at IS NULL
+            WHERE p.id = :id AND p.deleted_at IS NULL
         ");
         $stmt->execute([':id' => $id]);
         $project = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -304,7 +304,7 @@ class ProjectController
             FROM project_members pm
             JOIN company_users cu ON pm.company_user_id = cu.id
             JOIN users u ON cu.user_id = u.id
-            WHERE pm.project_id LIKE :pid
+            WHERE pm.project_id = :pid
         ");
         $stmtMembers->execute([':pid' => $id]);
         $project['members'] = $stmtMembers->fetchAll(PDO::FETCH_ASSOC);
@@ -330,7 +330,7 @@ class ProjectController
             return;
         }
 
-        $sql = "UPDATE projects SET " . implode(', ', $fields) . " WHERE id LIKE :id";
+        $sql = "UPDATE projects SET " . implode(', ', $fields) . " WHERE id = :id";
         try {
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute($params);
@@ -342,7 +342,7 @@ class ProjectController
 
     private function delete(string $id): void
     {
-        $stmt = $this->pdo->prepare("UPDATE projects SET deleted_at = NOW() WHERE id LIKE :id");
+        $stmt = $this->pdo->prepare("UPDATE projects SET deleted_at = NOW() WHERE id = :id");
         $stmt->execute([':id' => $id]);
         Response::json(['message' => 'Project deleted']);
     }
@@ -366,13 +366,13 @@ class ProjectController
         $offset = ($page - 1) * $limit;
 
         // Count
-        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM project_milestones WHERE project_id LIKE :pid AND deleted_at IS NULL");
+        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM project_milestones WHERE project_id = :pid AND deleted_at IS NULL");
         $countStmt->execute([':pid' => $projectId]);
         $total = (int)$countStmt->fetchColumn();
 
         $stmt = $this->pdo->prepare("
             SELECT * FROM project_milestones 
-            WHERE project_id LIKE :pid AND deleted_at IS NULL
+            WHERE project_id = :pid AND deleted_at IS NULL
             ORDER BY due_date ASC, created_at ASC
             LIMIT :limit OFFSET :offset
         ");
@@ -472,20 +472,20 @@ class ProjectController
             return;
         }
 
-        $sql = "UPDATE project_milestones SET " . implode(', ', $fields) . " WHERE id LIKE :id";
+        $sql = "UPDATE project_milestones SET " . implode(', ', $fields) . " WHERE id = :id";
         $this->pdo->prepare($sql)->execute($params);
         Response::json(['message' => 'Milestone updated']);
     }
 
     private function deleteMilestone(string $id): void
     {
-        $this->pdo->prepare("UPDATE project_milestones SET deleted_at = NOW() WHERE id LIKE :id")->execute([':id' => $id]);
+        $this->pdo->prepare("UPDATE project_milestones SET deleted_at = NOW() WHERE id = :id")->execute([':id' => $id]);
         Response::json(['message' => 'Milestone deleted']);
     }
 
     private function indexDeliverables(string $milestoneId): void
     {
-        $stmt = $this->pdo->prepare("SELECT * FROM project_deliverables WHERE milestone_id LIKE :mid AND deleted_at IS NULL");
+        $stmt = $this->pdo->prepare("SELECT * FROM project_deliverables WHERE milestone_id = :mid AND deleted_at IS NULL");
         $stmt->execute([':mid' => $milestoneId]);
         Response::json($stmt->fetchAll(PDO::FETCH_ASSOC));
     }
@@ -594,14 +594,14 @@ class ProjectController
             return;
         }
 
-        $sql = "UPDATE project_deliverables SET " . implode(', ', $fields) . " WHERE id LIKE :id";
+        $sql = "UPDATE project_deliverables SET " . implode(', ', $fields) . " WHERE id = :id";
         $this->pdo->prepare($sql)->execute($params);
         Response::json(['message' => 'Deliverable updated']);
     }
 
     private function deleteDeliverable(string $id): void
     {
-        $this->pdo->prepare("UPDATE project_deliverables SET deleted_at = NOW() WHERE id LIKE :id")->execute([':id' => $id]);
+        $this->pdo->prepare("UPDATE project_deliverables SET deleted_at = NOW() WHERE id = :id")->execute([':id' => $id]);
         Response::json(['message' => 'Deliverable deleted']);
     }
 
@@ -616,7 +616,7 @@ class ProjectController
             FROM project_members pm
             JOIN company_users cu ON pm.company_user_id = cu.id
             JOIN users u ON cu.user_id = u.id
-            WHERE pm.project_id LIKE :pid
+            WHERE pm.project_id = :pid
         ");
         $stmt->execute([':pid' => $projectId]);
         Response::json($stmt->fetchAll(PDO::FETCH_ASSOC));
@@ -635,12 +635,14 @@ class ProjectController
             $stmt = $this->pdo->prepare("
                 INSERT INTO project_members (project_id, company_user_id, role_in_project, created_at)
                 VALUES (:pid, :cuid, :role, NOW())
-                ON DUPLICATE KEY UPDATE role_in_project = :role
+                ON DUPLICATE KEY UPDATE role_in_project = :role_upd
             ");
+            $role = $data['role_in_project'] ?? 'viewer';
             $stmt->execute([
                 ':pid' => $projectId,
                 ':cuid' => $data['company_user_id'],
-                ':role' => $data['role_in_project'] ?? 'viewer'
+                ':role' => $role,
+                ':role_upd' => $role,
             ]);
 
             Response::json(['message' => 'Member assigned']);

@@ -175,8 +175,8 @@ class KnowledgeBaseController
         }
 
         if ($q) {
-            $where[] = "(title LIKE :q OR content LIKE :q)";
-            $params[':q'] = "%$q%";
+            $where[] = "(title LIKE :q_1 OR content LIKE :q_2)";
+            $params[':q_1'] = $params[':q_2'] = "%$q%";
         }
 
         // Only published unless admin

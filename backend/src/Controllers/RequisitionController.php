@@ -26,7 +26,7 @@ class RequisitionController
         $userId = Auth::userId();
         if (!$userId) return null;
 
-        $stmt = $this->pdo->prepare("SELECT company_id FROM company_users WHERE user_id LIKE :uid LIMIT 1");
+        $stmt = $this->pdo->prepare("SELECT company_id FROM company_users WHERE user_id = :uid LIMIT 1");
         $stmt->execute([':uid' => $userId]);
         return $stmt->fetchColumn() ?: null;
     }
@@ -143,8 +143,8 @@ class RequisitionController
         $limit = max(1, min(100, (int)($_GET['limit'] ?? 20)));
         $offset = ($page - 1) * $limit;
 
-        $whereCount = $companyId ? 'WHERE company_id LIKE :cid' : '';
-        $whereReq = $companyId ? 'WHERE r.company_id LIKE :cid' : '';
+        $whereCount = $companyId ? 'WHERE company_id = :cid' : '';
+        $whereReq = $companyId ? 'WHERE r.company_id = :cid' : '';
 
         // Count total
         $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM requisitions $whereCount");
@@ -183,7 +183,7 @@ class RequisitionController
                 FROM roles r
                 JOIN user_roles ur ON ur.role_id = r.id
                 JOIN company_users cu ON cu.id = ur.company_user_id
-                WHERE cu.user_id LIKE :uid AND cu.company_id LIKE :cid
+                WHERE cu.user_id = :uid AND cu.company_id = :cid
             ");
             $rolesStmt->execute([':uid' => $userId, ':cid' => $companyId]);
             $userRoles = array_map('strtolower', $rolesStmt->fetchAll(PDO::FETCH_COLUMN));
@@ -370,7 +370,7 @@ class RequisitionController
                    CASE WHEN LOCATE(' ', u.full_name) > 0 THEN SUBSTRING(u.full_name, LOCATE(' ', u.full_name) + 1) ELSE '' END as last_name
             FROM requisitions r
             LEFT JOIN users u ON r.requester_id = u.id
-            WHERE r.id LIKE :id
+            WHERE r.id = :id
         ");
         $stmt->execute([':id' => $id]);
         $req = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -389,7 +389,7 @@ class RequisitionController
                    CASE WHEN LOCATE(' ', u.full_name) > 0 THEN SUBSTRING(u.full_name, LOCATE(' ', u.full_name) + 1) ELSE '' END as reviewer_last_name
             FROM requisition_approvals ra
             LEFT JOIN users u ON ra.reviewed_by_user_id = u.id
-            WHERE ra.requisition_id LIKE :rid
+            WHERE ra.requisition_id = :rid
             ORDER BY ra.step_number ASC
         ");
         $stmtApp->execute([':rid' => $id]);
@@ -418,7 +418,7 @@ class RequisitionController
         // Get current pending step
         $stmt = $this->pdo->prepare("
             SELECT * FROM requisition_approvals 
-            WHERE requisition_id LIKE :rid AND status = 'pending' 
+            WHERE requisition_id = :rid AND status = 'pending' 
             ORDER BY step_number ASC LIMIT 1
         ");
         $stmt->execute([':rid' => $id]);
@@ -436,7 +436,7 @@ class RequisitionController
             FROM roles r
             JOIN user_roles ur ON ur.role_id = r.id
             JOIN company_users cu ON cu.id = ur.company_user_id
-            WHERE cu.user_id LIKE :uid AND cu.company_id LIKE :cid
+            WHERE cu.user_id = :uid AND cu.company_id = :cid
         ");
         $rolesStmt->execute([':uid' => $userId, ':cid' => $companyId]);
         $userRoles = $rolesStmt->fetchAll(PDO::FETCH_COLUMN);
@@ -458,7 +458,7 @@ class RequisitionController
             $updStmt = $this->pdo->prepare("
                 UPDATE requisition_approvals 
                 SET status = :status, reviewed_by_user_id = :uid, reviewed_at = NOW(), comments = :comments
-                WHERE id LIKE :id
+                WHERE id = :id
             ");
             $updStmt->execute([
                 ':status' => $status,
@@ -469,20 +469,20 @@ class RequisitionController
 
             if ($status === 'rejected') {
                 // If rejected, the whole requisition is rejected
-                $this->pdo->prepare("UPDATE requisitions SET status = 'rejected' WHERE id LIKE :rid")
+                $this->pdo->prepare("UPDATE requisitions SET status = 'rejected' WHERE id = :rid")
                      ->execute([':rid' => $id]);
             } else {
                 // If approved, check if there are more steps
                 $countStmt = $this->pdo->prepare("
                     SELECT COUNT(*) FROM requisition_approvals 
-                    WHERE requisition_id LIKE :rid AND status LIKE 'pending'
+                    WHERE requisition_id = :rid AND status LIKE 'pending'
                 ");
                 $countStmt->execute([':rid' => $id]);
                 $remaining = $countStmt->fetchColumn();
 
                 if ($remaining == 0) {
                     // All steps approved
-                    $this->pdo->prepare("UPDATE requisitions SET status = 'approved' WHERE id LIKE :rid")
+                    $this->pdo->prepare("UPDATE requisitions SET status = 'approved' WHERE id = :rid")
                          ->execute([':rid' => $id]);
                 }
             }

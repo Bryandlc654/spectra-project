@@ -71,8 +71,8 @@ final class CurrencyController
             return;
         }
 
-        $where[] = '(code LIKE :q OR name LIKE :q OR symbol LIKE :q)';
-        $params[':q'] = "%$q%";
+        $where[] = '(code LIKE :q_1 OR name LIKE :q_2 OR symbol LIKE :q_3)';
+        $params[':q_1'] = $params[':q_2'] = $params[':q_3'] = "%$q%";
 
         $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
 

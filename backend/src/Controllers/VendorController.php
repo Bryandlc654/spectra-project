@@ -26,7 +26,7 @@ class VendorController
         $userId = Auth::userId();
         if (!$userId) return null;
 
-        $stmt = $this->pdo->prepare("SELECT company_id FROM company_users WHERE user_id LIKE :uid LIMIT 1");
+        $stmt = $this->pdo->prepare("SELECT company_id FROM company_users WHERE user_id = :uid LIMIT 1");
         $stmt->execute([':uid' => $userId]);
         return $stmt->fetchColumn() ?: null;
     }
@@ -156,7 +156,7 @@ class VendorController
     {
         $companyId = $this->getCompanyId();
         if (!$companyId) return;
-        $stmt = $this->pdo->prepare("SELECT company_id FROM vendors WHERE id LIKE :id");
+        $stmt = $this->pdo->prepare("SELECT company_id FROM vendors WHERE id = :id");
         $stmt->execute([':id' => $id]);
         $owner = $stmt->fetchColumn();
         if ($owner !== false && $owner !== $companyId) {
@@ -203,7 +203,7 @@ class VendorController
     private function delete(string $id): void
     {
         $this->assertVendorInCompany($id);
-        $stmt = $this->pdo->prepare("DELETE FROM vendors WHERE id LIKE :id");
+        $stmt = $this->pdo->prepare("DELETE FROM vendors WHERE id = :id");
         $stmt->execute([':id' => $id]);
         Response::json(['message' => 'Vendor deleted']);
     }

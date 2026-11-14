@@ -67,7 +67,8 @@ final class TimezoneController
             return;
         }
 
-        $where[] = '(t.name LIKE :q OR CAST(t.id AS CHAR) LIKE :q)';
+        $where[] = '(t.name LIKE :q_1 OR CAST(t.id AS CHAR) LIKE :q_2)';
+        $params[':q_1'] = $params[':q_2'] = "%$q%";
 
         $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
 

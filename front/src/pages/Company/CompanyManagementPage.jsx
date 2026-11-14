@@ -175,11 +175,11 @@ export default function CompanyManagementPage() {
                 <dl className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
                     <div>
                         <dt className="text-xs font-medium text-slate-500 uppercase">Nombre Legal</dt>
-                        <dd className="mt-1 text-sm font-semibold text-slate-900">{companyInfo.name}</dd>
+                        <dd className="mt-1 text-sm font-semibold text-slate-900">{companyInfo.legal_name || companyInfo.trade_name || '—'}</dd>
                     </div>
                     <div>
                         <dt className="text-xs font-medium text-slate-500 uppercase">ID / Tax ID</dt>
-                        <dd className="mt-1 text-sm font-semibold text-slate-900">{companyInfo.tax_id || '—'}</dd>
+                        <dd className="mt-1 text-sm font-semibold text-slate-900">{company?.settings?.tax_id || companyInfo?.tax_id || '—'}</dd>
                     </div>
                     <div className="sm:col-span-2">
                         <dt className="text-xs font-medium text-slate-500 uppercase">Dirección</dt>

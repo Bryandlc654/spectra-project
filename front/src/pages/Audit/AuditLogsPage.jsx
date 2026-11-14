@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { createApi } from '../../lib/api';
 import { normalizePageResponse } from '../../lib/pagination';
 import { useToast } from '../../components/ToastProvider';
@@ -6,6 +7,8 @@ import { useToast } from '../../components/ToastProvider';
 export default function AuditLogsPage({ apiUrl, token }) {
   const api = useMemo(() => createApi({ baseUrl: apiUrl, token }), [apiUrl, token]);
   const toast = useToast();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -13,22 +16,34 @@ export default function AuditLogsPage({ apiUrl, token }) {
   const [err, setErr] = useState('');
   const [page, setPage] = useState(1);
   const [meta, setMeta] = useState({ page: 1, perPage: 50, total: 0, totalPages: 1 });
+
+  const queryCompanyId = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get('company_id') || params.get('tenant_id') || '';
+  }, [location.search]);
+  const [companyId, setCompanyId] = useState(queryCompanyId);
   
   const [userId, setUserId] = useState(''); // Filtro opcional
 
   useEffect(() => {
+    setCompanyId(queryCompanyId);
+    setPage(1);
+  }, [queryCompanyId]);
+
+  useEffect(() => {
     load(page);
     // eslint-disable-next-line
-  }, [page]);
+  }, [page, companyId]);
 
   async function load(nextPage) {
     setLoading(true);
     setErr('');
     try {
-      // GET /audit?page=...&user_id=...
+      // GET /audit?page=...&user_id=...&company_id=...
       const params = new URLSearchParams();
       params.set('page', String(nextPage));
       if (userId.trim()) params.set('user_id', userId.trim());
+      if (companyId) params.set('company_id', companyId);
 
       const res = await api.get(`/api/audit?${params.toString()}`);
       const out = normalizePageResponse(res);
@@ -47,11 +62,18 @@ export default function AuditLogsPage({ apiUrl, token }) {
       load(1);
   }
 
+  function clearCompanyFilter() {
+      setCompanyId('');
+      setPage(1);
+      navigate('/dashboard/audit', { replace: true });
+  }
+
   async function handleExport() {
     setExporting(true);
     try {
       const params = new URLSearchParams();
       if (userId.trim()) params.set('user_id', userId.trim());
+      if (companyId) params.set('company_id', companyId);
 
       const res = await fetch(`${apiUrl}/api/audit/export?${params.toString()}`, {
         headers: {
@@ -85,6 +107,22 @@ export default function AuditLogsPage({ apiUrl, token }) {
         <h1 className="text-xl font-bold">Logs de Auditoría</h1>
         <p className="text-sm text-slate-600">Registro histórico de acciones críticas en el sistema.</p>
       </div>
+
+      {companyId && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand/20 bg-brand/5 px-4 py-3 text-sm text-slate-700">
+          <span className="inline-flex items-center gap-2">
+            <i className="bi bi-funnel-fill text-brand" />
+            Mostrando la auditoría de la empresa seleccionada.
+          </span>
+          <button
+            type="button"
+            onClick={clearCompanyFilter}
+            className="text-xs font-semibold text-brand hover:underline"
+          >
+            Ver toda la auditoría
+          </button>
+        </div>
+      )}
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4">
         {/* Filters */}

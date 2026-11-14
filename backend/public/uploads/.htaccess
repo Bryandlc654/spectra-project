@@ -1,0 +1,6 @@
+# Defensa en profundidad: en las carpetas de subidas nunca se ejecuta código.
+# Aunque una subida colara un archivo con extensión de script, Apache lo deniega.
+<FilesMatch "\.(php[0-9]?|phtml|phar|pht|cgi|pl|py|sh)$">
+    Require all denied
+</FilesMatch>
+Options -ExecCGI -Indexes

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useToast } from '../../components/ToastProvider';
 import Modal from '../../components/Modal';
@@ -40,6 +40,12 @@ export default function TimesheetsPage({ apiUrl, token }) {
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [itemToReject, setItemToReject] = useState(null);
+
+  const [documentFile, setDocumentFile] = useState(null);
+  const [uploadingDocument, setUploadingDocument] = useState(false);
+  const [commentText, setCommentText] = useState('');
+  const [savingComment, setSavingComment] = useState(false);
+  const documentInputRef = useRef(null);
 
   // Load Projects for dropdown
   const [projects, setProjects] = useState([]);
@@ -108,6 +114,122 @@ export default function TimesheetsPage({ apiUrl, token }) {
       }
     } catch (e) {
       toast.error(e.message || 'Error actualizando estado');
+    }
+  };
+
+  const handleCompletionChange = async (id, completionStatus) => {
+    try {
+      await apiFetch(apiUrl, `/api/timesheets/${id}`, {
+        token,
+        method: 'PUT',
+        body: JSON.stringify({ completion_status: completionStatus })
+      });
+      toast.success(completionStatus === 'completed' ? 'Hoja marcada como completada' : 'Hoja marcada como pendiente');
+      setTimesheets(prev => prev.map(t => t.id === id ? { ...t, completion_status: completionStatus } : t));
+      if (selectedTimesheet?.id === id) {
+        setSelectedTimesheet(prev => ({ ...prev, completion_status: completionStatus }));
+      }
+    } catch (e) {
+      toast.error(e.message || 'Error actualizando estado');
+    }
+  };
+
+  const refreshSelectedTimesheet = async (timesheetId = selectedTimesheet?.id) => {
+    if (!timesheetId) return;
+    const res = await apiFetch(apiUrl, `/api/timesheets/${timesheetId}`, { token });
+    setSelectedTimesheet(res);
+  };
+
+  const handleUploadDocument = async () => {
+    if (!selectedTimesheet || !documentFile) {
+      toast.error('Selecciona un documento');
+      return;
+    }
+
+    setUploadingDocument(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', documentFile);
+
+      const res = await fetch(`${apiUrl}/api/timesheets/${selectedTimesheet.id}/attachments`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || data.error || 'Error al subir documento');
+
+      toast.success('Documento subido');
+      setDocumentFile(null);
+      if (documentInputRef.current) documentInputRef.current.value = '';
+      await refreshSelectedTimesheet();
+    } catch (e) {
+      toast.error(e.message || 'Error al subir documento');
+    } finally {
+      setUploadingDocument(false);
+    }
+  };
+
+  const handleDownloadDocument = async (attachment) => {
+    if (!selectedTimesheet) return;
+    try {
+      const res = await fetch(`${apiUrl}/api/timesheets/${selectedTimesheet.id}/attachments/${attachment.id}/download`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('No se pudo descargar el documento');
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = attachment.file_name || 'documento';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      toast.error(e.message || 'Error al descargar documento');
+    }
+  };
+
+  const handleDeleteDocument = async (attachment) => {
+    if (!selectedTimesheet || !window.confirm('¿Eliminar este documento?')) return;
+    try {
+      await apiFetch(apiUrl, `/api/timesheets/${selectedTimesheet.id}/attachments/${attachment.id}`, {
+        token,
+        method: 'DELETE'
+      });
+      toast.success('Documento eliminado');
+      await refreshSelectedTimesheet();
+    } catch (e) {
+      toast.error(e.message || 'Error al eliminar documento');
+    }
+  };
+
+  const handleAddComment = async (e) => {
+    e.preventDefault();
+    if (!selectedTimesheet || !commentText.trim()) {
+      toast.error('Escribe un comentario');
+      return;
+    }
+
+    setSavingComment(true);
+    try {
+      const res = await apiFetch(apiUrl, `/api/timesheets/${selectedTimesheet.id}/comments`, {
+        token,
+        method: 'POST',
+        body: JSON.stringify({ body: commentText.trim() })
+      });
+      toast.success('Comentario agregado');
+      setCommentText('');
+      setSelectedTimesheet(prev => prev ? {
+        ...prev,
+        comments: [...(prev.comments || []), res.comment].filter(Boolean)
+      } : prev);
+    } catch (e) {
+      toast.error(e.message || 'Error al agregar comentario');
+    } finally {
+      setSavingComment(false);
     }
   };
 
@@ -210,6 +332,12 @@ export default function TimesheetsPage({ apiUrl, token }) {
     );
   };
 
+  const formatDateTime = (value) => {
+    if (!value) return '';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -253,6 +381,7 @@ export default function TimesheetsPage({ apiUrl, token }) {
                 <th className="px-4 py-3 text-left">Proyecto</th>
                 <th className="px-4 py-3 text-left">Total Horas</th>
                 <th className="px-4 py-3 text-left">Estado</th>
+                <th className="px-4 py-3 text-left">Aprobación</th>
                 <th className="px-4 py-3 text-right">Acciones</th>
               </tr>
             </thead>
@@ -267,6 +396,20 @@ export default function TimesheetsPage({ apiUrl, token }) {
                   </td>
                   <td className="px-4 py-3 text-slate-600">
                       {ts.total_hours || '0.00'}
+                  </td>
+                  <td className="px-4 py-3">
+                      <select
+                          value={ts.completion_status || 'pending'}
+                          onChange={(e) => handleCompletionChange(ts.id, e.target.value)}
+                          className={`rounded-lg border-0 text-xs font-semibold px-2 py-1 ${
+                              (ts.completion_status || 'pending') === 'completed'
+                                  ? 'bg-emerald-50 text-emerald-700'
+                                  : 'bg-amber-50 text-amber-700'
+                          }`}
+                      >
+                          <option value="pending">Pendiente</option>
+                          <option value="completed">Completado</option>
+                      </select>
                   </td>
                   <td className="px-4 py-3">
                       {renderStatus(ts.status)}
@@ -315,7 +458,18 @@ export default function TimesheetsPage({ apiUrl, token }) {
                 <div className="flex justify-between items-center bg-slate-50 p-4 rounded-xl">
                     <div>
                         <p className="text-sm text-slate-500">Periodo</p>
-                        <p className="font-semibold">{selectedTimesheet.period_start} — {selectedTimesheet.period_end}</p>
+                        <p className="font-semibold">{selectedTimesheet.period_start} - {selectedTimesheet.period_end}</p>
+                        <div className="mt-2 flex items-center gap-2">
+                            <span className="text-xs font-semibold text-slate-500">Estado:</span>
+                            <select
+                                value={selectedTimesheet.completion_status || 'pending'}
+                                onChange={(e) => handleCompletionChange(selectedTimesheet.id, e.target.value)}
+                                className="rounded-lg border-slate-200 text-xs font-semibold"
+                            >
+                                <option value="pending">Pendiente</option>
+                                <option value="completed">Completado</option>
+                            </select>
+                        </div>
                     </div>
                     <div className="text-right">
                         <p className="text-sm text-slate-500">Total Horas</p>
@@ -424,6 +578,98 @@ export default function TimesheetsPage({ apiUrl, token }) {
                     ) : (
                         <p className="text-slate-500 text-sm text-center py-4">No hay entradas registradas</p>
                     )}
+                </div>
+
+                <div>
+                    <h3 className="font-bold text-slate-900 mb-3">Documentos</h3>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center mb-3">
+                        <input
+                            ref={documentInputRef}
+                            type="file"
+                            accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.webp,.zip"
+                            onChange={(e) => setDocumentFile(e.target.files?.[0] || null)}
+                            className="block w-full text-xs text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-brand/10 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-brand hover:file:bg-brand/20"
+                        />
+                        <button
+                            type="button"
+                            onClick={handleUploadDocument}
+                            disabled={!documentFile || uploadingDocument}
+                            className="inline-flex items-center justify-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white hover:bg-brand/90 disabled:opacity-50"
+                        >
+                            <i className="bi bi-upload" />
+                            {uploadingDocument ? 'Subiendo...' : 'Subir'}
+                        </button>
+                    </div>
+                    {selectedTimesheet.attachments && selectedTimesheet.attachments.length > 0 ? (
+                        <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200 overflow-hidden">
+                            {selectedTimesheet.attachments.map((attachment) => (
+                                <li key={attachment.id} className="flex items-center justify-between gap-3 px-3 py-2 bg-white">
+                                    <div className="min-w-0">
+                                        <p className="truncate text-sm font-medium text-slate-800">{attachment.file_name}</p>
+                                        <p className="text-xs text-slate-500">
+                                            {attachment.uploaded_by_name || 'Usuario'}
+                                            {attachment.size_bytes ? ` · ${(Number(attachment.size_bytes) / 1024).toFixed(1)} KB` : ''}
+                                        </p>
+                                    </div>
+                                    <div className="flex shrink-0 items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => handleDownloadDocument(attachment)}
+                                            className="text-brand hover:text-brand/80"
+                                            title="Descargar"
+                                        >
+                                            <i className="bi bi-download" />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleDeleteDocument(attachment)}
+                                            className="text-red-500 hover:text-red-700"
+                                            title="Eliminar"
+                                        >
+                                            <i className="bi bi-trash" />
+                                        </button>
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    ) : (
+                        <p className="text-slate-500 text-sm text-center py-4">No hay documentos adjuntos</p>
+                    )}
+                </div>
+
+                <div>
+                    <h3 className="font-bold text-slate-900 mb-3">Comentarios</h3>
+                    <div className="mb-3 max-h-64 space-y-2 overflow-y-auto">
+                        {selectedTimesheet.comments && selectedTimesheet.comments.length > 0 ? (
+                            selectedTimesheet.comments.map((comment) => (
+                                <div key={comment.id} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="text-xs font-bold text-slate-700">{comment.user_name || 'Usuario'}</span>
+                                        <span className="text-[11px] text-slate-400">{formatDateTime(comment.created_at)}</span>
+                                    </div>
+                                    <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{comment.body}</p>
+                                </div>
+                            ))
+                        ) : (
+                            <p className="text-slate-500 text-sm text-center py-4">No hay comentarios</p>
+                        )}
+                    </div>
+                    <form onSubmit={handleAddComment} className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                        <textarea
+                            value={commentText}
+                            onChange={(e) => setCommentText(e.target.value)}
+                            placeholder="Escribe un comentario..."
+                            className="min-h-[70px] w-full rounded-xl border-slate-200 text-sm focus:border-brand focus:ring-brand"
+                        />
+                        <button
+                            type="submit"
+                            disabled={savingComment || !commentText.trim()}
+                            className="inline-flex shrink-0 items-center justify-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white hover:bg-brand/90 disabled:opacity-50"
+                        >
+                            <i className="bi bi-chat-dots" />
+                            {savingComment ? 'Enviando...' : 'Comentar'}
+                        </button>
+                    </form>
                 </div>
             </div>
         )}

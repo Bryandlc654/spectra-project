@@ -5,10 +5,12 @@ namespace App\Controllers;
 use App\Database;
 use App\Support\Auth;
 use App\Support\Cache;
+use App\Support\HtmlSanitizer;
 use App\Support\Response;
 use App\Support\SMTP;
 use App\Support\TaxEngine;
 use App\Support\Str;
+use App\Support\Schema;
 use Dompdf\Dompdf;
 use PDO;
 use Throwable;
@@ -41,6 +43,7 @@ final class TenantController
                 status VARCHAR(50) DEFAULT 'active',
                 logo_url VARCHAR(255) NULL,
                 read_only_mode BOOLEAN DEFAULT FALSE,
+                kyb_required BOOLEAN DEFAULT TRUE,
                 deleted_at DATETIME NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -48,6 +51,8 @@ final class TenantController
                 INDEX (deleted_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
         ");
+
+        try { $this->pdo->exec("ALTER TABLE companies ADD COLUMN kyb_required BOOLEAN DEFAULT FALSE AFTER read_only_mode"); } catch (\Throwable $e) {}
 
         $this->pdo->exec("
             CREATE TABLE IF NOT EXISTS currencies (
@@ -153,8 +158,6 @@ final class TenantController
      * GET    /api/tenants/{id}/payroll
      * GET    /api/tenants/{id}/projects
      * GET    /api/tenants/{id}/contracts
-     *
-     * POST   /api/tenants/{id}/impersonate
      */
     public function handle(array $segments, string $method): void
     {
@@ -168,8 +171,10 @@ final class TenantController
             $role = $user['platform_role'] ?? '';
             $isAdmin = in_array($role, ['super_admin', 'admin'], true);
             $isSupportView = ($role === 'support' && $tenantId === 'support-view');
-            if (!$isAdmin && !$isSupportView) {
-                Response::error('Acceso denegado: se requieren privilegios de administrador', 403);
+            $isOwnTenant = (in_array($role, ['company_admin', 'user', 'it_admin', 'freelancer'], true) && ($user['company_id'] ?? '') === $tenantId && $tenantId !== null && $tenantId !== 'wizard' && $tenantId !== 'export');
+            
+            if (!$isAdmin && !$isSupportView && !$isOwnTenant) {
+                Response::error('Acceso denegado: se requieren privilegios de administrador o ser propietario de la empresa', 403);
                 return;
             }
 
@@ -223,7 +228,7 @@ final class TenantController
 
             // Enforce Company Status & Read Only Mode
             if ($method !== 'GET') {
-                $allowedActions = ['activate', 'suspend', 'readonly', 'impersonate', 'settings'];
+                $allowedActions = ['activate', 'suspend', 'readonly', 'settings', 'kyb'];
                 if (!in_array($sub, $allowedActions, true)) {
                     $stmtStatus = $this->pdo->prepare("SELECT status, read_only_mode FROM companies WHERE id = :id LIMIT 1");
                     $stmtStatus->execute([':id' => $tenantId]);
@@ -237,7 +242,7 @@ final class TenantController
                         if ((int)($companyStatus['read_only_mode'] ?? 0) === 1) {
                             Response::error('Acción inhabilitada: Modo Solo Lectura', 423, [
                                 'code' => 'read_only',
-                                'hint' => 'Desactiva el modo desde Configuración del Tenant para operaciones de escritura'
+                                'hint' => 'Desactiva el modo desde Configuración de la Empresa para operaciones de escritura'
                             ]);
                             return;
                         }
@@ -294,6 +299,7 @@ final class TenantController
                 if ($action === 'reset-role' && $method === 'POST') { $this->membersResetRole($tenantId, $subId); return; }
                 if ($action === 'force-password-reset' && $method === 'POST') { $this->membersForcePasswordReset($tenantId, $subId); return; }
                 
+                if ($method === 'PUT') { $this->membersUpdate($tenantId, $subId); return; }
                 if ($method === 'DELETE') { $this->membersDestroy($tenantId, $subId); return; }
                 
                 Response::error('Método no permitido', 405);
@@ -392,6 +398,10 @@ final class TenantController
                         if ($method === 'GET') { $this->invoicesAttachmentInfo($tenantId, $subId); return; }
                         if ($method === 'DELETE') { $this->invoicesDeleteAttachment($tenantId, $subId); return; }
                     }
+                    if ($action === 'keyfacil' && $method === 'POST') { $this->invoicesSendKeyfacil($tenantId, $subId); return; }
+                    if ($action === 'keyfacil-void' && $method === 'POST') { $this->invoicesVoidKeyfacil($tenantId, $subId); return; }
+                    if ($action === 'keyfacil-pdf' && $method === 'GET') { $this->invoicesKeyfacilFile($tenantId, $subId, 'pdf'); return; }
+                    if ($action === 'keyfacil-xml' && $method === 'GET') { $this->invoicesKeyfacilFile($tenantId, $subId, 'xml'); return; }
                 }
                 Response::error('Método no permitido', 405);
                 return;
@@ -476,8 +486,6 @@ final class TenantController
                 Response::error('Método no permitido', 405);
                 return;
             }
-
-            if ($sub === 'impersonate' && $method === 'POST') { $this->impersonate($tenantId); return; }
 
             Response::error('Ruta no encontrada', 404);
             return;
@@ -832,8 +840,8 @@ final class TenantController
 
             $params = [];
             if ($search) {
-                $sql .= " AND (c.legal_name LIKE :s OR c.trade_name LIKE :s)";
-                $params[':s'] = "%$search%";
+                $sql .= " AND (c.legal_name LIKE :s_1 OR c.trade_name LIKE :s_2)";
+                $params[':s_1'] = $params[':s_2'] = "%$search%";
             }
 
             $sql .= " ORDER BY c.created_at DESC LIMIT $limit OFFSET $offset";
@@ -845,7 +853,7 @@ final class TenantController
             // Count total for pagination
             $countSql = "SELECT COUNT(*) FROM companies c WHERE c.deleted_at IS NULL";
             if ($search) {
-                $countSql .= " AND (c.legal_name LIKE :s OR c.trade_name LIKE :s)";
+                $countSql .= " AND (c.legal_name LIKE :s_1 OR c.trade_name LIKE :s_2)";
             }
             $stmtCount = $this->pdo->prepare($countSql);
             if ($search) $stmtCount->execute([':s' => "%$search%"]);
@@ -866,6 +874,23 @@ final class TenantController
         }
     }
 
+    /**
+     * Normaliza valores booleanos que pueden llegar como JSON (true/false),
+     * multipart ("1"/"0", "true"/"false") o query string.
+     */
+    private function toBoolInt($value, bool $default = false): int
+    {
+        if ($value === null) return $default ? 1 : 0;
+        if (is_bool($value)) return $value ? 1 : 0;
+        if (is_int($value) || is_float($value)) return (int)$value !== 0 ? 1 : 0;
+
+        $normalized = strtolower(trim((string)$value));
+        if (in_array($normalized, ['1', 'true', 'on', 'yes', 'si', 'sí'], true)) return 1;
+        if (in_array($normalized, ['0', 'false', 'off', 'no'], true)) return 0;
+
+        return $default ? 1 : 0;
+    }
+
     private function store(): void
     {
         $payload = $this->readPayload();
@@ -877,9 +902,10 @@ final class TenantController
         $timezoneId = (int)($payload['timezone_id'] ?? 0); // NUEVO
         $status = trim((string)($payload['status'] ?? 'active'));
         $lang = trim((string)($payload['default_language'] ?? 'es'));
+        $kybRequired = $this->toBoolInt($payload['kyb_required'] ?? null, true);
 
-        if ($legal === '' || $countryId <= 0 || $currencyId <= 0 || $timezoneId <= 0) {
-            Response::error('legal_name, country_id, default_currency_id y timezone_id son requeridos', 422);
+        if ($legal === '' || $countryId <= 0 || $currencyId <= 0) {
+            Response::error('legal_name, country_id y default_currency_id son requeridos', 422);
             return;
         }
         if (!in_array($status, ['active', 'suspended'], true)) $status = 'active';
@@ -896,29 +922,17 @@ final class TenantController
         if (!$this->existsById('countries', $countryId)) { Response::error('country_id inválido', 422); return; }
         if (!$this->existsById('currencies', $currencyId)) { Response::error('default_currency_id inválido', 422); return; }
         
-        // Validar timezone
-        $stmtTz = $this->pdo->prepare("SELECT 1 FROM timezones WHERE id = :id LIMIT 1");
-        $stmtTz->execute([':id' => $timezoneId]);
-        if (!$stmtTz->fetchColumn()) { Response::error('timezone_id inválido', 422); return; }
-
-        // Logo Upload
-        $logoUrl = null;
-        if (isset($_FILES['logo']) && $_FILES['logo']['error'] === UPLOAD_ERR_OK) {
-            $allowed = ['image/jpeg', 'image/png', 'image/webp'];
-            $finfo = new \finfo(FILEINFO_MIME_TYPE);
-            $mime = $finfo->file($_FILES['logo']['tmp_name']);
-            
-            if (in_array($mime, $allowed)) {
-                $ext = pathinfo($_FILES['logo']['name'], PATHINFO_EXTENSION);
-                $filename = 'company_' . uniqid() . '.' . $ext;
-                $uploadDir = __DIR__ . '/../../public/uploads/logos';
-                if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
-                
-                if (move_uploaded_file($_FILES['logo']['tmp_name'], $uploadDir . '/' . $filename)) {
-                    $logoUrl = '/uploads/logos/' . $filename;
-                }
-            }
+        // Validar timezone (opcional)
+        if ($timezoneId > 0) {
+            $stmtTz = $this->pdo->prepare("SELECT 1 FROM timezones WHERE id = :id LIMIT 1");
+            $stmtTz->execute([':id' => $timezoneId]);
+            if (!$stmtTz->fetchColumn()) { Response::error('timezone_id inválido', 422); return; }
         }
+
+        // Logo Upload (validado por contenido; ver processLogoUpload)
+        $logo = $this->processLogoUpload('company_');
+        if ($logo['error'] !== null) { Response::error($logo['error'], 422); return; }
+        $logoUrl = $logo['url'];
 
         $id = $this->uuid();
 
@@ -926,8 +940,8 @@ final class TenantController
             $this->pdo->beginTransaction();
 
             $stmt = $this->pdo->prepare("
-                INSERT INTO companies (id, legal_name, trade_name, country_id, default_currency_id, timezone_id, status, logo_url, created_at)
-                VALUES (:id, :legal, :trade, :country, :currency, :tzid, :status, :logo, NOW())
+                INSERT INTO companies (id, legal_name, trade_name, country_id, default_currency_id, timezone_id, status, logo_url, kyb_required, created_at)
+                VALUES (:id, :legal, :trade, :country, :currency, :tzid, :status, :logo, :kyb_required, NOW())
             ");
             $stmt->execute([
                 ':id' => $id,
@@ -935,9 +949,10 @@ final class TenantController
                 ':trade' => ($trade !== '' ? $trade : null),
                 ':country' => $countryId,
                 ':currency' => $currencyId,
-                ':tzid' => $timezoneId,
+                ':tzid' => $timezoneId > 0 ? $timezoneId : null,
                 ':status' => $status,
                 ':logo' => $logoUrl,
+                ':kyb_required' => $kybRequired,
             ]);
 
             $this->ensureCompanySettings($id, $lang);
@@ -959,7 +974,7 @@ final class TenantController
         ]);
 
         Response::json([
-            'message' => 'Tenant creado',
+            'message' => 'Empresa creada',
             'data' => [
                 'id' => $id,
             ],
@@ -977,6 +992,7 @@ final class TenantController
         $currencyId = (int)($payload['default_currency_id'] ?? 0);
         $timezoneId = (int)($payload['timezone_id'] ?? 0);
         $status = trim((string)($payload['status'] ?? 'active'));
+        $kybRequired = $this->toBoolInt($payload['kyb_required'] ?? null, true);
         
         // Settings
         $taxCountry = trim((string)($payload['tax_country'] ?? ''));
@@ -993,7 +1009,7 @@ final class TenantController
         $createRoles = (bool)($payload['create_default_roles'] ?? false);
         $activateTemplates = (bool)($payload['activate_templates'] ?? false);
 
-        if ($legal === '' || $countryId <= 0 || $currencyId <= 0 || $timezoneId <= 0) {
+        if ($legal === '' || $countryId <= 0 || $currencyId <= 0) {
             Response::error('Faltan datos básicos obligatorios', 422);
             return;
         }
@@ -1016,6 +1032,14 @@ final class TenantController
              Response::error('Email del administrador es requerido', 422);
              return;
         }
+        if (!filter_var($ownerEmail, FILTER_VALIDATE_EMAIL)) {
+            Response::error('El email del administrador no es válido', 422);
+            return;
+        }
+        if (($payload['owner_mode'] ?? 'create') !== 'invite' && $ownerName === '') {
+            Response::error('El nombre del administrador es requerido', 422);
+            return;
+        }
 
         // Subfuncion: Validacion tax_id unico
         if ($taxId !== '') {
@@ -1035,31 +1059,17 @@ final class TenantController
              return;
         }
 
-        // Validar timezone
-        $stmtTz = $this->pdo->prepare("SELECT 1 FROM timezones WHERE id = :id LIMIT 1");
-        $stmtTz->execute([':id' => $timezoneId]);
-        if (!$stmtTz->fetchColumn()) { Response::error('timezone_id inválido', 422); return; }
-
-        // Logo Upload
-        $logoUrl = null;
-        if (isset($_FILES['logo']) && $_FILES['logo']['error'] === UPLOAD_ERR_OK) {
-            $allowed = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
-            $ext = strtolower(pathinfo($_FILES['logo']['name'], PATHINFO_EXTENSION));
-            
-            if (in_array($ext, $allowed)) {
-                $uploadDir = __DIR__ . '/../../public/uploads/logos/';
-                if (!is_dir($uploadDir)) {
-                    @mkdir($uploadDir, 0755, true);
-                }
-                
-                $filename = uniqid('logo_') . '.' . $ext;
-                $targetPath = $uploadDir . $filename;
-                
-                if (move_uploaded_file($_FILES['logo']['tmp_name'], $targetPath)) {
-                    $logoUrl = '/uploads/logos/' . $filename;
-                }
-            }
+        // Validar timezone (opcional)
+        if ($timezoneId > 0) {
+            $stmtTz = $this->pdo->prepare("SELECT 1 FROM timezones WHERE id = :id LIMIT 1");
+            $stmtTz->execute([':id' => $timezoneId]);
+            if (!$stmtTz->fetchColumn()) { Response::error('timezone_id inválido', 422); return; }
         }
+
+        // Logo Upload (validado por contenido; antes un archivo no válido se ignoraba en silencio)
+        $logo = $this->processLogoUpload('logo_');
+        if ($logo['error'] !== null) { Response::error($logo['error'], 422); return; }
+        $logoUrl = $logo['url'];
 
         try {
             // Lazy Migration for logo_url
@@ -1075,8 +1085,8 @@ final class TenantController
             // 2. Create Company
             $companyId = $this->uuid();
             $stmt = $this->pdo->prepare("
-                INSERT INTO companies (id, legal_name, trade_name, logo_url, country_id, default_currency_id, timezone_id, status, created_at)
-                VALUES (:id, :legal, :trade, :logo, :country, :currency, :tzid, :status, NOW())
+                INSERT INTO companies (id, legal_name, trade_name, logo_url, country_id, default_currency_id, timezone_id, status, kyb_required, created_at)
+                VALUES (:id, :legal, :trade, :logo, :country, :currency, :tzid, :status, :kyb_required, NOW())
             ");
             $stmt->execute([
                 ':id' => $companyId,
@@ -1085,8 +1095,9 @@ final class TenantController
                 ':logo' => $logoUrl,
                 ':country' => $countryId,
                 ':currency' => $currencyId,
-                ':tzid' => $timezoneId,
+                ':tzid' => $timezoneId > 0 ? $timezoneId : null,
                 ':status' => $status,
+                ':kyb_required' => $kybRequired,
             ]);
 
             // 3. Create Settings (Ajustado a Schema: sin tax_country, invoice_number_next)
@@ -1133,6 +1144,16 @@ final class TenantController
             $stmt->execute([':email' => $ownerEmail]);
             $existingUser = $stmt->fetch(PDO::FETCH_ASSOC);
 
+            // Validar modo estricto
+            if ($ownerMode === 'create' && $existingUser) {
+                Response::error("El correo '$ownerEmail' ya está registrado. Para agregarlo a esta empresa, selecciona 'Invitar usuario existente'.", 409);
+                return;
+            }
+            if ($ownerMode === 'invite' && !$existingUser) {
+                Response::error("El correo '$ownerEmail' no existe en la plataforma. Para registrarlo, selecciona 'Crear nuevo usuario'.", 404);
+                return;
+            }
+
             if ($existingUser) {
                 $userId = $existingUser['id'];
             } else {
@@ -1147,7 +1168,7 @@ final class TenantController
                 }
                 $stmt = $this->pdo->prepare("
                     INSERT INTO users (id, full_name, email, password_hash, status, platform_role, created_at)
-                    VALUES (:id, :name, :email, :pwd, 'active', 'user', NOW())
+                    VALUES (:id, :name, :email, :pwd, 'active', 'company_admin', NOW())
                 ");
                 $stmt->execute([
                     ':id' => $userId,
@@ -1234,6 +1255,36 @@ final class TenantController
                 $this->seedTemplates($companyId, $countryId);
             }
 
+            // 9. Send Invitation Email (SMTP)
+            try {
+                $subject = "Invitacion a Spectra: {$legal}";
+                // Valores escapados para el cuerpo HTML del correo
+                $legalHtml = htmlspecialchars((string)$legal, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                
+                if ($existingUser) {
+                    $loginLink = rtrim($this->getFrontendUrl(), '/') . "/auth/login";
+                    $body = "Hola,<br><br>Has sido agregado como Administrador a la empresa <b>{$legalHtml}</b> en Spectra.<br>";
+                    $body .= "Dado que ya tienes una cuenta en la plataforma, simplemente inicia sesión para acceder a tu nuevo espacio de trabajo.<br><br>";
+                    $body .= "<a href='{$loginLink}' style='padding: 10px 20px; background-color: #4F46E5; color: white; text-decoration: none; border-radius: 5px; display: inline-block;'>Iniciar Sesión</a>";
+                } else {
+                    // Create a password reset token for the new user
+                    $token = bin2hex(random_bytes(32));
+                    $this->pdo->prepare("DELETE FROM password_resets WHERE email = ?")->execute([$ownerEmail]);
+                    $this->pdo->prepare("INSERT INTO password_resets (email, token, created_at) VALUES (?, ?, NOW())")->execute([$ownerEmail, $token]);
+                    $resetLink = rtrim($this->getFrontendUrl(), '/') . "/auth/reset-password?token={$token}&email=" . urlencode($ownerEmail);
+                    
+                    $nameToShow = htmlspecialchars($ownerName !== '' ? $ownerName : 'Usuario', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                    $body = "Hola {$nameToShow},<br><br>Has sido invitado a administrar la empresa <b>{$legalHtml}</b> en Spectra.<br>";
+                    $body .= "Para comenzar, por favor configura tu contraseña haciendo clic en el siguiente enlace:<br><br>";
+                    $body .= "<a href='{$resetLink}' style='padding: 10px 20px; background-color: #4F46E5; color: white; text-decoration: none; border-radius: 5px; display: inline-block;'>Configurar Contraseña</a><br><br>";
+                    $body .= "El enlace expirará en 60 minutos.";
+                }
+                
+                \App\Support\SMTP::send($ownerEmail, $subject, $body, true);
+            } catch (\Exception $e) {
+                error_log("SMTP Error in wizard for {$ownerEmail}: " . $e->getMessage());
+            }
+
             $this->audit('tenant.created_wizard', 'company', $companyId, ['legal_name' => $legal]);
 
             $this->pdo->commit();
@@ -1257,7 +1308,7 @@ final class TenantController
     {
         $company = $this->fetchCompanyWithRelations($id);
         if (!$company) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -1276,7 +1327,7 @@ final class TenantController
     private function update(string $id): void
     {
         if (!$this->fetchCompany($id)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -1292,27 +1343,12 @@ final class TenantController
         $sets = [];
         $params = [':id' => $id];
 
-        // Handle Logo Upload
-        if (isset($_FILES['logo']) && $_FILES['logo']['error'] === UPLOAD_ERR_OK) {
-            $allowed = ['jpg', 'jpeg', 'png', 'webp'];
-            $filename = $_FILES['logo']['name'];
-            $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-            
-            if (in_array($ext, $allowed)) {
-                $uploadDir = __DIR__ . '/../../public/uploads/logos/';
-                if (!is_dir($uploadDir)) {
-                    @mkdir($uploadDir, 0755, true);
-                }
-                
-                $newFilename = uniqid('logo_' . $id . '_') . '.' . $ext;
-                $targetPath = $uploadDir . $newFilename;
-                
-                if (move_uploaded_file($_FILES['logo']['tmp_name'], $targetPath)) {
-                    $logoUrl = '/uploads/logos/' . $newFilename;
-                    $sets[] = 'logo_url = :logo';
-                    $params[':logo'] = $logoUrl;
-                }
-            }
+        // Handle Logo Upload (validado por contenido)
+        $logo = $this->processLogoUpload('logo_');
+        if ($logo['error'] !== null) { Response::error($logo['error'], 422); return; }
+        if ($logo['url'] !== null) {
+            $sets[] = 'logo_url = :logo';
+            $params[':logo'] = $logo['url'];
         }
 
         if ($legal !== null && $legal !== '') { $sets[] = 'legal_name = :legal'; $params[':legal'] = $legal; }
@@ -1367,13 +1403,13 @@ final class TenantController
 
         $this->audit('tenant.updated', 'company', $id, $payload);
 
-        Response::json(['message' => 'Tenant actualizado']);
+        Response::json(['message' => 'Empresa actualizada']);
     }
 
     private function suspend(string $id): void
     {
         if (!$this->fetchCompany($id)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -1390,13 +1426,13 @@ final class TenantController
 
         $this->audit('tenant.suspended', 'company', $id, ['reason' => $reason]);
 
-        Response::json(['message' => 'Tenant suspendido']);
+        Response::json(['message' => 'Empresa suspendida']);
     }
 
     private function activate(string $id): void
     {
         if (!$this->fetchCompany($id)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -1408,13 +1444,13 @@ final class TenantController
 
         $this->audit('tenant.activated', 'company', $id, ['reason' => ($reason !== '' ? $reason : null)]);
 
-        Response::json(['message' => 'Tenant activado']);
+        Response::json(['message' => 'Empresa activada']);
     }
 
     private function toggleReadOnly(string $id): void
     {
         if (!$this->fetchCompany($id)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -1437,7 +1473,7 @@ final class TenantController
     private function destroy(string $id): void
     {
         if (!$this->fetchCompany($id)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -1491,14 +1527,14 @@ final class TenantController
 
         $this->audit('tenant.deleted', 'company', $id, ['legal_name' => $companyName, 'disabled_users' => $disabled]);
 
-        Response::json(['message' => 'Tenant eliminado']);
+        Response::json(['message' => 'Empresa eliminada']);
     }
 
     private function getStats(string $id): void
     {
         $company = $this->fetchCompany($id);
         if (!$company) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -1626,7 +1662,7 @@ final class TenantController
     private function getSettings(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -1642,7 +1678,7 @@ final class TenantController
     private function updateSettings(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -1650,6 +1686,14 @@ final class TenantController
         $payload = $_POST;
         if (empty($payload)) {
             $payload = $this->readPayload(); // Fallback for JSON
+        }
+
+        // Solo el equipo de plataforma puede cambiar los gates operativos del tenant.
+        $role = (string)(Auth::user()['platform_role'] ?? '');
+        $canManageGates = in_array($role, ['super_admin', 'admin', 'support', 'security', 'legal', 'finance'], true);
+        if (!$canManageGates && (array_key_exists('kyb_required', $payload) || array_key_exists('read_only_mode', $payload))) {
+            Response::error('Solo el equipo de plataforma puede cambiar el modo de lectura o el requerimiento KYB', 403);
+            return;
         }
 
         $this->ensureCompanySettings($companyId, (string)($payload['default_language'] ?? 'es'));
@@ -1671,7 +1715,7 @@ final class TenantController
         }
 
         if ($sets) {
-            $sql = "UPDATE company_settings SET " . implode(', ', $sets) . " WHERE company_id LIKE :company_id";
+            $sql = "UPDATE company_settings SET " . implode(', ', $sets) . " WHERE company_id = :company_id";
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute($params);
         }
@@ -1715,40 +1759,34 @@ final class TenantController
 
         // Sync read_only_mode to companies if provided
         if (array_key_exists('read_only_mode', $payload)) {
-            $val = (int)((bool)$payload['read_only_mode']);
+            $val = $this->toBoolInt($payload['read_only_mode'], false);
             $companySets[] = "read_only_mode = :read_only_mode";
             $companyParams[':read_only_mode'] = $val;
             $this->audit($val ? 'tenant.readonly.enabled' : 'tenant.readonly.disabled', 'company', $companyId, []);
 
             // Sincroniza company_settings.read_only_mode (lo usan Auth y getSettings)
-            $this->pdo->prepare("UPDATE company_settings SET read_only_mode = :val WHERE company_id LIKE :cid")
+            $this->pdo->prepare("UPDATE company_settings SET read_only_mode = :val WHERE company_id = :cid")
                 ->execute([':val' => $val, ':cid' => $companyId]);
         }
 
-        // Logo Upload
-        if (isset($_FILES['logo']) && $_FILES['logo']['error'] === UPLOAD_ERR_OK) {
-            $file = $_FILES['logo'];
-            $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-            if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp'])) {
-                Response::error('Formato de logo no válido (jpg, png, webp)', 422);
-                return;
-            }
-            
-            $uploadDir = __DIR__ . '/../../public/uploads/logos';
-            if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
-            
-            $filename = $companyId . '_' . time() . '.' . $ext;
-            $targetPath = $uploadDir . '/' . $filename;
-            
-            if (move_uploaded_file($file['tmp_name'], $targetPath)) {
-                $logoUrl = '/uploads/logos/' . $filename;
-                $companySets[] = "logo_url = :logo_url";
-                $companyParams[':logo_url'] = $logoUrl;
-            }
+        // KYB requirement can be enabled/disabled per company by platform staff.
+        if (array_key_exists('kyb_required', $payload)) {
+            $kybVal = $this->toBoolInt($payload['kyb_required'], true);
+            $companySets[] = "kyb_required = :kyb_required";
+            $companyParams[':kyb_required'] = $kybVal;
+            $this->audit($kybVal ? 'tenant.kyb.required' : 'tenant.kyb.not_required', 'company', $companyId, []);
+        }
+
+        // Logo Upload (validado por contenido)
+        $logo = $this->processLogoUpload('logo_');
+        if ($logo['error'] !== null) { Response::error($logo['error'], 422); return; }
+        if ($logo['url'] !== null) {
+            $companySets[] = "logo_url = :logo_url";
+            $companyParams[':logo_url'] = $logo['url'];
         }
 
         if ($companySets) {
-            $sql = "UPDATE companies SET " . implode(', ', $companySets) . " WHERE id LIKE :id AND deleted_at IS NULL";
+            $sql = "UPDATE companies SET " . implode(', ', $companySets) . " WHERE id = :id AND deleted_at IS NULL";
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute($companyParams);
         }
@@ -1765,7 +1803,7 @@ final class TenantController
     private function contactsIndex(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -1776,7 +1814,7 @@ final class TenantController
         $offset = ($page - 1) * $perPage;
 
         $cols = $this->tableColumns('company_contacts');
-        $where = ['company_id LIKE :cid'];
+        $where = ['company_id = :cid'];
         $params = [':cid' => $companyId];
 
         if (in_array('deleted_at', $cols, true)) {
@@ -1815,7 +1853,7 @@ final class TenantController
     private function contactsStore(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -1870,7 +1908,7 @@ final class TenantController
     private function contactsUpdate(string $companyId, string $contactId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -1895,7 +1933,7 @@ final class TenantController
             return;
         }
 
-        $sql = "UPDATE company_contacts SET " . implode(', ', $sets) . " WHERE id LIKE :id AND company_id LIKE :cid";
+        $sql = "UPDATE company_contacts SET " . implode(', ', $sets) . " WHERE id = :id AND company_id = :cid";
         if (in_array('deleted_at', $cols, true)) $sql .= " AND deleted_at IS NULL";
 
         $stmt = $this->pdo->prepare($sql);
@@ -1912,16 +1950,16 @@ final class TenantController
     private function contactsDestroy(string $companyId, string $contactId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
         $cols = $this->tableColumns('company_contacts');
         if (in_array('deleted_at', $cols, true)) {
-            $stmt = $this->pdo->prepare("UPDATE company_contacts SET deleted_at = NOW() WHERE id LIKE :id AND company_id LIKE :cid");
+            $stmt = $this->pdo->prepare("UPDATE company_contacts SET deleted_at = NOW() WHERE id = :id AND company_id = :cid");
             $stmt->execute([':id' => $contactId, ':cid' => $companyId]);
         } else {
-            $stmt = $this->pdo->prepare("DELETE FROM company_contacts WHERE id LIKE :id AND company_id LIKE :cid");
+            $stmt = $this->pdo->prepare("DELETE FROM company_contacts WHERE id = :id AND company_id = :cid");
             $stmt->execute([':id' => $contactId, ':cid' => $companyId]);
         }
 
@@ -1939,7 +1977,7 @@ final class TenantController
     private function membersIndex(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -1948,7 +1986,7 @@ final class TenantController
         $offset = ($page - 1) * $perPage;
 
         // Count total
-        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM company_users WHERE company_id LIKE :cid AND deleted_at IS NULL");
+        $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM company_users WHERE company_id = :cid AND deleted_at IS NULL");
         $countStmt->execute([':cid' => $companyId]);
         $total = (int)$countStmt->fetchColumn();
 
@@ -1970,7 +2008,7 @@ final class TenantController
             LEFT JOIN users m ON m.id LIKE u.manager_id
             LEFT JOIN user_roles ur ON ur.company_user_id LIKE cu.id
             LEFT JOIN roles r ON r.id LIKE ur.role_id
-            WHERE cu.company_id LIKE :cid 
+            WHERE cu.company_id = :cid 
               AND cu.deleted_at IS NULL
             GROUP BY cu.id
             ORDER BY cu.created_at DESC
@@ -2018,7 +2056,7 @@ final class TenantController
     private function membersStore(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -2038,7 +2076,7 @@ final class TenantController
         }
         
         // Check if already member
-        $stmt = $this->pdo->prepare("SELECT id FROM company_users WHERE company_id LIKE :cid AND user_id LIKE :uid AND deleted_at IS NULL");
+        $stmt = $this->pdo->prepare("SELECT id FROM company_users WHERE company_id = :cid AND user_id = :uid AND deleted_at IS NULL");
         $stmt->execute([':cid' => $companyId, ':uid' => $userId]);
         if ($stmt->fetch()) {
             Response::error('El usuario ya es miembro de esta empresa', 409);
@@ -2076,7 +2114,7 @@ final class TenantController
     private function membersInvite(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -2093,7 +2131,7 @@ final class TenantController
         $this->pdo->beginTransaction();
         try {
             // 1. Check if user exists
-            $stmt = $this->pdo->prepare("SELECT id FROM users WHERE email LIKE :email");
+            $stmt = $this->pdo->prepare("SELECT id FROM users WHERE email = :email");
             $stmt->execute([':email' => $email]);
             $userId = $stmt->fetchColumn();
 
@@ -2114,7 +2152,7 @@ final class TenantController
             }
 
             // 2. Check if already member
-            $stmt = $this->pdo->prepare("SELECT id FROM company_users WHERE company_id LIKE :cid AND user_id LIKE :uid AND deleted_at IS NULL");
+            $stmt = $this->pdo->prepare("SELECT id FROM company_users WHERE company_id = :cid AND user_id = :uid AND deleted_at IS NULL");
             $stmt->execute([':cid' => $companyId, ':uid' => $userId]);
             if ($stmt->fetch()) {
                 Response::error('El usuario ya es miembro de esta empresa', 409);
@@ -2138,7 +2176,7 @@ final class TenantController
             // Send Email via SMTP
             try {
                 // Fetch company name
-                $stmtC = $this->pdo->prepare("SELECT legal_name FROM companies WHERE id LIKE :id");
+                $stmtC = $this->pdo->prepare("SELECT legal_name FROM companies WHERE id = :id");
                 $stmtC->execute([':id' => $companyId]);
                 $companyName = $stmtC->fetchColumn() ?: 'Spectra ERP';
 
@@ -2184,6 +2222,43 @@ final class TenantController
        APPROVALS
        ========================= */
 
+    /**
+     * Procesa el logo subido en $_FILES['logo'] de forma segura:
+     * - valida el CONTENIDO (MIME real + getimagesize), no la extensión declarada;
+     * - limita el tamaño a 2 MB (lo que promete la interfaz);
+     * - la extensión se deriva del tipo real, así nunca se guarda un .php
+     *   dentro de public/ (antes era posible: ejecución remota de código).
+     * Devuelve ['url' => ?string, 'error' => ?string]; sin archivo => ambos null.
+     */
+    private function processLogoUpload(string $prefix): array
+    {
+        $file = $_FILES['logo'] ?? null;
+        if (!$file || ($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+            return ['url' => null, 'error' => null];
+        }
+        if (($file['error'] ?? UPLOAD_ERR_OK) !== UPLOAD_ERR_OK) {
+            $tooBig = in_array($file['error'], [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true);
+            return ['url' => null, 'error' => $tooBig ? 'El logotipo supera el tamaño máximo de 2 MB' : 'No se pudo subir el logotipo'];
+        }
+        if ((int)($file['size'] ?? 0) > 2 * 1024 * 1024) {
+            return ['url' => null, 'error' => 'El logotipo supera el tamaño máximo de 2 MB'];
+        }
+        $types = ['image/png' => 'png', 'image/jpeg' => 'jpg', 'image/webp' => 'webp'];
+        $mime = (new \finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']) ?: '';
+        if (!isset($types[$mime]) || @getimagesize($file['tmp_name']) === false) {
+            return ['url' => null, 'error' => 'Formato de logotipo no válido. Usa PNG, JPG o WEBP'];
+        }
+        $dir = __DIR__ . '/../../public/uploads/logos';
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return ['url' => null, 'error' => 'No se pudo guardar el logotipo'];
+        }
+        $name = $prefix . bin2hex(random_bytes(8)) . '.' . $types[$mime];
+        if (!move_uploaded_file($file['tmp_name'], $dir . '/' . $name)) {
+            return ['url' => null, 'error' => 'No se pudo guardar el logotipo'];
+        }
+        return ['url' => '/uploads/logos/' . $name, 'error' => null];
+    }
+
     private function ticketsIndex(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
@@ -2208,7 +2283,7 @@ final class TenantController
     private function approvalsList(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -2261,7 +2336,7 @@ final class TenantController
     private function approvalsToggle(string $companyId, string $policyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -2270,7 +2345,7 @@ final class TenantController
             return;
         }
 
-        $stmt = $this->pdo->prepare("SELECT id, is_active FROM approval_policies WHERE id LIKE :id AND company_id LIKE :cid");
+        $stmt = $this->pdo->prepare("SELECT id, is_active FROM approval_policies WHERE id = :id AND company_id = :cid");
         $stmt->execute([':id' => $policyId, ':cid' => $companyId]);
         $policy = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -2281,7 +2356,7 @@ final class TenantController
 
         $newStatus = !$policy['is_active'];
         
-        $stmt = $this->pdo->prepare("UPDATE approval_policies SET is_active = :s WHERE id LIKE :id");
+        $stmt = $this->pdo->prepare("UPDATE approval_policies SET is_active = :s WHERE id = :id");
         $stmt->execute([':s' => $newStatus ? 1 : 0, ':id' => $policyId]);
 
         $input = $this->readPayload();
@@ -2300,7 +2375,7 @@ final class TenantController
     private function approvalsSimulate(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -2357,14 +2432,64 @@ final class TenantController
     }
 
 
-    private function membersDestroy(string $companyId, string $memberId): void
+    private function membersUpdate(string $companyId, string $memberId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
-        $stmt = $this->pdo->prepare("UPDATE company_users SET deleted_at = NOW() WHERE id LIKE :id AND company_id LIKE :cid");
+        $payload = $this->readPayload();
+        $roleId = $payload['role_id'] ?? null;
+
+        if (!$roleId) {
+            Response::error('role_id es requerido', 422);
+            return;
+        }
+
+        // Validate role belongs to this company
+        $stmtRole = $this->pdo->prepare("SELECT id FROM roles WHERE id = :rid AND (company_id = :cid OR company_id IS NULL)");
+        $stmtRole->execute([':rid' => $roleId, ':cid' => $companyId]);
+        if (!$stmtRole->fetch()) {
+            Response::error('Rol inválido o no pertenece a esta empresa', 422);
+            return;
+        }
+
+        try {
+            $this->pdo->beginTransaction();
+
+            // Check if member exists in company
+            $stmtCheck = $this->pdo->prepare("SELECT id FROM company_users WHERE id = :mid AND company_id = :cid AND deleted_at IS NULL");
+            $stmtCheck->execute([':mid' => $memberId, ':cid' => $companyId]);
+            if (!$stmtCheck->fetch()) {
+                Response::error('Miembro no encontrado', 404);
+                return;
+            }
+
+            // Remove existing roles
+            $stmtDel = $this->pdo->prepare("DELETE FROM user_roles WHERE company_user_id = :mid");
+            $stmtDel->execute([':mid' => $memberId]);
+
+            // Insert new role
+            $stmtIns = $this->pdo->prepare("INSERT INTO user_roles (company_user_id, role_id) VALUES (:mid, :rid)");
+            $stmtIns->execute([':mid' => $memberId, ':rid' => $roleId]);
+
+            $this->pdo->commit();
+            Response::json(['message' => 'Rol actualizado correctamente']);
+        } catch (\Throwable $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    private function membersDestroy(string $companyId, string $memberId): void
+    {
+        if (!$this->fetchCompany($companyId)) {
+            Response::error('Empresa no encontrada', 404);
+            return;
+        }
+
+        $stmt = $this->pdo->prepare("UPDATE company_users SET deleted_at = NOW() WHERE id = :id AND company_id = :cid");
         $stmt->execute([':id' => $memberId, ':cid' => $companyId]);
 
         $this->audit('tenant.member.removed', 'company_user', $memberId, ['company_id' => $companyId]);
@@ -2374,7 +2499,7 @@ final class TenantController
 
     private function membersToggleAccess(string $companyId, string $memberId): void
     {
-        $stmt = $this->pdo->prepare("SELECT status FROM company_users WHERE id LIKE :id AND company_id LIKE :cid");
+        $stmt = $this->pdo->prepare("SELECT status FROM company_users WHERE id = :id AND company_id = :cid");
         $stmt->execute([':id' => $memberId, ':cid' => $companyId]);
         $curr = $stmt->fetchColumn();
         
@@ -2384,7 +2509,7 @@ final class TenantController
         }
 
         $newStatus = ($curr === 'active') ? 'disabled' : 'active';
-        $stmt = $this->pdo->prepare("UPDATE company_users SET status = :st WHERE id LIKE :id");
+        $stmt = $this->pdo->prepare("UPDATE company_users SET status = :st WHERE id = :id");
         $stmt->execute([':st' => $newStatus, ':id' => $memberId]);
         
         Response::json(['message' => 'Acceso actualizado', 'status' => $newStatus]);
@@ -2393,7 +2518,7 @@ final class TenantController
     private function membersResendInvite(string $companyId, string $memberId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -2402,7 +2527,7 @@ final class TenantController
             SELECT u.email, u.full_name 
             FROM company_users cu
             JOIN users u ON u.id LIKE cu.user_id
-            WHERE cu.id LIKE :mid AND cu.company_id LIKE :cid AND cu.deleted_at IS NULL
+            WHERE cu.id = :mid AND cu.company_id = :cid AND cu.deleted_at IS NULL
         ");
         $stmt->execute([':mid' => $memberId, ':cid' => $companyId]);
         $member = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -2416,7 +2541,7 @@ final class TenantController
         $name = $member['full_name'];
 
         // Fetch company name
-        $stmtC = $this->pdo->prepare("SELECT legal_name FROM companies WHERE id LIKE :id");
+        $stmtC = $this->pdo->prepare("SELECT legal_name FROM companies WHERE id = :id");
         $stmtC->execute([':id' => $companyId]);
         $companyName = $stmtC->fetchColumn() ?: 'Spectra ERP';
 
@@ -2454,11 +2579,11 @@ final class TenantController
             $this->pdo->beginTransaction();
 
             // 1. Remove existing roles
-            $stmt = $this->pdo->prepare("DELETE FROM user_roles WHERE company_user_id LIKE :mid");
+            $stmt = $this->pdo->prepare("DELETE FROM user_roles WHERE company_user_id = :mid");
             $stmt->execute([':mid' => $memberId]);
 
             // 2. Find 'Viewer' role
-            $stmt = $this->pdo->prepare("SELECT id FROM roles WHERE company_id LIKE :cid AND name LIKE 'Viewer' LIMIT 1");
+            $stmt = $this->pdo->prepare("SELECT id FROM roles WHERE company_id = :cid AND name LIKE 'Viewer' LIMIT 1");
             $stmt->execute([':cid' => $companyId]);
             $roleId = $stmt->fetchColumn();
 
@@ -2502,7 +2627,7 @@ final class TenantController
     private function membersForcePasswordReset(string $companyId, string $memberId): void
     {
         // Check member
-        $stmt = $this->pdo->prepare("SELECT user_id FROM company_users WHERE id LIKE :id AND company_id LIKE :cid");
+        $stmt = $this->pdo->prepare("SELECT user_id FROM company_users WHERE id = :id AND company_id = :cid");
         $stmt->execute([':id' => $memberId, ':cid' => $companyId]);
         $userId = $stmt->fetchColumn();
 
@@ -2511,7 +2636,7 @@ final class TenantController
             return;
         }
 
-        $stmt = $this->pdo->prepare("UPDATE users SET password_change_required = 1 WHERE id LIKE :uid");
+        $stmt = $this->pdo->prepare("UPDATE users SET password_change_required = 1 WHERE id = :uid");
         $stmt->execute([':uid' => $userId]);
 
         $this->audit('member.password_reset_forced', 'company_user', $memberId, ['user_id' => $userId]);
@@ -2525,7 +2650,7 @@ final class TenantController
     private function exportData(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -2542,7 +2667,7 @@ final class TenantController
                     SELECT u.full_name, u.email, cu.job_title, cu.status 
                     FROM company_users cu 
                     JOIN users u ON u.id LIKE cu.user_id 
-                    WHERE cu.company_id LIKE :cid
+                    WHERE cu.company_id = :cid
                 ");
                 $stmt->execute([':cid' => $companyId]);
                 $members = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -2553,7 +2678,7 @@ final class TenantController
         $contacts = [];
         if ($this->tableExists('company_contacts')) {
             try {
-                $stmt = $this->pdo->prepare("SELECT * FROM company_contacts WHERE company_id LIKE :cid");
+                $stmt = $this->pdo->prepare("SELECT * FROM company_contacts WHERE company_id = :cid");
                 $stmt->execute([':cid' => $companyId]);
                 $contacts = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
             } catch (\Throwable $e) { $contacts = []; }
@@ -2634,7 +2759,7 @@ final class TenantController
     private function walletShow(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -2654,11 +2779,11 @@ final class TenantController
         $meta = ['page' => $page, 'per_page' => $perPage, 'total' => 0, 'total_pages' => 1];
 
         if ($this->tableExists('wallet_transactions')) {
-            $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM wallet_transactions WHERE company_id LIKE :cid");
+            $countStmt = $this->pdo->prepare("SELECT COUNT(*) FROM wallet_transactions WHERE company_id = :cid");
             $countStmt->execute([':cid' => $companyId]);
             $total = (int)$countStmt->fetchColumn();
 
-            $stmt = $this->pdo->prepare("SELECT * FROM wallet_transactions WHERE company_id LIKE :cid ORDER BY created_at DESC LIMIT :l OFFSET :o");
+            $stmt = $this->pdo->prepare("SELECT * FROM wallet_transactions WHERE company_id = :cid ORDER BY created_at DESC LIMIT :l OFFSET :o");
             $stmt->bindValue(':cid', $companyId);
             $stmt->bindValue(':l', $perPage, PDO::PARAM_INT);
             $stmt->bindValue(':o', $offset, PDO::PARAM_INT);
@@ -2685,7 +2810,7 @@ final class TenantController
     private function walletDeposit(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -2779,7 +2904,7 @@ final class TenantController
     {
         $this->ensureInvoicesTable();
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -2795,10 +2920,15 @@ final class TenantController
         $notes = trim((string)($data['notes'] ?? ''));
         $contactId = $data['contact_id'] ?? null;
         $customerName = null; $customerEmail = null; $customerPhone = null;
+        $customerDocumentType = trim((string)($data['customer_document_type'] ?? ''));
+        $customerDocument = trim((string)($data['customer_document'] ?? ''));
+        $customerAddress = trim((string)($data['customer_address'] ?? ''));
+        $comprobanteTipo = trim((string)($data['comprobante_tipo'] ?? '01'));
+        if (!in_array($comprobanteTipo, ['01', '03'], true)) $comprobanteTipo = '01';
 
         if ($contactId) {
             try {
-                $stmt = $this->pdo->prepare("SELECT name, email, phone FROM company_contacts WHERE id LIKE :id AND company_id LIKE :cid");
+                $stmt = $this->pdo->prepare("SELECT name, email, phone FROM company_contacts WHERE id = :id AND company_id = :cid");
                 $stmt->execute([':id' => $contactId, ':cid' => $companyId]);
                 $c = $stmt->fetch(PDO::FETCH_ASSOC);
                 if ($c) {
@@ -2870,12 +3000,14 @@ final class TenantController
                     invoice_number, issue_date, due_date, currency_id, 
                     subtotal, tax_amount, total_amount, status, notes, 
                     contact_id, customer_name, customer_email, customer_phone, 
+                    customer_document_type, customer_document, customer_address, comprobante_tipo,
                     created_at
                 ) VALUES (
                     :id, :cid, :contract, :freelancer,
                     :num, :issue, :due, :cur,
                     :sub, :tax, :total, 'draft', :notes,
                     :contact_id, :customer_name, :customer_email, :customer_phone,
+                    :customer_document_type, :customer_document, :customer_address, :comprobante_tipo,
                     NOW()
                 )
             ");
@@ -2896,7 +3028,11 @@ final class TenantController
                 ':contact_id' => $contactId,
                 ':customer_name' => $customerName,
                 ':customer_email' => $customerEmail,
-                ':customer_phone' => $customerPhone
+                ':customer_phone' => $customerPhone,
+                ':customer_document_type' => $customerDocumentType !== '' ? $customerDocumentType : null,
+                ':customer_document' => $customerDocument !== '' ? $customerDocument : null,
+                ':customer_address' => $customerAddress !== '' ? $customerAddress : null,
+                ':comprobante_tipo' => $comprobanteTipo
             ]);
 
             $lineStmt = $this->pdo->prepare("
@@ -3106,7 +3242,7 @@ final class TenantController
     private function payrollIndex(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -3151,7 +3287,7 @@ final class TenantController
     private function payrollStore(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -3289,7 +3425,7 @@ final class TenantController
     private function payrollShow(string $companyId, string $payrollId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -3331,7 +3467,7 @@ final class TenantController
     private function payrollPay(string $companyId, string $payrollId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -3470,7 +3606,7 @@ final class TenantController
         $this->ensureContractsTable();
         
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -3483,13 +3619,24 @@ final class TenantController
         $params = [':cid' => $companyId];
         
         if (!empty($_GET['status'])) {
-            $where[] = 'c.status LIKE :status';
-            $params[':status'] = $_GET['status'];
+            $statuses = explode(',', $_GET['status']);
+            if (count($statuses) > 1) {
+                $placeholders = [];
+                foreach ($statuses as $i => $st) {
+                    $key = ':st_' . $i;
+                    $placeholders[] = $key;
+                    $params[$key] = trim($st);
+                }
+                $where[] = 'c.status IN (' . implode(',', $placeholders) . ')';
+            } else {
+                $where[] = 'c.status LIKE :status';
+                $params[':status'] = trim($_GET['status']);
+            }
         }
         
         if ($q !== '') {
-            $where[] = '(c.title LIKE :q OR c.id LIKE :q)';
-            $params[':q'] = "%$q%";
+            $where[] = '(c.title LIKE :q_1 OR c.id LIKE :q_2)';
+            $params[':q_1'] = $params[':q_2'] = "%$q%";
         }
         
         $whereSql = implode(' AND ', $where);
@@ -3533,7 +3680,7 @@ final class TenantController
     private function contractsStore(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -4054,12 +4201,12 @@ final class TenantController
             fputcsv($output, [
                 $row['id'],
                 $row['title'],
-                $row['freelancer_name'] ?? '—',
+                $row['freelancer_name'] ?? 'â€”',
                 $row['status'],
                 $row['legal_status'] ?? 'not_required',
                 $row['reviewer_name'] ?? 'No asignado',
-                $row['last_observation_date'] ?? '—',
-                $row['last_observation_content'] ?? '—'
+                $row['last_observation_date'] ?? 'â€”',
+                $row['last_observation_content'] ?? 'â€”'
             ]);
         }
         
@@ -4123,7 +4270,7 @@ final class TenantController
     private function contractTemplatesStore(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -4133,6 +4280,7 @@ final class TenantController
         $title = trim((string)($data['title'] ?? ''));
         $body = trim((string)($data['body'] ?? ''));
         $body = preg_replace('/<br\s*\/?>/i', "\n", $body ?? '');
+        $body = HtmlSanitizer::stripCss((string)$body);
         $body = strip_tags((string)$body);
         $body = html_entity_decode((string)$body, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $body = preg_replace("/\r\n?/", "\n", $body);
@@ -4184,11 +4332,11 @@ final class TenantController
     private function contractTemplatesShow(string $companyId, string $id): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
-        $stmt = $this->pdo->prepare("SELECT * FROM contract_templates WHERE id LIKE :id AND company_id LIKE :cid");
+        $stmt = $this->pdo->prepare("SELECT * FROM contract_templates WHERE id = :id AND company_id = :cid");
         $stmt->execute([':id' => $id, ':cid' => $companyId]);
         $item = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -4207,7 +4355,7 @@ final class TenantController
     private function contractTemplatesUpdate(string $companyId, string $id): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -4231,6 +4379,7 @@ final class TenantController
         if (isset($data['body'])) {
             $b = trim((string)$data['body']);
             $b = preg_replace('/<br\s*\/?>/i', "\n", $b ?? '');
+            $b = HtmlSanitizer::stripCss((string)$b);
             $b = strip_tags((string)$b);
             $b = html_entity_decode((string)$b, ENT_QUOTES | ENT_HTML5, 'UTF-8');
             $b = preg_replace("/\r\n?/", "\n", $b);
@@ -4285,7 +4434,7 @@ final class TenantController
     private function contractTemplatesDestroy(string $companyId, string $id): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -4293,14 +4442,14 @@ final class TenantController
         // User asked for "templates module". Usually templates are archived rather than deleted if used.
         // But let's check if it's used.
         // Check fk_contracts_template
-        $check = $this->pdo->prepare("SELECT COUNT(*) FROM contracts WHERE template_id LIKE :id");
+        $check = $this->pdo->prepare("SELECT COUNT(*) FROM contracts WHERE template_id = :id");
         $check->execute([':id' => $id]);
         if ($check->fetchColumn() > 0) {
             Response::error('No se puede eliminar la plantilla porque está en uso en contratos. Archívela en su lugar.', 409);
             return;
         }
 
-        $stmt = $this->pdo->prepare("DELETE FROM contract_templates WHERE id LIKE :id AND company_id LIKE :cid");
+        $stmt = $this->pdo->prepare("DELETE FROM contract_templates WHERE id = :id AND company_id = :cid");
         $stmt->execute([':id' => $id, ':cid' => $companyId]);
 
         if ($stmt->rowCount() > 0) {
@@ -4314,7 +4463,7 @@ final class TenantController
     private function pagedCompanyIndex(string $companyId, string $table, array $filterableCols, array $customWhere = []): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
         if (!$this->tableExists($table)) {
@@ -4328,7 +4477,7 @@ final class TenantController
         $offset = ($page - 1) * $perPage;
 
         $cols = $this->tableColumns($table);
-        $where = ['company_id LIKE :cid'];
+        $where = ['company_id = :cid'];
         $params = [':cid' => $companyId];
 
         if (!empty($customWhere)) {
@@ -4382,62 +4531,6 @@ final class TenantController
                 'total_pages' => max(1, (int)ceil($total / max(1, $perPage))),
             ],
         ]);
-    }
-
-    /* =========================
-       IMPERSONATE (token temporal firmado)
-       ========================= */
-
-    private function impersonate(string $companyId): void
-    {
-        if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
-            return;
-        }
-
-        $payload = $this->readPayload();
-        $minutes = (int)($payload['duration_minutes'] ?? 30);
-        $minutes = max(5, min(240, $minutes));
-        $reason = trim((string)($payload['reason'] ?? ''));
-
-        if ($reason === '') {
-            Response::error('reason es requerido', 422);
-            return;
-        }
-
-        $now = time();
-        $exp = $now + ($minutes * 60);
-
-        $secret = getenv('APP_SECRET') ?: (getenv('APP_KEY') ?: 'spectra-dev-secret');
-        $token = $this->signToken([
-            'typ' => 'impersonation',
-            'company_id' => $companyId,
-            'iat' => $now,
-            'exp' => $exp,
-        ], $secret);
-
-        $this->audit('tenant.impersonate.created', 'company', $companyId, [
-            'reason' => $reason,
-            'duration_minutes' => $minutes,
-            'expires_at' => date('c', $exp),
-        ]);
-
-        Response::json([
-            'message' => 'Impersonación creada',
-            'data' => [
-                'token' => $token,
-                'expires_at' => date('c', $exp),
-                'duration_minutes' => $minutes,
-            ],
-        ], 201);
-    }
-
-    private function signToken(array $payload, string $secret): string
-    {
-        $h = $this->base64url(json_encode(['alg' => 'HS256', 'typ' => 'JWT'], JSON_UNESCAPED_UNICODE));
-        $p = $this->base64url(json_encode($payload, JSON_UNESCAPED_UNICODE));
-        $sig = hash_hmac('sha256', "{$h}.{$p}", $secret, true);
-        return "{$h}.{$p}." . $this->base64url($sig);
     }
 
     private function createDefaultSubscription(string $companyId, int $currencyId, float $price, string $interval): void
@@ -4545,11 +4638,6 @@ final class TenantController
         ]);
     }
 
-    private function base64url(string $raw): string
-    {
-        return rtrim(strtr(base64_encode($raw), '+/', '-_'), '=');
-    }
-
     /* =========================
        HELPERS: fetch/ensure
        ========================= */
@@ -4622,7 +4710,7 @@ final class TenantController
     private function fetchSettings(string $companyId): ?array
     {
         if (!$this->tableExists('company_settings')) return null;
-        $stmt = $this->pdo->prepare("SELECT * FROM company_settings WHERE company_id LIKE :id LIMIT 1");
+        $stmt = $this->pdo->prepare("SELECT * FROM company_settings WHERE company_id = :id LIMIT 1");
         $stmt->execute([':id' => $companyId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row ?: null;
@@ -4655,7 +4743,7 @@ final class TenantController
     private function fetchWallet(string $companyId): ?array
     {
         if (!$this->tableExists('wallets')) return null;
-        $stmt = $this->pdo->prepare("SELECT * FROM wallets WHERE company_id LIKE :id LIMIT 1");
+        $stmt = $this->pdo->prepare("SELECT * FROM wallets WHERE company_id = :id LIMIT 1");
         $stmt->execute([':id' => $companyId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row ?: null;
@@ -4753,8 +4841,6 @@ final class TenantController
                 return "Reactivó la empresa. Motivo: " . ($metadata['reason'] ?? 'No especificado');
             case 'tenant.deleted':
                  return "Eliminó la empresa " . ($metadata['legal_name'] ?? '');
-            case 'tenant.impersonate.created':
-                return "Inició sesión como admin de empresa";
             default:
                 return $action;
         }
@@ -4791,7 +4877,7 @@ final class TenantController
     private function updateSubscription(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -4853,7 +4939,7 @@ final class TenantController
                 $currentPlanId = $stmtSub->fetchColumn();
 
                 if (!$currentPlanId) {
-                    throw new \RuntimeException('No existe una suscripción activa para este tenant');
+                    throw new \RuntimeException('No existe una suscripción activa para esta empresa');
                 }
 
                 // Check if plan is shared
@@ -4922,7 +5008,7 @@ final class TenantController
     {
         $company = $this->fetchCompany($id);
         if (!$company) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -4950,7 +5036,7 @@ final class TenantController
             if ($val !== false) {
                 $platformFee = (float)$val;
             } else {
-                // Backfill: tenant legacy sin regla de fee → crear con defaults (29.00)
+                // Backfill: tenant legacy sin regla de fee â†’ crear con defaults (29.00)
                 try {
                     $stmtCur = $this->pdo->prepare("SELECT default_currency_id FROM companies WHERE id = :cid");
                     $stmtCur->execute([':cid' => $id]);
@@ -4986,7 +5072,7 @@ final class TenantController
                 $stmt = $this->pdo->prepare("
                     SELECT id, invoice_number, issue_date as date, total_amount as amount, status 
                     FROM invoices 
-                    WHERE company_id LIKE :id 
+                    WHERE company_id = :id 
                     ORDER BY issue_date DESC 
                     LIMIT 5
                 ");
@@ -4998,7 +5084,7 @@ final class TenantController
         // Mock Usage
         $usersCount = 0;
         try {
-            $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM company_users WHERE company_id LIKE :id AND status LIKE 'active' AND deleted_at IS NULL");
+            $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM company_users WHERE company_id = :id AND status LIKE 'active' AND deleted_at IS NULL");
             $stmt->execute([':id' => $id]);
             $usersCount = (int)$stmt->fetchColumn();
         } catch (Throwable $e) {}
@@ -5006,7 +5092,7 @@ final class TenantController
         $projectsCount = 0;
         if ($this->tableExists('projects')) {
             try {
-                $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM projects WHERE company_id LIKE :id AND status LIKE 'active'");
+                $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM projects WHERE company_id = :id AND status LIKE 'active'");
                 $stmt->execute([':id' => $id]);
                 $projectsCount = (int)$stmt->fetchColumn();
             } catch (Throwable $e) {}
@@ -5154,7 +5240,7 @@ final class TenantController
     private function kybShow(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
@@ -5170,7 +5256,11 @@ final class TenantController
         $stmt->execute([':kid' => $kyb['id']]);
         $docs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+        $company = $this->fetchCompany($companyId) ?: [];
+
         Response::json([
+            'required' => (bool)($company['kyb_required'] ?? false),
+            'company_name' => $company['legal_name'] ?? null,
             'request' => $kyb,
             'documents' => $docs
         ]);
@@ -5179,7 +5269,7 @@ final class TenantController
     private function kybUploadDocument(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
         
@@ -5263,14 +5353,31 @@ final class TenantController
     private function kybSubmit(string $companyId): void
     {
         if (!$this->fetchCompany($companyId)) {
-            Response::error('Tenant no encontrado', 404);
+            Response::error('Empresa no encontrada', 404);
             return;
         }
 
         $kyb = $this->ensureKybRequest($companyId);
+
+        if (($kyb['status'] ?? '') === 'approved') {
+            Response::error('La verificación KYB ya fue aprobada', 409);
+            return;
+        }
+
+        $docStmt = $this->pdo->prepare("
+            SELECT COUNT(*)
+            FROM attachment_links al
+            JOIN attachments a ON a.id = al.attachment_id
+            WHERE al.object_type LIKE 'kyb_request' AND al.object_id = :kid
+        ");
+        $docStmt->execute([':kid' => $kyb['id']]);
+        if ((int)$docStmt->fetchColumn() === 0) {
+            Response::error('Debes subir al menos un documento antes de enviar la solicitud', 422);
+            return;
+        }
         
         if ($kyb['status'] !== 'pending_review') {
-             $stmt = $this->pdo->prepare("UPDATE kyb_requests SET status = 'pending_review', submitted_at = NOW() WHERE id = :id");
+             $stmt = $this->pdo->prepare("UPDATE kyb_requests SET status = 'pending_review', submitted_at = NOW(), rejection_reason = NULL WHERE id = :id");
              $stmt->execute([':id' => $kyb['id']]);
         }
         
@@ -5298,7 +5405,9 @@ final class TenantController
         try { $this->pdo->exec("ALTER TABLE kyb_requests ADD COLUMN documents JSON NULL"); } catch (\Throwable $e) {}
         try { $this->pdo->exec("ALTER TABLE kyb_requests ADD COLUMN reviewed_by_user_id CHAR(36) NULL"); } catch (\Throwable $e) {}
 
-        $stmt = $this->pdo->prepare("SELECT * FROM kyb_requests WHERE company_id LIKE :cid LIMIT 1");
+        Schema::ensureKybStatusEnum($this->pdo);
+
+        $stmt = $this->pdo->prepare("SELECT * FROM kyb_requests WHERE company_id = :cid LIMIT 1");
         $stmt->execute([':cid' => $companyId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         
@@ -5346,11 +5455,21 @@ final class TenantController
         $customerName = $invoice['customer_name'] ?? null;
         $customerEmail = $invoice['customer_email'] ?? null;
         $customerPhone = $invoice['customer_phone'] ?? null;
+        $customerDocumentType = $invoice['customer_document_type'] ?? null;
+        $customerDocument = $invoice['customer_document'] ?? null;
+        $customerAddress = $invoice['customer_address'] ?? null;
+        $comprobanteTipo = $invoice['comprobante_tipo'] ?? '01';
+
+        if (array_key_exists('customer_document_type', $data)) $customerDocumentType = trim((string)($data['customer_document_type'] ?? ''));
+        if (array_key_exists('customer_document', $data)) $customerDocument = trim((string)($data['customer_document'] ?? ''));
+        if (array_key_exists('customer_address', $data)) $customerAddress = trim((string)($data['customer_address'] ?? ''));
+        if (array_key_exists('comprobante_tipo', $data)) $comprobanteTipo = trim((string)($data['comprobante_tipo'] ?? '01'));
+        if (!in_array($comprobanteTipo, ['01', '03'], true)) $comprobanteTipo = '01';
 
         if (array_key_exists('contact_id', $data)) {
             if ($contactId) {
                 try {
-                    $stmt = $this->pdo->prepare("SELECT name, email, phone FROM company_contacts WHERE id LIKE :id AND company_id LIKE :cid");
+                    $stmt = $this->pdo->prepare("SELECT name, email, phone FROM company_contacts WHERE id = :id AND company_id = :cid");
                     $stmt->execute([':id' => $contactId, ':cid' => $companyId]);
                     $c = $stmt->fetch(PDO::FETCH_ASSOC);
                     if ($c) {
@@ -5461,6 +5580,10 @@ final class TenantController
                     customer_name = :customer_name,
                     customer_email = :customer_email,
                     customer_phone = :customer_phone,
+                    customer_document_type = :customer_document_type,
+                    customer_document = :customer_document,
+                    customer_address = :customer_address,
+                    comprobante_tipo = :comprobante_tipo,
                     updated_at = NOW()
                 WHERE id = :id
             ");
@@ -5479,6 +5602,10 @@ final class TenantController
                 ':customer_name' => $customerName,
                 ':customer_email' => $customerEmail,
                 ':customer_phone' => $customerPhone,
+                ':customer_document_type' => $customerDocumentType !== '' ? $customerDocumentType : null,
+                ':customer_document' => $customerDocument !== '' ? $customerDocument : null,
+                ':customer_address' => $customerAddress !== '' ? $customerAddress : null,
+                ':comprobante_tipo' => $comprobanteTipo,
                 ':id' => $invoiceId
             ]);
 
@@ -5522,6 +5649,373 @@ final class TenantController
         } catch (Throwable $e) {
             Response::error('Error al eliminar factura: ' . $e->getMessage(), 500);
         }
+    }
+
+    private function invoicesSendKeyfacil(string $companyId, string $invoiceId): void
+    {
+        $this->ensureInvoicesTable();
+
+        $stmt = $this->pdo->prepare("
+            SELECT i.*, cur.code AS currency_code
+            FROM invoices i
+            LEFT JOIN currencies cur ON i.currency_id = cur.id
+            WHERE i.id = :id AND i.company_id = :cid
+            LIMIT 1
+        ");
+        $stmt->execute([':id' => $invoiceId, ':cid' => $companyId]);
+        $invoice = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$invoice) {
+            Response::error('Factura no encontrada', 404);
+            return;
+        }
+        if (($invoice['status'] ?? '') === 'voided') {
+            Response::error('No se puede emitir una factura anulada', 422);
+            return;
+        }
+        if (!empty($invoice['keyfacil_id'])) {
+            Response::error('Esta factura ya fue emitida electrónicamente', 409, [
+                'keyfacil_id' => $invoice['keyfacil_id'],
+                'keyfacil_status' => $invoice['keyfacil_status'],
+            ]);
+            return;
+        }
+
+        $lineStmt = $this->pdo->prepare("
+            SELECT * FROM invoice_lines
+            WHERE invoice_id = :id
+            ORDER BY created_at ASC
+        ");
+        $lineStmt->execute([':id' => $invoiceId]);
+        $lines = $lineStmt->fetchAll(PDO::FETCH_ASSOC);
+        if (empty($lines)) {
+            Response::error('La factura no tiene ítems para enviar a Keyfacil', 422);
+            return;
+        }
+
+        $tipo = in_array((string)($invoice['comprobante_tipo'] ?? '01'), ['01', '03'], true)
+            ? (string)$invoice['comprobante_tipo']
+            : '01';
+
+        $serie = $tipo === '03' ? 'B001' : 'F001';
+        $numero = 0;
+        $rawNumber = trim((string)($invoice['invoice_number'] ?? ''));
+        if (preg_match('/^\s*([A-Za-z]\d{2,4})\s*-\s*(\d+)\s*$/', $rawNumber, $matches)) {
+            $serie = strtoupper($matches[1]);
+            $numero = (int)$matches[2];
+        } elseif (ctype_digit($rawNumber)) {
+            $numero = (int)$rawNumber;
+        } elseif (preg_match('/(\d+)\s*$/', $rawNumber, $matches)) {
+            $numero = (int)$matches[1];
+        }
+
+        if ($numero <= 0) {
+            Response::error('El número de factura debe ser correlativo o tener formato F001-0001', 422);
+            return;
+        }
+
+        $customerDocument = preg_replace('/\s+/', '', (string)($invoice['customer_document'] ?? ''));
+        $customerDocumentType = trim((string)($invoice['customer_document_type'] ?? ''));
+        if ($customerDocumentType === '') {
+            if (strlen($customerDocument) === 11) $customerDocumentType = '6';
+            elseif (strlen($customerDocument) === 8) $customerDocumentType = '1';
+            else $customerDocumentType = '-';
+        }
+        if (!in_array($customerDocumentType, ['6', '1', '4', '7', '-', '0'], true)) {
+            $customerDocumentType = '-';
+        }
+        if ($tipo === '01' && ($customerDocument === '' || $customerDocumentType === '-')) {
+            Response::error('Para emitir factura se requiere RUC/DNI del cliente', 422);
+            return;
+        }
+        if ($customerDocument === '') {
+            $customerDocument = '-';
+            $customerDocumentType = '-';
+        }
+
+        $customerName = trim((string)($invoice['customer_name'] ?? ''));
+        if ($customerName === '') {
+            $customerName = 'Cliente Varios';
+        }
+
+        $currencyCode = strtoupper(trim((string)($invoice['currency_code'] ?? 'PEN')));
+        if (!in_array($currencyCode, ['PEN', 'USD', 'EUR'], true)) {
+            Response::error('Keyfacil solo admite monedas PEN, USD o EUR', 422);
+            return;
+        }
+
+        $issueDate = (string)($invoice['issue_date'] ?? '');
+        $dueDate = (string)($invoice['due_date'] ?? '');
+        if ($issueDate === '' || $dueDate === '') {
+            Response::error('La factura no tiene fechas válidas', 422);
+            return;
+        }
+        if (strtotime($dueDate) < strtotime($issueDate)) {
+            Response::error('La fecha de vencimiento no puede ser menor a la fecha de emisión', 422);
+            return;
+        }
+
+        $tipoIgv = ((float)($invoice['tax_amount'] ?? 0)) > 0 ? '10' : '20';
+        $sellerName = trim((string)(Auth::user()['full_name'] ?? ''));
+        $items = [];
+        foreach ($lines as $line) {
+            $items[] = [
+                'codigo' => substr((string)($line['id'] ?? 'ITEM'), 0, 30),
+                'descripcion' => (string)($line['concept'] ?? 'Servicio'),
+                'unidad_medida' => 'ZZ',
+                'cantidad' => (float)($line['quantity'] ?? 1),
+                'precio_unitario' => \App\Support\KeyfacilService::priceWithIgv((float)($line['unit_price'] ?? 0), $tipoIgv),
+                'descuento_porcentaje' => 0,
+                'tipo_igv' => $tipoIgv,
+            ];
+        }
+
+        $payload = [
+            'tipo' => $tipo,
+            'serie' => $serie,
+            'numero' => $numero,
+            'fecha_emision' => $issueDate . 'T00:00:00-05:00',
+            'fecha_vencimiento' => $dueDate . 'T00:00:00-05:00',
+            'tipo_operacion' => '0101',
+            'cliente_tipo' => $customerDocumentType,
+            'cliente_documento' => $customerDocument,
+            'cliente_nombre' => $customerName,
+            'cliente_direccion' => trim((string)($invoice['customer_address'] ?? '')) ?: 'Lima',
+            'cliente_email' => trim((string)($invoice['customer_email'] ?? '')) ?: null,
+            'cliente_telefono' => trim((string)($invoice['customer_phone'] ?? '')) ?: null,
+            'vendedor_nombre' => $sellerName !== '' ? $sellerName : null,
+            'observaciones' => trim((string)($invoice['notes'] ?? '')) ?: null,
+            'moneda' => $currencyCode,
+            'condicion_pago_tipo' => strtotime($dueDate) > strtotime($issueDate) ? '02' : '01',
+            'incluir_pdf' => true,
+            'incluir_xml' => true,
+            'formato_pdf' => 'A4',
+            'items' => $items,
+        ];
+
+        if (strtotime($dueDate) > strtotime($issueDate)) {
+            $payload['condicion_pago_credito_cuotas'] = [[
+                'monto' => round((float)($invoice['total_amount'] ?? 0), 2),
+                'fecha_vencimiento' => $dueDate . 'T00:00:00-05:00',
+            ]];
+        }
+
+        $service = new \App\Support\KeyfacilService();
+        $result = $service->issueInvoice($payload);
+
+        if (!$result['ok']) {
+            $this->pdo->prepare("
+                UPDATE invoices SET keyfacil_response = :resp, keyfacil_status = 'error', updated_at = NOW()
+                WHERE id = :id
+            ")->execute([
+                ':resp' => $result['raw'] ?: null,
+                ':id' => $invoiceId,
+            ]);
+            Response::error($result['error'] ?: 'Error al emitir comprobante en Keyfacil', 502, [
+                'keyfacil_status' => $result['status'],
+                'response' => $result['data'],
+            ]);
+            return;
+        }
+
+        $responseData = $result['data'] ?? [];
+        $payloadData = is_array($responseData['data'] ?? null) ? $responseData['data'] : $responseData;
+        $keyfacilId = $payloadData['id'] ?? $payloadData['invoice_id'] ?? $responseData['id'] ?? null;
+        $keyfacilStatus = $payloadData['status'] ?? $responseData['status'] ?? 'sent';
+
+        $pdf = $this->extractKeyfacilFile($responseData, 'pdf');
+        $xml = $this->extractKeyfacilFile($responseData, 'xml');
+        $pdfBase64 = ($pdf && $this->looksLikeBase64($pdf)) ? preg_replace('#^data:[^;]+;base64,#i', '', $pdf) : null;
+        $xmlBase64 = ($xml && $this->looksLikeBase64($xml)) ? preg_replace('#^data:[^;]+;base64,#i', '', $xml) : null;
+        $pdfUrl = ($pdf && !$this->looksLikeBase64($pdf)) ? $pdf : null;
+        $xmlUrl = ($xml && !$this->looksLikeBase64($xml)) ? $xml : null;
+
+        $this->pdo->prepare("
+            UPDATE invoices SET
+                keyfacil_id = :kid,
+                keyfacil_status = :kstatus,
+                keyfacil_serie = :serie,
+                keyfacil_number = :numero,
+                keyfacil_pdf = :pdf,
+                keyfacil_xml = :xml,
+                keyfacil_pdf_url = :pdf_url,
+                keyfacil_xml_url = :xml_url,
+                keyfacil_response = :resp,
+                keyfacil_issued_at = NOW(),
+                status = CASE WHEN status = 'draft' THEN 'issued' ELSE status END,
+                updated_at = NOW()
+            WHERE id = :id
+        ")->execute([
+            ':kid' => $keyfacilId,
+            ':kstatus' => $keyfacilStatus,
+            ':serie' => $serie,
+            ':numero' => $numero,
+            ':pdf' => $pdfBase64,
+            ':xml' => $xmlBase64,
+            ':pdf_url' => $pdfUrl,
+            ':xml_url' => $xmlUrl,
+            ':resp' => $result['raw'] ?: null,
+            ':id' => $invoiceId,
+        ]);
+
+        $this->audit('tenant.invoice.keyfacil_issued', 'invoice', $invoiceId, [
+            'company_id' => $companyId,
+            'keyfacil_id' => $keyfacilId,
+            'serie' => $serie,
+            'numero' => $numero,
+        ]);
+
+        Response::json([
+            'message' => 'Comprobante emitido electrónicamente',
+            'keyfacil_id' => $keyfacilId,
+            'keyfacil_status' => $keyfacilStatus,
+            'serie' => $serie,
+            'numero' => $numero,
+            'pdf_url' => $pdfUrl ?: ($pdfBase64 ? '/api/tenants/' . $companyId . '/invoices/' . $invoiceId . '/keyfacil-pdf' : null),
+            'xml_url' => $xmlUrl ?: ($xmlBase64 ? '/api/tenants/' . $companyId . '/invoices/' . $invoiceId . '/keyfacil-xml' : null),
+        ]);
+    }
+
+    private function invoicesVoidKeyfacil(string $companyId, string $invoiceId): void
+    {
+        $this->ensureInvoicesTable();
+
+        $stmt = $this->pdo->prepare("SELECT * FROM invoices WHERE id = :id AND company_id = :cid LIMIT 1");
+        $stmt->execute([':id' => $invoiceId, ':cid' => $companyId]);
+        $invoice = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$invoice) {
+            Response::error('Factura no encontrada', 404);
+            return;
+        }
+        if (empty($invoice['keyfacil_id'])) {
+            Response::error('La factura no tiene comprobante electrónico emitido', 422);
+            return;
+        }
+
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+        $reason = trim((string)($data['motivo'] ?? ''));
+        if ($reason === '') {
+            Response::error('El motivo de anulación es obligatorio', 422);
+            return;
+        }
+
+        $service = new \App\Support\KeyfacilService();
+        $result = $service->voidInvoice((string)$invoice['keyfacil_id'], $reason);
+
+        if (!$result['ok']) {
+            Response::error($result['error'] ?: 'Error al anular comprobante en Keyfacil', 502, [
+                'keyfacil_status' => $result['status'],
+                'response' => $result['data'],
+            ]);
+            return;
+        }
+
+        $this->pdo->prepare("
+            UPDATE invoices SET
+                status = 'voided',
+                keyfacil_status = 'voided',
+                keyfacil_response = :resp,
+                updated_at = NOW()
+            WHERE id = :id
+        ")->execute([
+            ':resp' => $result['raw'] ?: null,
+            ':id' => $invoiceId,
+        ]);
+
+        $this->audit('tenant.invoice.keyfacil_voided', 'invoice', $invoiceId, [
+            'company_id' => $companyId,
+            'motivo' => $reason,
+        ]);
+
+        Response::json(['message' => 'Comprobante anulado']);
+    }
+
+    private function invoicesKeyfacilFile(string $companyId, string $invoiceId, string $type): void
+    {
+        $this->ensureInvoicesTable();
+
+        $stmt = $this->pdo->prepare("
+            SELECT keyfacil_pdf, keyfacil_xml, keyfacil_pdf_url, keyfacil_xml_url,
+                   keyfacil_serie, keyfacil_number
+            FROM invoices
+            WHERE id = :id AND company_id = :cid
+            LIMIT 1
+        ");
+        $stmt->execute([':id' => $invoiceId, ':cid' => $companyId]);
+        $invoice = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$invoice) {
+            Response::error('Factura no encontrada', 404);
+            return;
+        }
+
+        $url = $type === 'pdf' ? $invoice['keyfacil_pdf_url'] : $invoice['keyfacil_xml_url'];
+        $base64 = $type === 'pdf' ? $invoice['keyfacil_pdf'] : $invoice['keyfacil_xml'];
+
+        if ($url) {
+            header('Location: ' . $url);
+            exit;
+        }
+        if (!$base64) {
+            Response::error('Archivo no disponible', 404);
+            return;
+        }
+
+        $binary = base64_decode((string)$base64, true);
+        if ($binary === false) {
+            Response::error('Archivo electrónico corrupto', 500);
+            return;
+        }
+
+        $serie = $invoice['keyfacil_serie'] ?: 'F001';
+        $number = $invoice['keyfacil_number'] ?: '';
+        $fileName = trim($serie . '-' . $number) ?: ('comprobante-' . $invoiceId);
+        $fileName .= '.' . $type;
+
+        header('Content-Type: ' . ($type === 'pdf' ? 'application/pdf' : 'application/xml'));
+        header('Content-Length: ' . strlen($binary));
+        header('Content-Disposition: attachment; filename="' . $fileName . '"');
+        header('Cache-Control: private, max-age=0, must-revalidate');
+        echo $binary;
+        exit;
+    }
+
+    private function looksLikeBase64(string $value): bool
+    {
+        if (str_starts_with($value, 'data:')) return true;
+
+        $compact = preg_replace('/\s+/', '', $value);
+        if ($compact === '' || strlen($compact) < 100) return false;
+
+        return (bool)preg_match('#^[A-Za-z0-9+/]+={0,2}$#', $compact);
+    }
+
+    private function extractKeyfacilFile(array $data, string $type): ?string
+    {        $keys = [
+            $type,
+            $type . '_base64',
+            $type . '_content',
+            'file_' . $type,
+            'archivo_' . $type,
+            $type . '_url',
+            'url_' . $type,
+        ];
+
+        foreach ($keys as $key) {
+            if (isset($data[$key]) && is_string($data[$key]) && trim($data[$key]) !== '') {
+                return trim($data[$key]);
+            }
+        }
+
+        foreach ($data as $value) {
+            if (is_array($value)) {
+                $found = $this->extractKeyfacilFile($value, $type);
+                if ($found !== null) return $found;
+            }
+        }
+
+        return null;
     }
 
     private function invoicesUploadAttachment(string $companyId, string $invoiceId): void
@@ -5944,6 +6438,20 @@ final class TenantController
                 customer_name VARCHAR(150) NULL,
                 customer_email VARCHAR(150) NULL,
                 customer_phone VARCHAR(50) NULL,
+                customer_document_type VARCHAR(2) NULL,
+                customer_document VARCHAR(20) NULL,
+                customer_address VARCHAR(255) NULL,
+                comprobante_tipo VARCHAR(2) DEFAULT '01',
+                keyfacil_id VARCHAR(100) NULL,
+                keyfacil_status VARCHAR(50) NULL,
+                keyfacil_serie VARCHAR(20) NULL,
+                keyfacil_number INT NULL,
+                keyfacil_pdf LONGTEXT NULL,
+                keyfacil_xml LONGTEXT NULL,
+                keyfacil_pdf_url VARCHAR(500) NULL,
+                keyfacil_xml_url VARCHAR(500) NULL,
+                keyfacil_response LONGTEXT NULL,
+                keyfacil_issued_at DATETIME NULL,
                 attachment_path VARCHAR(255) NULL,
                 attachment_name VARCHAR(150) NULL,
                 attachment_mime VARCHAR(100) NULL,
@@ -5977,6 +6485,20 @@ final class TenantController
         try { $this->pdo->exec("ALTER TABLE invoices ADD COLUMN customer_name VARCHAR(150) NULL"); } catch (\Throwable $e) {}
         try { $this->pdo->exec("ALTER TABLE invoices ADD COLUMN customer_email VARCHAR(150) NULL"); } catch (\Throwable $e) {}
         try { $this->pdo->exec("ALTER TABLE invoices ADD COLUMN customer_phone VARCHAR(50) NULL"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("ALTER TABLE invoices ADD COLUMN customer_document_type VARCHAR(2) NULL"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("ALTER TABLE invoices ADD COLUMN customer_document VARCHAR(20) NULL"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("ALTER TABLE invoices ADD COLUMN customer_address VARCHAR(255) NULL"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("ALTER TABLE invoices ADD COLUMN comprobante_tipo VARCHAR(2) DEFAULT '01'"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("ALTER TABLE invoices ADD COLUMN keyfacil_id VARCHAR(100) NULL"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("ALTER TABLE invoices ADD COLUMN keyfacil_status VARCHAR(50) NULL"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("ALTER TABLE invoices ADD COLUMN keyfacil_serie VARCHAR(20) NULL"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("ALTER TABLE invoices ADD COLUMN keyfacil_number INT NULL"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("ALTER TABLE invoices ADD COLUMN keyfacil_pdf LONGTEXT NULL"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("ALTER TABLE invoices ADD COLUMN keyfacil_xml LONGTEXT NULL"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("ALTER TABLE invoices ADD COLUMN keyfacil_pdf_url VARCHAR(500) NULL"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("ALTER TABLE invoices ADD COLUMN keyfacil_xml_url VARCHAR(500) NULL"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("ALTER TABLE invoices ADD COLUMN keyfacil_response LONGTEXT NULL"); } catch (\Throwable $e) {}
+        try { $this->pdo->exec("ALTER TABLE invoices ADD COLUMN keyfacil_issued_at DATETIME NULL"); } catch (\Throwable $e) {}
         // Lazy migrations for attachment fields
         try { $this->pdo->exec("ALTER TABLE invoices ADD COLUMN attachment_path VARCHAR(255) NULL"); } catch (\Throwable $e) {}
         try { $this->pdo->exec("ALTER TABLE invoices ADD COLUMN attachment_name VARCHAR(150) NULL"); } catch (\Throwable $e) {}
@@ -6006,5 +6528,18 @@ final class TenantController
     {
         $stmt = $this->pdo->query("SELECT id FROM users ORDER BY created_at ASC LIMIT 1");
         return $stmt->fetchColumn() ?: '00000000-0000-0000-0000-000000000000';
+    }
+
+    private function getFrontendUrl(): string
+    {
+        try {
+            $stmt = $this->pdo->prepare("SELECT setting_value FROM system_settings WHERE setting_key = 'system_frontend_url' LIMIT 1");
+            $stmt->execute();
+            $url = $stmt->fetchColumn();
+            if ($url) return rtrim($url, '/');
+        } catch (\Throwable $e) {}
+
+        // Fallback to environment variable or production URL
+        return rtrim($_ENV['FRONTEND_URL'] ?? 'https://manage.spectralatam.com', '/');
     }
 }

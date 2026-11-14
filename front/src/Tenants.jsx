@@ -51,7 +51,7 @@ export default function Tenants({ apiUrl, token }) {
 
   async function fetchList(nextPage) {
     setLoading(true);
-    setStatusMsg({ tone: 'info', message: 'Cargando tenants...' });
+    setStatusMsg({ tone: 'info', message: 'Cargando empresas...' });
     try {
       const params = new URLSearchParams();
       params.set('page', String(nextPage));
@@ -102,7 +102,7 @@ export default function Tenants({ apiUrl, token }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || 'No se pudo crear');
 
-      setStatusMsg({ tone: 'success', message: 'Tenant creado' });
+      setStatusMsg({ tone: 'success', message: 'Empresa creada' });
       setOpenCreate(false);
       setCreateForm({
         legal_name: '',
@@ -125,9 +125,9 @@ export default function Tenants({ apiUrl, token }) {
     <section className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="text-xs font-semibold tracking-widest text-slate-500 uppercase">Tenants</div>
+          <div className="text-xs font-semibold tracking-widest text-slate-500 uppercase">Empresas</div>
           <h2 className="text-xl font-bold text-slate-900">Gestión de empresas</h2>
-          <p className="text-sm text-slate-600">Filtra, navega y crea nuevos tenants desde el panel global.</p>
+          <p className="text-sm text-slate-600">Filtra, navega y crea nuevas empresas desde el panel global.</p>
         </div>
 
         <div className="flex gap-2">
@@ -249,7 +249,7 @@ export default function Tenants({ apiUrl, token }) {
         </div>
       </div>
 
-      <Modal open={openCreate} title="Agregar tenant" onClose={() => setOpenCreate(false)}>
+      <Modal open={openCreate} title="Agregar empresa" onClose={() => setOpenCreate(false)}>
         <form onSubmit={createTenant} className="space-y-4">
           <div>
             <label className="text-sm font-semibold text-slate-700">Razón social</label>
@@ -319,7 +319,7 @@ export default function Tenants({ apiUrl, token }) {
             disabled={loading}
             className="w-full rounded-xl bg-brand px-4 py-3 font-semibold text-white hover:bg-brand/90 disabled:opacity-60"
           >
-            {loading ? 'Guardando...' : 'Crear tenant'}
+            {loading ? 'Guardando...' : 'Crear empresa'}
           </button>
         </form>
       </Modal>

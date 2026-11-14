@@ -107,7 +107,7 @@ class NotificationController
 
         $stmt = $this->pdo->prepare("
             SELECT * FROM notifications 
-            WHERE user_id LIKE :user_id 
+            WHERE user_id = :user_id 
             ORDER BY created_at DESC 
             LIMIT :limit OFFSET :offset
         ");
@@ -118,7 +118,7 @@ class NotificationController
         $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         // Count unread
-        $stmtCount = $this->pdo->prepare("SELECT COUNT(*) FROM notifications WHERE user_id LIKE :user_id AND is_read = 0");
+        $stmtCount = $this->pdo->prepare("SELECT COUNT(*) FROM notifications WHERE user_id = :user_id AND is_read = 0");
         $stmtCount->execute([':user_id' => $userId]);
         $unread = $stmtCount->fetchColumn();
 
@@ -129,7 +129,7 @@ class NotificationController
 
         if ($page) {
             // Count total for pagination
-            $stmtTotal = $this->pdo->prepare("SELECT COUNT(*) FROM notifications WHERE user_id LIKE :user_id");
+            $stmtTotal = $this->pdo->prepare("SELECT COUNT(*) FROM notifications WHERE user_id = :user_id");
             $stmtTotal->execute([':user_id' => $userId]);
             $total = (int)$stmtTotal->fetchColumn();
 
@@ -146,14 +146,14 @@ class NotificationController
 
     private function markAsRead(string $userId, string $id): void
     {
-        $stmt = $this->pdo->prepare("UPDATE notifications SET is_read = 1 WHERE id LIKE :id AND user_id LIKE :user_id");
+        $stmt = $this->pdo->prepare("UPDATE notifications SET is_read = 1 WHERE id = :id AND user_id = :user_id");
         $stmt->execute([':id' => $id, ':user_id' => $userId]);
         Response::json(['success' => true]);
     }
 
     private function markAllAsRead(string $userId): void
     {
-        $stmt = $this->pdo->prepare("UPDATE notifications SET is_read = 1 WHERE user_id LIKE :user_id");
+        $stmt = $this->pdo->prepare("UPDATE notifications SET is_read = 1 WHERE user_id = :user_id");
         $stmt->execute([':user_id' => $userId]);
         Response::json(['success' => true]);
     }

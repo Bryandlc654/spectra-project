@@ -162,7 +162,7 @@ export default function ContractsListPage({ apiUrl, token }) {
                         <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
                             <tr>
                                 <th className="px-4 py-3 text-left">Título / Ref</th>
-                                <th className="px-4 py-3 text-left">Empresa (Tenant)</th>
+                                <th className="px-4 py-3 text-left">Empresa</th>
                                 <th className="px-4 py-3 text-left">Tipo</th>
                                 <th className="px-4 py-3 text-left">Estado</th>
                                 <th className="px-4 py-3 text-left">Fecha</th>

@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useToast } from '../../../components/ToastProvider';
+import { useI18n } from '../../../i18n/I18nContext';
 
 export default function TenantContractTemplatesTab({ companyId, api, countries = [] }) {
     const toast = useToast();
+    const { t } = useI18n();
     const safeApi = useMemo(() => api, [api]);
 
     const [templates, setTemplates] = useState([]);
@@ -33,7 +35,7 @@ export default function TenantContractTemplatesTab({ companyId, api, countries =
     useEffect(() => {
         if (!safeApi?.get || !companyId) return;
         load();
-    }, [safeApi, companyId, page, statusFilter, search]);
+    }, [safeApi, companyId, page, statusFilter, search, t]);
 
     async function load() {
         setLoading(true);
@@ -61,7 +63,7 @@ export default function TenantContractTemplatesTab({ companyId, api, countries =
             setTemplates(items);
             setTotalPages(Math.max(1, Number(pages) || 1));
         } catch (e) {
-            setErr(e?.message || 'No se pudieron cargar las plantillas');
+            setErr(e?.message || t('tenants.contracts.templates.loadError'));
         } finally {
             setLoading(false);
         }
@@ -101,7 +103,7 @@ export default function TenantContractTemplatesTab({ companyId, api, countries =
     const handleDuplicate = (item) => {
         setEditingItem(null);
         setFormData({
-            title: `${item.title} (copia)`,
+            title: t('tenants.contracts.templates.copyTitle', { title: item.title }),
             type: item.type,
             country_id: item.country_id,
             language_code: item.language_code,
@@ -112,13 +114,13 @@ export default function TenantContractTemplatesTab({ companyId, api, countries =
     };
 
     const handleDelete = async (id) => {
-        if (!window.confirm('¿Estás seguro de eliminar esta plantilla?')) return;
+        if (!window.confirm(t('tenants.contracts.templates.deleteConfirm'))) return;
         try {
             await safeApi.delete(`/api/tenants/${companyId}/contract-templates/${id}`);
-            toast.success('Plantilla eliminada');
+            toast.success(t('tenants.contracts.templates.deleted'));
             load();
         } catch (e) {
-            toast.error(e.message || 'Error al eliminar');
+            toast.error(e.message || t('tenants.contracts.templates.deleteError'));
         }
     };
 
@@ -128,18 +130,29 @@ export default function TenantContractTemplatesTab({ companyId, api, countries =
         try {
             if (editingItem) {
                 await safeApi.put(`/api/tenants/${companyId}/contract-templates/${editingItem.id}`, formData);
-                toast.success('Plantilla actualizada');
+                toast.success(t('tenants.contracts.templates.updated'));
             } else {
                 await safeApi.post(`/api/tenants/${companyId}/contract-templates`, formData);
-                toast.success('Plantilla creada');
+                toast.success(t('tenants.contracts.templates.created'));
             }
             setShowModal(false);
             load();
         } catch (e) {
-            toast.error(e.message || 'Error al guardar');
+            toast.error(e.message || t('tenants.contracts.templates.saveError'));
         } finally {
             setSaving(false);
         }
+    };
+
+    const renderType = (typeRaw) => {
+        const type = String(typeRaw || '').toLowerCase();
+        const typeLabels = {
+            hourly: t('tenants.contracts.templates.types.hourly'),
+            retainer: t('tenants.contracts.templates.types.retainer'),
+            fixed: t('tenants.contracts.templates.types.fixed'),
+            project: t('tenants.contracts.templates.types.project'),
+        };
+        return typeLabels[type] || typeRaw;
     };
 
     const renderStatusBadge = (statusRaw) => {
@@ -150,7 +163,7 @@ export default function TenantContractTemplatesTab({ companyId, api, countries =
 
         return (
             <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${cls}`}>
-                {status === 'active' ? 'Activo' : 'Archivado'}
+                {status === 'active' ? t('tenants.common.active') : t('tenants.contracts.templates.archived')}
             </span>
         );
     };
@@ -158,7 +171,7 @@ export default function TenantContractTemplatesTab({ companyId, api, countries =
     if (!safeApi?.get) {
         return (
             <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
-                API no inicializada.
+                {t('tenants.contracts.templates.apiNotInitialized')}
             </div>
         );
     }
@@ -167,9 +180,9 @@ export default function TenantContractTemplatesTab({ companyId, api, countries =
         <div className="space-y-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h3 className="text-lg font-bold text-slate-900">Plantillas de Contratos</h3>
+                    <h3 className="text-lg font-bold text-slate-900">{t('tenants.contracts.templates.title')}</h3>
                     <p className="text-xs text-slate-500">
-                        Gestiona las plantillas base para generar contratos.
+                        {t('tenants.contracts.templates.subtitle')}
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -181,9 +194,9 @@ export default function TenantContractTemplatesTab({ companyId, api, countries =
                         }}
                         className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700"
                     >
-                        <option value="">Todos</option>
-                        <option value="active">Activos</option>
-                        <option value="archived">Archivados</option>
+                        <option value="">{t('tenants.common.all')}</option>
+                        <option value="active">{t('tenants.contracts.templates.activePlural')}</option>
+                        <option value="archived">{t('tenants.contracts.templates.archivedPlural')}</option>
                     </select>
 
                     <input
@@ -193,7 +206,7 @@ export default function TenantContractTemplatesTab({ companyId, api, countries =
                             setSearch(e.target.value);
                             setPage(1);
                         }}
-                        placeholder="Buscar..."
+                        placeholder={t('tenants.contracts.templates.searchPlaceholder')}
                         className="w-40 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 placeholder:text-slate-400 focus:border-brand focus:ring-brand"
                     />
 
@@ -211,7 +224,7 @@ export default function TenantContractTemplatesTab({ companyId, api, countries =
                         className="inline-flex items-center gap-1 rounded-xl bg-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-600"
                     >
                         <i className="bi bi-plus-lg" />
-                        Nueva Plantilla
+                        {t('tenants.contracts.templates.newTemplate')}
                     </button>
                 </div>
             </div>
@@ -224,7 +237,7 @@ export default function TenantContractTemplatesTab({ companyId, api, countries =
 
             {!templates.length && !loading && !err && (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
-                    No hay plantillas registradas.
+                    {t('tenants.contracts.templates.empty')}
                 </div>
             )}
 
@@ -233,48 +246,48 @@ export default function TenantContractTemplatesTab({ companyId, api, countries =
                     <table className="w-full text-sm">
                         <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
                             <tr>
-                                <th className="px-4 py-3 text-left">Título</th>
-                                <th className="px-4 py-3 text-left">Tipo</th>
-                                <th className="px-4 py-3 text-left">País / Idioma</th>
-                                <th className="px-4 py-3 text-left">Estado</th>
-                                <th className="px-4 py-3 text-right">Acciones</th>
+                                <th className="px-4 py-3 text-left">{t('tenants.contracts.templates.tableTitle')}</th>
+                                <th className="px-4 py-3 text-left">{t('tenants.common.type')}</th>
+                                <th className="px-4 py-3 text-left">{t('tenants.contracts.templates.countryLanguage')}</th>
+                                <th className="px-4 py-3 text-left">{t('tenants.common.status')}</th>
+                                <th className="px-4 py-3 text-right">{t('tenants.common.actions')}</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {templates.map((t) => (
-                                <tr key={t.id} className="hover:bg-slate-50">
+                            {templates.map((template) => (
+                                <tr key={template.id} className="hover:bg-slate-50">
                                     <td className="px-4 py-3 font-semibold text-slate-900">
-                                        {t.title}
+                                        {template.title}
                                     </td>
                                     <td className="px-4 py-3 text-slate-700 capitalize">
-                                        {t.type}
+                                        {renderType(template.type)}
                                     </td>
                                     <td className="px-4 py-3 text-slate-700">
-                                        {countries.find(c => c.id == t.country_id)?.name || t.country_id} / {t.language_code}
+                                        {countries.find(c => c.id == template.country_id)?.name || template.country_id} / {template.language_code}
                                     </td>
                                     <td className="px-4 py-3">
-                                        {renderStatusBadge(t.status)}
+                                        {renderStatusBadge(template.status)}
                                     </td>
                                     <td className="px-4 py-3 text-right">
                                         <div className="flex items-center justify-end gap-2">
                                             <button
-                                                onClick={() => handleDuplicate(t)}
+                                                onClick={() => handleDuplicate(template)}
                                                 className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-emerald-600"
-                                                title="Duplicar como nueva"
+                                                title={t('tenants.contracts.templates.duplicate')}
                                             >
                                                 <i className="bi bi-files" />
                                             </button>
                                             <button
-                                                onClick={() => handleEdit(t)}
+                                                onClick={() => handleEdit(template)}
                                                 className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-brand"
-                                                title="Editar"
+                                                title={t('tenants.common.edit')}
                                             >
                                                 <i className="bi bi-pencil" />
                                             </button>
                                             <button
-                                                onClick={() => handleDelete(t.id)}
+                                                onClick={() => handleDelete(template.id)}
                                                 className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                                                title="Eliminar"
+                                                title={t('tenants.common.delete')}
                                             >
                                                 <i className="bi bi-trash" />
                                             </button>
@@ -291,15 +304,15 @@ export default function TenantContractTemplatesTab({ companyId, api, countries =
                                 onClick={() => setPage(p => Math.max(1, p - 1))}
                                 className="disabled:opacity-50"
                             >
-                                Anterior
+                                {t('tenants.common.previous')}
                             </button>
-                            <span>Página {page} de {totalPages}</span>
+                            <span>{t('tenants.common.pageOf', { page, total: totalPages })}</span>
                             <button
                                 disabled={page >= totalPages}
                                 onClick={() => setPage(p => p + 1)}
                                 className="disabled:opacity-50"
                             >
-                                Siguiente
+                                {t('tenants.common.next')}
                             </button>
                         </div>
                     )}
@@ -311,12 +324,12 @@ export default function TenantContractTemplatesTab({ companyId, api, countries =
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
                     <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl">
                         <h3 className="mb-4 text-lg font-bold text-slate-900">
-                            {editingItem ? 'Editar Plantilla' : 'Nueva Plantilla'}
+                            {editingItem ? t('tenants.contracts.templates.editTemplate') : t('tenants.contracts.templates.newTemplate')}
                         </h3>
                         <form onSubmit={handleSave} className="space-y-4">
                             <div className="grid gap-4 sm:grid-cols-2">
                                 <div>
-                                    <label className="mb-1 block text-xs font-semibold text-slate-700">Título</label>
+                                    <label className="mb-1 block text-xs font-semibold text-slate-700">{t('tenants.contracts.templates.tableTitle')}</label>
                                     <input
                                         required
                                         type="text"
@@ -326,34 +339,34 @@ export default function TenantContractTemplatesTab({ companyId, api, countries =
                                     />
                                 </div>
                                 <div>
-                                    <label className="mb-1 block text-xs font-semibold text-slate-700">Tipo</label>
+                                    <label className="mb-1 block text-xs font-semibold text-slate-700">{t('tenants.common.type')}</label>
                                     <select
                                         className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                                         value={formData.type}
                                         onChange={e => setFormData({ ...formData, type: e.target.value })}
                                     >
-                                        <option value="hourly">Hourly</option>
-                                        <option value="retainer">Retainer</option>
-                                        <option value="fixed">Fixed</option>
-                                        <option value="project">Project</option>
+                                        <option value="hourly">{t('tenants.contracts.templates.types.hourly')}</option>
+                                        <option value="retainer">{t('tenants.contracts.templates.types.retainer')}</option>
+                                        <option value="fixed">{t('tenants.contracts.templates.types.fixed')}</option>
+                                        <option value="project">{t('tenants.contracts.templates.types.project')}</option>
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="mb-1 block text-xs font-semibold text-slate-700">País</label>
+                                    <label className="mb-1 block text-xs font-semibold text-slate-700">{t('tenants.contracts.templates.country')}</label>
                                     <select
                                         required
                                         className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                                         value={formData.country_id}
                                         onChange={e => setFormData({ ...formData, country_id: e.target.value })}
                                     >
-                                        <option value="">Seleccionar país...</option>
+                                        <option value="">{t('tenants.contracts.templates.selectCountry')}</option>
                                         {countries.map(c => (
                                             <option key={c.id} value={c.id}>{c.name}</option>
                                         ))}
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="mb-1 block text-xs font-semibold text-slate-700">Idioma</label>
+                                    <label className="mb-1 block text-xs font-semibold text-slate-700">{t('tenants.contracts.templates.language')}</label>
                                     <input
                                         type="text"
                                         className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -362,19 +375,19 @@ export default function TenantContractTemplatesTab({ companyId, api, countries =
                                     />
                                 </div>
                                 <div>
-                                    <label className="mb-1 block text-xs font-semibold text-slate-700">Estado</label>
+                                    <label className="mb-1 block text-xs font-semibold text-slate-700">{t('tenants.common.status')}</label>
                                     <select
                                         className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                                         value={formData.status}
                                         onChange={e => setFormData({ ...formData, status: e.target.value })}
                                     >
-                                        <option value="active">Activo</option>
-                                        <option value="archived">Archivado</option>
+                                        <option value="active">{t('tenants.common.active')}</option>
+                                        <option value="archived">{t('tenants.contracts.templates.archived')}</option>
                                     </select>
                                 </div>
                             </div>
                             <div>
-                                <label className="mb-1 block text-xs font-semibold text-slate-700">Contenido (texto plano)</label>
+                                <label className="mb-1 block text-xs font-semibold text-slate-700">{t('tenants.contracts.templates.content')}</label>
                                 <textarea
                                     required
                                     rows={10}
@@ -383,7 +396,7 @@ export default function TenantContractTemplatesTab({ companyId, api, countries =
                                     onChange={e => setFormData({ ...formData, body: e.target.value })}
                                 />
                                 <div className="mt-1 text-[11px] text-slate-500">
-                                    Usa solo texto plano. Variables permitidas:{' '}
+                                    {t('tenants.contracts.templates.plainTextHelp')}{' '}
                                     <span className="font-mono">{'{{company_name}}'}</span>,{' '}
                                     <span className="font-mono">{'{{employee_name}}'}</span>,{' '}
                                     <span className="font-mono">{'{{start_date}}'}</span>,{' '}
@@ -397,14 +410,14 @@ export default function TenantContractTemplatesTab({ companyId, api, countries =
                                     onClick={() => setShowModal(false)}
                                     className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100"
                                 >
-                                    Cancelar
+                                    {t('tenants.common.cancel')}
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={saving}
                                     className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50"
                                 >
-                                    {saving ? 'Guardando...' : 'Guardar'}
+                                    {saving ? t('tenants.common.saving') : t('tenants.common.save')}
                                 </button>
                             </div>
                         </form>
